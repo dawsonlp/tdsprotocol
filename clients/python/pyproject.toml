@@ -1,0 +1,54 @@
+[project]
+name = "tds"
+version = "0.1.0"
+description = "A TDS 7.4 and 8.0 client for SQL Server, whose code teaches the protocol and which shows what it does while it runs."
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
+dependencies = []
+
+[project.urls]
+Documentation = "https://dawsonlp.github.io/tdsprotocol/"
+Repository = "https://github.com/dawsonlp/tdsprotocol"
+
+[project.scripts]
+tds = "tds.__main__:main"
+
+[project.optional-dependencies]
+encryption = [
+    "cryptography>=50.0.2",
+]
+windows = [
+    "pyspnego>=0.12.4",
+]
+kerberos = [
+    "pyspnego[kerberos]>=0.12.4",
+]
+entra = [
+    "azure-identity>=1.26.0",
+]
+keyvault = [
+    "azure-identity>=1.26.0",
+    "azure-keyvault-keys>=4.11.3",
+]
+
+[dependency-groups]
+dev = [
+    "azure-identity>=1.26.0",
+    "azure-keyvault-keys>=4.11.3",
+    "cryptography>=50.0.2",
+    "pyspnego>=0.12.4",
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["uv_build>=0.8"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: needs the SQL Server 2025 container from docker/macos (skipped if it isn't running)",
+           "azure: needs the Azure test infrastructure from infra/azure (skipped if it isn't up)"]

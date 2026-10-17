@@ -1,0 +1,35 @@
+# Publishes site/ to GitHub Pages: the design, as an interactive site (D-29). The site needs no build step,
+# so the folder is published as it is. Pages' source must be set to “GitHub Actions” in the repository's settings.
+name: Publish the site
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check every script parses
+        run: for f in site/assets/*.js site/data/*.js site/pages/*.js; do node --check "$f"; done
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

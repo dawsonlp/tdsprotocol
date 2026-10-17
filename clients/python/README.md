@@ -1,0 +1,98 @@
+# tds: the Python client
+
+A TDS 7.4 and 8.0 client whose code teaches the protocol, and which can display what it does while it runs. The design is in [`docs/design/`](../../docs/design/README.md).
+
+## Run it
+
+First, from the repository root, start the local SQL Server 2025 with its test certificate. The steps are in [`docker/macos/tls`](../../docker/macos/tls/README.md):
+
+```sh
+docker/macos/tls/make-test-certificates.sh
+docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d
+```
+
+Then run the client from this folder. `CA` is the test certificate authority that signed the container's certificate. The tests trust it and nothing else (D-10):
+
+```sh
+CA=../../docker/macos/tls/test-ca.pem
+uv run tds --ca-file $CA                          # log in, SELECT 1, close: one line per step and message
+uv run tds --ca-file $CA --tds-version 8.0        # TLS first: TDS 8.0
+uv run tds --ca-file $CA --observe full           # every message expanded to its fields and bytes
+uv run tds --ca-file $CA --mars --channels 2      # two serial channels, as MARS sessions on one connection
+uv run tds --ca-file $CA --query "SELECT @@VERSION"
+uv run pytest                                     # captured messages, channel and response rules, live tests
+```
+
+The password comes from `MSSQL_SA_PASSWORD`, or else from `docker/macos/.env`. It is never shown: observability masks it, and a test checks that it can't appear in any form.
+
+## Use it as a library
+
+```python
+import tds
+
+async with tds.Pool("127.0.0.1", 14325, user="sa", password=..., ssl_context=ssl.create_default_context(cafile="test-ca.pem"), size=5) as pool:
+    async with pool.connection() as connection:            # borrowed whole: this session is yours alone
+        async with connection.serial_channel() as channel:  # one request at a time, owned by this task
+            async with await channel.exchange(tds.Batch("SELECT name FROM sys.databases")) as response:
+                async for result_set in response:          # the response streams: result sets as they arrive…
+                    async for row in result_set:           # …and their rows, as plain tuples
+                        print(row)
+                response.completions                       # the record: every DONE, with its count if valid
+```
+
+`tds.connect(...)` returns a single `Connection`, which is used the same way. Requests are made only on a serial channel.
+
+`tds_version="8.0"` (or `strict=True`) starts TLS before anything else. The default is `"7.4"`, which agrees on encryption in the hello. In both cases the whole connection is encrypted. The certificate is checked with Python's `ssl.SSLContext`, passed as `ssl_context`. If the certificate must name a host other than the one connected to, `server_hostname` gives that name (D-10). [Connect › Options](../../docs/design/3-reference/connect.md#options) describes each option.
+
+`observe` receives what the running client does. It can be `observe.Printer(Level.OUTLINE)`, `observe.Printer(Level.FULL)` or any callable. `None` turns it off, which costs the least. `connection.observe` changes it between exchanges. `capture=tds.capture.Capture("session.jsonl")` records the conversation in a file, and `tds.capture.replay("session.jsonl", Printer(Level.FULL))` shows it again, offline, exactly as before. A capture holds query text and data. It holds the password only if it is asked to (D-12).
+
+`odbc=True`, the default, sets the login's ODBC flag, so the session starts with ODBC's defaults (ANSI options on, unlimited TEXTSIZE), as ODBC, .NET and JDBC clients get them. `odbc=False` gives the server's own defaults, which truncate large values to 4,096 bytes (D-9).
+
+- `await response.fetch()` reads to the end and returns a `FetchedResponse`, held in memory. It can be read again or indexed (`fetched.result_sets[0].rows[0]`).
+- Errors are raised at the end of the response, as a `tds.ServerError` carrying the whole record (`e.response`).
+- Procedures are called with explicitly typed parameters, one or several in a request:
+
+  ```python
+  from tds import Call, Calls, Param, types
+  call = Call("shop.place_order", Param("@customer", types.int, 42), Param("@order", types.int, None, output=True))
+  async with await channel.exchange(call) as response:
+      [returned] = await response.returns(unread=tds.Unread.DISCARD)
+      returned.status, returned.outputs["@order"].value
+  ```
+- A table-valued parameter's type lists the types of its table type's columns, in order. Its value is rows, given as tuples. A column that the server fills is `types.default(…)`:
+
+  ```python
+  changes = types.table("shop.price_change", types.int, types.decimal(10, 2))
+  Call("shop.update_prices", Param("@changes", changes, [(1, Decimal("9.99")), (2, Decimal("4.50"))]))
+  ```
+- A bulk load is two requests on one serial channel: the application's own `INSERT BULK` statement, then the rows, described by columns taken from `SELECT TOP 0` of the same columns (D-50):
+
+  ```python
+  async with await channel.exchange(tds.Batch("SELECT TOP 0 id, total FROM shop.orders")) as response:
+      columns = (await response.fetch()).result_sets[0].columns
+  for request in (tds.BulkInsert("INSERT BULK shop.orders (id int NOT NULL, total money) WITH (TABLOCK)"),
+                  tds.BulkRows(columns, rows)):                      # rows: a list of tuples, or an async source
+      async with await channel.exchange(request) as response:
+          await response.fetch()                                     # the second says how many rows loaded
+  ```
+- Transactions can be controlled by protocol requests in `tds.transactions`: `Begin`, `Commit`, `Rollback`, `Save`, `Promote`, `Propagate`, `CoordinatorAddress` (D-51). The session follows the server's announcements.
+- Large values (`types.MAX`, `xml`, `text`, `ntext`, `image`) arrive whole in tuples, or value by value with `result_set.streamed()`, each as a `tds.ValueStream` of bytes or str. A parameter's value can also be a source: an async iterator. The driver sends each part as the iterator produces it.
+- `response.cancel()` may be called from any task; the owner's next read raises `tds.Cancelled`. Leaving the `async with` block early also cancels the response.
+- The record's items (`Completion`, `Message`, `Error`, `ReturnStatus`, `OutputValue`, `Announcement`, `Return`) are in `tds.response`.
+
+## Read it
+
+Read the modules in this order, which is also the order of the reference pages:
+
+1. `tds/packet.py`: the 8-byte header; splitting messages into packets and joining them back.
+2. `tds/prelogin.py`: the hello.
+3. `tds/login7.py`: the login.
+4. `tds/tokens.py`: how the server's replies are read, token by token.
+5. `tds/types.py`: the type vocabulary (`tds.types`): each type's description on the wire, its values, and its checks.
+   `tds/collations.py` is its generated table of how SQL Server reads each code page (`tools/generate_collations.py`).
+6. `tds/requests.py`: what the client asks: the headers every request carries, the SQL batch, procedure calls, and bulk load.
+   `tds/transactions.py` holds the transaction-manager requests.
+7. `tds/response.py`: the record of what the server did, and how a response is read forward as it arrives.
+8. `tds/connection/core.py`: the connect procedure from start to end, then TLS, MARS, serial channels, exchange and cancel.
+
+`tds/wire.py` and `tds/connection/shell.py` are machinery. `tds/wire.py` is the engine that reads and writes the definitions, and `tds/connection/shell.py` is the asyncio code that moves bytes. Read them to learn *how* the client works. The modules above describe *what* it does.

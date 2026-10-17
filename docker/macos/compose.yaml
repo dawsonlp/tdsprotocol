@@ -1,0 +1,16 @@
+name: mssql-server-service
+services:
+  mssql-server:
+    # MSSQL Server image isn't available for ARM64, so we use Azure SQL Edge instead.
+    # The latest ARM64 version is v1.0.7
+    image: mcr.microsoft.com/azure-sql-edge:1.0.7
+    restart: unless-stopped
+    container_name: mssql-server
+    ports:
+    #  - 1433:1433
+      - 127.0.0.1:1433:1433 # Use this to restrict access to localhost only
+    environment:
+      ACCEPT_EULA: 1
+      # Read from .env next to this file (never committed). Compose stops with this message if it's missing.
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in docker/macos/.env (see .env.example)}
+      MSSQL_PID: Developer

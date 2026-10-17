@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TDS Client · Design</title>
+  <meta name="description" content="An interactive guide to Microsoft's Tabular Data Stream (TDS) protocol, the wire protocol of SQL Server, and to a client whose code teaches it.">
+  <link rel="stylesheet" href="assets/site.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    (function () { var t = localStorage.getItem('tds-theme'); if (t) document.documentElement.dataset.theme = t; })();
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <span class="brand-mark" aria-hidden="true">TDS</span>
+      <span class="brand-text">Client Design</span>
+    </a>
+    <div class="topbar-right">
+      <span class="topbar-meta">TDS 7.4 · 8.0</span>
+      <button class="theme-toggle" type="button" aria-label="Switch theme" title="Switch theme"></button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" aria-label="Reading path"></nav>
+    <main id="main" class="page" tabindex="-1"></main>
+    <aside class="toc" aria-label="On this page"></aside>
+  </div>
+
+  <div id="tip" class="tip" role="tooltip" hidden></div>
+  <div id="announce" class="sr-only" aria-live="polite"></div>
+
+  <!-- Engine: namespace, helpers, components -->
+  <script src="assets/core.js"></script>
+  <script src="assets/bytegrid.js"></script>
+  <script src="assets/components.js"></script>
+
+  <!-- Data: one source for terms, field meanings and sample bytes -->
+  <script src="data/glossary.js"></script>
+  <script src="data/fields.js"></script>
+  <script src="data/samples.js"></script>
+
+  <!-- Pages, in reading order -->
+  <script src="pages/model.js"></script>
+  <script src="pages/example-login.js"></script>
+  <script src="pages/ref-packet.js"></script>
+  <script src="pages/ref-token-stream.js"></script>
+  <script src="pages/ref-prelogin.js"></script>
+  <script src="pages/ref-login7.js"></script>
+  <script src="pages/ref-login-response.js"></script>
+  <script src="pages/ref-requests.js"></script>
+  <script src="pages/ref-response.js"></script>
+  <script src="pages/ref-types.js"></script>
+  <script src="pages/ref-conversations.js"></script>
+  <script src="pages/ref-connect.js"></script>
+  <script src="pages/ref-browser.js"></script>
+  <script src="pages/ref-always-encrypted.js"></script>
+  <script src="pages/decisions.js"></script>
+  <script src="pages/done-when.js"></script>
+  <script src="pages/client.js"></script>
+  <script src="pages/build.js"></script>
+  <script src="pages/roadmap.js"></script>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

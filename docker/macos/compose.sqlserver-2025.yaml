@@ -1,0 +1,37 @@
+# SQL Server 2025 (17.x), independent of compose.yaml (Azure SQL Edge): start either one, or both.
+#   docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d
+#
+# The image is x86-64 only. On Apple Silicon it runs under emulation; turn on
+# Docker Desktop › Settings › General › "Use Rosetta for x86_64/amd64 emulation on Apple Silicon".
+# Needed for TDS 8.0 testing: Azure SQL Edge predates it.
+name: mssql-2025-service
+services:
+  mssql-2025:
+    image: mcr.microsoft.com/mssql/server:2025-CU9-GDR1-ubuntu-24.04   # pinned for reproducible tests
+    platform: linux/amd64
+    restart: unless-stopped
+    container_name: mssql-2025
+    ports:
+      - 127.0.0.1:14325:1433   # localhost only; 14325 so it can run beside Azure SQL Edge on 1433
+      - 127.0.0.1:14345:1434   # the dedicated administrator connection (DAC); needs remote admin connections on
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      # Read from .env next to this file (never committed). Shared with compose.yaml.
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in docker/macos/.env (see .env.example)}
+    volumes:
+      - mssql-2025-data:/var/opt/mssql   # data survives restarts; the SA password is fixed when this is first created
+      # TLS with a certificate from the test authority (D-10): run tls/make-test-certificates.sh first.
+      - ./tls/mssql.conf:/var/opt/mssql/mssql.conf:ro
+      - ./tls/server.pem:/etc/mssql-tls/server.pem:ro
+      - ./tls/server.key:/etc/mssql-tls/server.key:ro
+    healthcheck:
+      # $$ passes a literal $ to the container's shell, so the password is read inside the container, not written here.
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  mssql-2025-data:

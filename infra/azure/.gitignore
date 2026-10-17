@@ -1,0 +1,7 @@
+# Terraform's state holds every secret: it never leaves this machine.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+secrets/
