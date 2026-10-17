@@ -41,7 +41,7 @@ Client code is identical with or without MARS. Without MARS a connection allows 
 The serial channel already open, and the connection, are unaffected.
 
 **D-21 · Serial channels are handed out, each with one owner** · *2026-10-15*
-A serial channel is owned by the task that opened it, scoped to a block, and can be handed to another task explicitly. Use from any other task fails immediately. A synchronous wrapper checks the owning thread instead.
+A serial channel is owned by the task that opened it, scoped to a block, and can be handed to another task explicitly. Use from any other task fails immediately. A synchronous wrapper checks the owning thread instead. This remains the Python contract; D-64 records the user-selected proposal for movable Rust authority.
 *Why:* this makes misuse fail every time, not only when calls happen to overlap.
 *Rejected:*
 - a single switchable pipe, because of its hidden "current channel" mode;
@@ -532,21 +532,30 @@ Python's TLS engine works entirely in memory (`ssl.MemoryBIO`), so the core driv
 
 *Why:* Windows logins need a domain and SQL Server on Windows, federated logins need Entra ID and Azure SQL, and none of it should remain after the tests.
 
-**D-63 · The roadmap after M18: conveniences, a Rust client, application drivers** · *2026-10-17* · [Roadmap](C-roadmap.md)
+**D-63 · The roadmap after M18: Rust, Python conveniences, application drivers** · *2026-10-17; order revised by the user* · [Roadmap](C-roadmap.md)
 - **Three phases, in this order:**
-  1. **Conveniences** (M16): the standard patterns of use in one call each, asynchronous and synchronous (D-37, D-38, D-50).
-  2. **A Rust client:** the same design in Rust, built with the Python code and tests as its reference.
+  1. **A Rust client:** the same design and learning intent, with the Python code and tests as a reference. Begin with local SQL Server setup, Python tests, source analysis, and a Rust development plan that establishes ownership and permissions carefully.
+  2. **Python conveniences** (M16): the standard patterns of use in one call each, asynchronous and synchronous (D-37, D-38, D-50).
   3. **Application drivers:** DB-API 2.0 for Python, and possibly other standard interfaces, built on the conveniences.
-- **Each phase's design is agreed before its code is written,** as the driver's was. Its milestones are then added to [Done When](5-done-when.md).
-- **DB-API becomes phase 3,** as a package that depends on this driver (D-39). D-25 and D-26 stay deferred until phase 3 starts.
+- **Rust does not depend on Python M16.** Phase 3 depends on phase 2.
+- **Each phase's design is agreed before its code is written.** The [Rust development plan](D-rust-development.md) is a proposal, including its runtime, APIs, ownership enforcement and exact representations; the priority and learning intent above are agreed. Accepted milestones are then added to [Done When](5-done-when.md).
+- **The [Python baseline](E-python-baseline.md) records fresh evidence and limitations.** Skipped local/remote tests are not completed interoperability checks.
+- **DB-API remains phase 3**, as a package that depends on this driver (D-39). D-25 and D-26 stay deferred until phase 3 starts.
 
-*Why:* the conveniences make the Python client complete for everyday use. A second language shows whether the design depends on Python, and the Python code and tests make the port checkable. Application drivers let existing code use the client through interfaces it already knows.
+*Why:* the user requested Rust first. A second language tests whether the design depends on Python. The existing Python implementation provides a concrete reference without requiring its convenience layer to be finished. Rust must preserve the learning purpose while making resource ownership, permission to act, exact values and cleanup explicit.
 
 ---
 
 ## Proposed and open
 
-Nothing is proposed or open.
+**D-64 · Rust channels use movable authority rather than task identity** · *Proposed direction selected by the user, 2026-10-17* · [Rust ownership and permissions](D-rust-development.md#1--ownership-and-permissions-come-first)
+
+- The Rust plan proposes one non-`Clone` send/read authority. A native Rust move transfers it; an exclusive borrow lends it temporarily. Task identity does not restrict sequential use after a valid move or loan.
+- This is a deliberate language-specific variation to D-21. Python retains its opening-task check and explicit `hand_over(task)`. A mutex may permit sequential lending in Rust; it does not make an unread response available for a new exchange.
+- Separate generation-scoped cancel/close handles may be shared. Persistent busy, continuation, lease and generation checks still govern protocol use after a guard or future is dropped.
+- Active-response transfer, borrow shapes and `Send` bounds remain API choices for R0. No runtime, TLS backend or cleanup mechanism is selected by this direction.
+
+*Why:* the user chose to propose Rust ownership through moves and borrowing. It should be expressed in Rust's own terms while preserving one advancing reader, safe pool return, explicit cleanup and the shared session semantics.
 
 ---
 

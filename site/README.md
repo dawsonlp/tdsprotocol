@@ -24,6 +24,8 @@ The site follows the client's own design rule: definitions are data, written onc
 | `pages/*.js` | One file per page, in reading order. Each page is plain HTML written with small helpers. | content changes |
 | `assets/` | The engine: `core.js` (helpers), `bytegrid.js` (grids, hovers, table and tree views), `components.js` (diagrams), `app.js` (routing, navigation), `site.css` | presentation changes |
 
+The Rust plan and Python baseline pages are generated from their Markdown records. After editing either, run `uv run tools/render_planning_pages.py` from the repository root. This authoring tool leaves the site self-contained; readers and publication need no Markdown renderer.
+
 ## Adding to it
 
 - **A new message or token:**

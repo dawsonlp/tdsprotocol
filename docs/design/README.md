@@ -17,7 +17,9 @@ Read in order. Each part builds on the one before it.
 | 5 | [Done When](5-done-when.md) | How to tell that each slice and milestone is finished | 5 min |
 | A | [The Client](A-the-client.md) | How the code is built and what the running client shows | 10 min |
 | B | [Building the Client](B-building-the-client.md) | Where the code lives, the milestones, and how each is tested | 10 min |
-| C | [Roadmap](C-roadmap.md) | What comes after the milestones: conveniences, a Rust client, application drivers | 5 min |
+| C | [Roadmap](C-roadmap.md) | What comes after the milestones: Rust, Python conveniences, application drivers | 5 min |
+| D | [Building the Rust Client](D-rust-development.md) | Proposed ownership/permissions, exact representations, coding practices and milestones | as needed |
+| E | [Python Baseline](E-python-baseline.md) | Source analysis, current test results and server setup | 10 min |
 
 ## How every page is built
 
@@ -72,4 +74,4 @@ What the client cannot do yet, or what has not been confirmed. Each is described
 
 ## Next
 
-The milestones M1–M15, M17 and M18 in [Building the Client](B-building-the-client.md#4--milestones--agreed-d-46) are built. As D-62 decided, the logins and Azure's features were built before M16. M16, the convenience layer and the synchronous shell, is next. It is the first phase of the [Roadmap](C-roadmap.md), followed by a Rust client and application drivers such as DB-API (D-63).
+The milestones M1–M15, M17 and M18 in [Building the Client](B-building-the-client.md#4--milestones--agreed-d-46) are built. As D-62 decided, the logins and Azure's features were built before M16. The Rust client is next, before M16, following the user's revised priority (D-63). Its [development proposal](D-rust-development.md) begins with ownership and permissions. The [Python baseline](E-python-baseline.md) records 589 passes, no failures and 13 remote-environment skips after fixing captured-server portability and automatic test database initialization. SQL Server runs under Rosetta, and local TLS and .NET interoperability checks passed. Python conveniences and application drivers follow in the [Roadmap](C-roadmap.md).

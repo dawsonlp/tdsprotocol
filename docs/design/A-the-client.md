@@ -120,7 +120,7 @@ async with pool.connection() as connection:  # borrowed whole: yours alone until
 
 Per MS-TDS, a session reset doesn't reset distributed transactions or the isolation level (§2.2.3.1.2). A connection's session id (from the packet header) identifies its session while the session exists. SQL Server reuses ids after a session ends, so a new connection can get the id of a closed one.
 
-Every serial channel is **owned by the task that opened it** and **closes when its block ends**.
+The Python client follows D-21: every serial channel is **owned by the task that opened it** and **closes when its block ends**. The [Rust proposal](D-rust-development.md#1--ownership-and-permissions-come-first) uses unique movable authority instead of task identity (D-64); its move/borrow and cleanup API remains to be agreed.
 
 | When client code… | …this happens |
 |---|---|

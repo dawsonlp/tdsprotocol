@@ -139,7 +139,7 @@ Return(status, outputs, function_result, failed)
         ['gets a connection back with a request still in progress', 'closes it and never lends it again, because its next borrower would read another borrower’s response'],
       ])}
       <p>Per MS-TDS, a session reset doesn’t reset distributed transactions or the isolation level. A connection’s session id identifies its session while the session exists. SQL Server reuses ids after a session ends.</p>
-      <p>Every ${T('serial channel')} is <b>owned by the task that opened it</b> and <b>closes when its block ends</b>.</p>
+      <p>The Python client follows ${D(21)}: every ${T('serial channel')} is <b>owned by the task that opened it</b> and <b>closes when its block ends</b>. The ${L('rust', 'Rust proposal', '1-ownership-and-permissions-come-first')} uses unique movable authority instead of task identity (${D(64)}); its move/borrow and cleanup API remains to be agreed.</p>
       ${table(['When client code…', '…this happens'], [
         ['opens a second serial channel without MARS', `fails immediately; the open channel and the connection are unaffected (${D(20)})`],
         ['starts a request while a response is still open', `fails immediately; never queued (${D(22)})`],
