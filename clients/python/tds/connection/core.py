@@ -26,7 +26,7 @@ from ..session import INITIAL_STATES, RECOVERY, Recovery, SessionState
 from ..tokens import TOKENS, DoneStatus, EnvKind, FedAuthInfoId, _fed_auth_info
 from ..wire import Field, MalformedMessage, Node, Record, Struct, U8, U16, U32, kept
 
-CLIENT_VERSION = {"major": 0, "minor": 1, "build": 0, "sub_build": 0}
+CLIENT_VERSION = {"major": 0, "minor": 1, "build": 1, "sub_build": 0}
 
 
 # =========================================================================== what a procedure asks the shell to do

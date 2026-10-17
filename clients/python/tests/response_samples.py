@@ -6,6 +6,8 @@ request unchanged. The RPC requests were built by hand, because the driver's Cal
 without the ODBC flag (odbc=False), so it started with the server's own defaults (D-9).
 """
 
+SERVER_NAME = "6a376fcf9e7e"  # capture provenance, not a requirement on the live server
+
 # SELECT 1 AS a UNION ALL SELECT 2; SELECT N'x' AS b WHERE 1 = 0
 TWO_RESULT_SETS = bytes.fromhex("""
 81 01 00 00 00 00 00 00 00 38 01 61 00 D1 01 00 00 00 D1 02 00 00 00 FD 11 00 C1 00 02 00 00 00

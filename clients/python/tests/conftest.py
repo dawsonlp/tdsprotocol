@@ -54,7 +54,7 @@ def server() -> dict:
     try:
         socket.create_connection((HOST, PORT), timeout=1).close()
     except OSError:
-        pytest.skip(f"SQL Server isn't listening on {HOST}:{PORT}: docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d")
+        pytest.skip(f"SQL Server isn't listening on {HOST}:{PORT}: docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d --wait")
     return {"host": HOST, "port": PORT, "user": "sa", "password": Secret(password), "ssl_context": trust_test_authority()}
 
 

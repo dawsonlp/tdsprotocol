@@ -8,8 +8,12 @@ First, from the repository root, start the local SQL Server 2025 with its test c
 
 ```sh
 docker/macos/tls/make-test-certificates.sh
-docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d
+docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d --wait
 ```
+
+Compose 2.30 or later is required. Its post-start hook waits for SQL Server and creates `tds_test` if missing. The health check opens that database, so `--wait` returns only after the test environment is ready. Existing data is retained.
+
+The captured-response live tests query the current server identity and select `us_english`; they do not require the machine or container that produced the captures. The original capture bytes remain unchanged for offline decoding checks.
 
 Then run the client from this folder. `CA` is the test certificate authority that signed the container's certificate. The tests trust it and nothing else (D-10):
 

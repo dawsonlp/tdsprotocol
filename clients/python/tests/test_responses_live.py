@@ -15,7 +15,7 @@ import pytest
 import response_samples as samples
 import tds
 from conftest import fetch
-from test_response import outline, reader
+from test_response import at_server, outline, reader
 from tds.observe import Level, Printer
 from tds.tokens import DoneStatus
 
@@ -62,21 +62,23 @@ async def record_of(channel, sql: str) -> list:
     return out
 
 
-def test_every_batch_fact_on_request_response_still_holds(server):
-    """Each captured request is sent again live, and the record must be the same, item for item.
+@pytest.mark.parametrize("name", BATCH_SAMPLES)
+def test_every_batch_fact_on_request_response_still_holds(server, name):
+    """Check each scenario's record, binding only captured report identities to the current server.
 
-    The fixtures were captured in a session without the ODBC flag, so this test logs in the same way.
+    Keep the capture's session defaults and select its message language explicitly. Every other asserted field,
+    row and item position must match the capture; the offline tests still decode its original bytes exactly.
     """
     async def go():
-        async with await tds.connect(**server, odbc=False) as connection:
+        async with await tds.connect(**server, odbc=False, language="us_english") as connection:
             async with connection.serial_channel() as channel:
+                server_name = (await fetch(channel, "SELECT @@SERVERNAME")).result_sets[0].rows[0][0]
                 for sql in PROCEDURES:
                     await fetch(channel, sql)
-                return {name: await record_of(channel, sql) for name, sql in BATCH_SAMPLES.items()}
+                return server_name, await record_of(channel, BATCH_SAMPLES[name])
 
-    live = run(go())
-    for name in BATCH_SAMPLES:
-        assert live[name] == outline(reader(getattr(samples, name))), name
+    server_name, live = run(go())
+    assert live == at_server(outline(reader(getattr(samples, name))), server_name)
 
 
 def test_without_the_odbc_flag_sessions_start_with_ansi_warnings_and_arithabort_off(server):  # D-9

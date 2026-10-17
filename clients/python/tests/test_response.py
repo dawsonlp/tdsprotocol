@@ -7,6 +7,7 @@ tests use no server and no network.
 import asyncio
 import gc
 import random
+from dataclasses import replace
 
 import pytest
 
@@ -48,6 +49,42 @@ def outline(r: ResponseReader) -> list:
         else:
             out.append(item)
     return out
+
+
+def at_server(record: list, server_name: str) -> list:
+    """Bind a captured record's named reports to the live server, leaving every other field unchanged.
+
+    Only expected records pass through this helper. Actual reports must still name the server queried on the
+    connection. Empty server fields stay empty; rows and message text are never rewritten.
+    """
+    assert server_name, "the live connection must report its server name"
+    expected = []
+    for item in record:
+        if isinstance(item, (Error, Message)) and item.server:
+            assert item.server == samples.SERVER_NAME, "record the sample's server provenance before rebinding it"
+            item = replace(item, server=server_name)
+        expected.append(item)
+    return expected
+
+
+@pytest.mark.parametrize("server_name", ["new-container", "sql-host\\INSTANCE"])
+def test_binding_a_capture_changes_only_the_reports_server(server_name):
+    error = next(item for item in reader(samples.REFUSED_THEN_RUNS).sequence if isinstance(item, Error))
+    message = next(item for item in reader(samples.MESSAGES).sequence if isinstance(item, Message))
+    message = replace(message, text=samples.SERVER_NAME)
+    unnamed = replace(error, server="")
+    row = ("set", ["server"], (), ((samples.SERVER_NAME,),), None)
+    original = [error, message, unnamed, row]
+
+    assert at_server(original, server_name) == [replace(error, server=server_name),
+                                               replace(message, server=server_name), unnamed, row]
+    assert original == [error, message, unnamed, row] and error.server == samples.SERVER_NAME
+
+
+def test_binding_refuses_an_unrecorded_capture_origin():
+    error = next(item for item in reader(samples.REFUSED_THEN_RUNS).sequence if isinstance(item, Error))
+    with pytest.raises(AssertionError, match="provenance"):
+        at_server([replace(error, server="unrecorded-origin")], "live-server")
 
 
 def counts(r: ResponseReader) -> list:

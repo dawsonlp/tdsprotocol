@@ -1,6 +1,6 @@
 [project]
 name = "tds"
-version = "0.1.0"
+version = "0.1.1"
 description = "A TDS 7.4 and 8.0 client for SQL Server, whose code teaches the protocol and which shows what it does while it runs."
 requires-python = ">=3.14"
 license = "MIT"

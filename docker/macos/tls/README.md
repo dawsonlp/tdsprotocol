@@ -11,8 +11,10 @@ From the repository root:
 
 ```sh
 docker/macos/tls/make-test-certificates.sh                      # writes test-ca.pem/.key, server.pem/.key here
-docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d  # recreates the container with them mounted
+docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d --wait  # recreates the container with them mounted
 ```
+
+Use Docker Compose 2.30 or later. The [post-start hook](https://docs.docker.com/compose/how-tos/lifecycle/) runs `../init/initialize.sh`, which waits for SQL Server and applies `../init/tds_test.sql`. It creates `tds_test` only when missing. The health check connects to `tds_test`, so `up --wait` includes database readiness. Initialization does not drop an existing database or seed test tables; each scenario owns its own tables. Use Compose to start or recreate the test service so its initialization hook runs.
 
 Run the script again to replace the certificates (they are valid for ten years), then run `docker restart mssql-2025`.
 

@@ -1,5 +1,6 @@
 # SQL Server 2025 (17.x), independent of compose.yaml (Azure SQL Edge): start either one, or both.
-#   docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d
+#   docker compose -f docker/macos/compose.sqlserver-2025.yaml up -d --wait
+# Requires Compose 2.30+ for the post-start database initialization hook.
 #
 # The image is x86-64 only. On Apple Silicon it runs under emulation; turn on
 # Docker Desktop › Settings › General › "Use Rosetta for x86_64/amd64 emulation on Apple Silicon".
@@ -25,9 +26,21 @@ services:
       - ./tls/mssql.conf:/var/opt/mssql/mssql.conf:ro
       - ./tls/server.pem:/etc/mssql-tls/server.pem:ro
       - ./tls/server.key:/etc/mssql-tls/server.key:ro
+      - ./init:/etc/tds-test-init:ro
+    post_start:
+      - command: /bin/bash /etc/tds-test-init/initialize.sh
     healthcheck:
-      # $$ passes a literal $ to the container's shell, so the password is read inside the container, not written here.
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      # Readiness includes the test database. The local sqlcmd probe uses the password environment, not argv.
+      # Wait for TCP before launching an emulated client, as the initialization hook does.
+      # $$ passes a literal $ to the container shell. Python tests separately verify the TLS certificate.
+      test:
+        - CMD
+        - /bin/bash
+        - -c
+        - >-
+          (: > /dev/tcp/127.0.0.1/1433) 2>/dev/null &&
+          SQLCMDPASSWORD="$$MSSQL_SA_PASSWORD"
+          exec /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -d tds_test -Q 'SELECT 1' -b -o /dev/null
       interval: 10s
       timeout: 5s
       retries: 30

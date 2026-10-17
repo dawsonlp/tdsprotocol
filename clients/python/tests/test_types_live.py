@@ -116,7 +116,6 @@ def run(coroutine):
 
 
 async def shop(channel) -> None:
-    await fetch(channel, "IF DB_ID('tds_test') IS NULL CREATE DATABASE tds_test")
     await fetch(channel, "USE tds_test; IF SCHEMA_ID('shop') IS NULL EXEC('CREATE SCHEMA shop')")
     for table, null in (("short_types_not_null", "NOT NULL"), ("short_types_nullable", "NULL")):
         columns = ", ".join(f"{name} {declared} {null}" for name, (declared, _) in COLUMNS.items())

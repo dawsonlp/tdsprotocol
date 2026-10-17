@@ -11,7 +11,7 @@ import pytest
 import response_samples as samples
 import tds
 from conftest import fetch
-from test_response import outline, reader
+from test_response import at_server, outline, reader
 from test_responses_live import record_of
 from test_types_live import CODE_PAGES, COLUMNS, LIMITS, SEQUENCES
 from tds import types
@@ -48,22 +48,21 @@ async def call(channel, request):
             return e.response
 
 
-def test_every_rpc_fact_on_request_response_still_holds(server):
+@pytest.mark.parametrize("name", CALLS)
+def test_every_rpc_fact_on_request_response_still_holds(server, name):
+    """Check the captured RPC record against this server, with explicit message language and session defaults."""
     async def go():  # the fixtures were captured without the ODBC flag
-        async with await tds.connect(**server, odbc=False) as connection:
+        async with await tds.connect(**server, odbc=False, language="us_english") as connection:
             async with connection.serial_channel() as channel:
+                server_name = (await fetch(channel, "SELECT @@SERVERNAME")).result_sets[0].rows[0][0]
                 for sql in PROCEDURES:
                     await fetch(channel, sql)
-                out = {}
-                for name, request in CALLS.items():
-                    fetched = await call(channel, request)
-                    out[name] = [("set", [c.name for c in i.columns], i.order, i.rows, i.completion)
-                                 if isinstance(i, tds.ResultSet) else i for i in fetched.sequence]
-                return out
+                fetched = await call(channel, CALLS[name])
+                return server_name, [("set", [c.name for c in i.columns], i.order, i.rows, i.completion)
+                                     if isinstance(i, tds.ResultSet) else i for i in fetched.sequence]
 
-    live = run(go())
-    for name in CALLS:
-        assert live[name] == outline(reader(getattr(samples, name))), name
+    server_name, live = run(go())
+    assert live == at_server(outline(reader(getattr(samples, name))), server_name)
 
 
 def test_outputs_are_matched_by_their_position_in_the_call(server):  # Request Response › Rules
