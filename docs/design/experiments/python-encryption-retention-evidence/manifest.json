@@ -1,0 +1,237 @@
+{
+  "recorded_utc": "2026-10-18T21:36:43.504022+00:00",
+  "branch": "rust-client",
+  "base_revision": "6e2da043719cf98ecdebbce7391e3ca41bea39a6",
+  "working_tree_uncommitted": true,
+  "runtime": {
+    "python": "3.14.8",
+    "machine": "arm64",
+    "cryptography": "50.0.2"
+  },
+  "checks": [
+    {
+      "command": "clients/python/.venv/bin/python -m pytest clients/python/tests -q -rs",
+      "exit_code": 0,
+      "passed": 866,
+      "skipped": 13,
+      "elapsed_seconds": 153.3,
+      "log": "full-suite.log"
+    },
+    {
+      "command": "clients/python/.venv/bin/python -m pytest clients/python/tests/test_bulk.py clients/python/tests/test_encryption.py clients/python/tests/test_encryption_policy.py -q",
+      "exit_code": 0,
+      "passed": 77,
+      "elapsed_seconds": 3.82,
+      "log": "controller.log"
+    },
+    {
+      "command": "clients/python/.venv/bin/python tools/probe_encryption_cache_identity.py",
+      "exit_code": 0,
+      "log": "cache-probe.json"
+    }
+  ],
+  "new_scenarios": {
+    "controller_cases": 41,
+    "controller_functions": 26,
+    "live_policy_cases": 40,
+    "live_policy_functions": 7,
+    "bulk_core_regressions": 1
+  },
+  "twenty_exchange_counts": [
+    {
+      "master": "transaction",
+      "column": "transaction",
+      "explicit_transaction": true,
+      "master_loads": 1,
+      "unwraps": 1,
+      "evidence": "real RSA unit and all four live SQL modes"
+    },
+    {
+      "master": "exchange",
+      "column": "exchange",
+      "explicit_transaction": true,
+      "master_loads": 20,
+      "unwraps": 20,
+      "evidence": "real RSA unit and all four live SQL modes"
+    },
+    {
+      "master": "transaction",
+      "column": "exchange",
+      "explicit_transaction": true,
+      "master_loads": 1,
+      "unwraps": 20,
+      "evidence": "real RSA unit and all four live SQL modes"
+    },
+    {
+      "master": "exchange",
+      "column": "transaction",
+      "explicit_transaction": true,
+      "master_loads": 1,
+      "unwraps": 1,
+      "evidence": "real RSA unit and all four live SQL modes"
+    },
+    {
+      "master": "transaction",
+      "column": "transaction",
+      "explicit_transaction": false,
+      "master_loads": 20,
+      "unwraps": 20,
+      "evidence": "real RSA controller unit"
+    }
+  ],
+  "live_modes": [
+    {
+      "tds": "7.4",
+      "mars": false
+    },
+    {
+      "tds": "7.4",
+      "mars": true
+    },
+    {
+      "tds": "8.0",
+      "mars": false
+    },
+    {
+      "tds": "8.0",
+      "mars": true
+    }
+  ],
+  "skips": {
+    "azure": 10,
+    "windows_certificate_store": 1,
+    "kerberos_azure": 2
+  },
+  "python_dotnet_interoperability": "existing live test passed in full suite; not Rust interoperability",
+  "owned_cell_buffers_zeroed": [
+    "root",
+    "encryption",
+    "mac",
+    "iv"
+  ],
+  "limits": [
+    "Python/HMAC/backend/native/call-boundary immutable copies are outside owned-buffer zeroization guarantees",
+    "Master policy controls driver-owned local RSA references; opaque provider internals remain provider-owned",
+    "Synchronous providers and cryptography remain synchronous; this is not the Rust worker implementation",
+    "Idle timers require a running event loop; orderly runtime cancellation revokes, arbitrary abandoned loops require explicit close",
+    "Enclave session secrets are lease-local but outside the column retention policy",
+    "New retention matrix uses local keys; no fresh Windows certificate, Key Vault or enclave acceptance",
+    "No cloud infrastructure, commit or release was created",
+    "Rust transparent SQL encryption and Rust/.NET interoperability remain pending"
+  ],
+  "test_function_inventory": {
+    "clients/python/tests/test_encryption_policy.py": [
+      "test_twenty_exchanges_count_real_local_operations",
+      "test_transaction_generations_and_old_reader_fallback",
+      "test_strict_override_cannot_borrow_transaction_entries",
+      "test_fixed_age_is_non_sliding_and_independent",
+      "test_idle_timer_zeroes_without_another_lookup",
+      "test_long_transaction_and_open_reader_reload_after_expiry",
+      "test_eviction_zeroes_and_reloads",
+      "test_different_connections_and_borrowers_never_share_keys",
+      "test_context_change_and_close_revoke_old_guards",
+      "test_buffer_zeroization_and_released_object_refusal",
+      "test_direct_calls_are_uncached_and_caller_owned",
+      "test_invalid_policy_refused",
+      "test_time_requires_idle_expiry_runtime_before_loading",
+      "test_provider_failure_is_not_cached_and_other_candidates_work",
+      "test_reentrant_provider_revocation_cannot_insert",
+      "test_master_backend_replacement_invalidates_both_caches",
+      "test_expired_acquisition_is_discarded_without_retry",
+      "test_master_expiry_does_not_shorten_an_independent_column_age",
+      "test_runtime_shutdown_revokes_an_escaped_bank",
+      "test_simultaneous_exchange_policies_are_isolated",
+      "test_policy_change_requires_idle_and_clears_prior_authority",
+      "test_local_provider_override_is_not_bypassed",
+      "test_completion_callback_waits_for_message_boundary_and_runs_once",
+      "test_false_policy_is_refused_rather_than_silently_using_defaults",
+      "test_instance_provider_override_is_not_bypassed",
+      "test_custom_backend_keeps_its_existing_bytes_contract"
+    ],
+    "clients/python/tests/test_encryption.py": [
+      "test_column_key_cache_compares_complete_wrapped_evidence",
+      "test_column_key_cache_retires_entries_on_provider_or_backend_replacement",
+      "test_an_encrypted_column_is_read_with_its_key",
+      "test_the_key_table_is_there_only_once_the_feature_is_agreed",
+      "test_the_hook_decrypts_and_a_failure_is_said_in_the_value",
+      "test_an_encrypted_output_parameter",
+      "test_an_encrypted_parameter_carries_its_cipher_info",
+      "test_bulk_data_carries_an_empty_key_table_once_the_feature_is_agreed",
+      "test_bulk_data_for_an_encrypted_column_carries_its_key_and_crypto_metadata",
+      "test_bulk_data_for_an_encrypted_column_takes_ciphertext",
+      "test_once_enclaves_are_agreed_every_request_carries_a_package",
+      "test_deterministic_encryption_repeats_and_randomized_doesnt",
+      "test_a_changed_value_isnt_decrypted",
+      "test_a_column_key_round_trips_through_its_master_key",
+      "test_another_master_keys_column_key_is_refused_by_its_signature",
+      "test_the_key_store_keeps_to_its_directory_and_its_keys",
+      "test_a_column_key_no_store_here_holds",
+      "test_each_types_plaintext",
+      "test_fixed_length_values_are_padded_when_read",
+      "test_what_cant_be_encrypted_and_what_doesnt_fit",
+      "test_an_enclave_session_and_package",
+      "test_a_master_key_signs_whether_its_keys_may_go_to_an_enclave"
+    ],
+    "clients/python/tests/test_encryption_live.py": [
+      "test_every_type_reads_back_exactly",
+      "test_every_type_bulk_loads_and_reads_back_exactly",
+      "test_bulk_rows_from_a_source_are_encrypted_as_they_are_sent",
+      "test_a_column_re_encrypted_with_another_key_is_described_again",
+      "test_a_refusal_of_a_new_describing_isnt_retried",
+      "test_an_output_parameter_and_a_procedures_positional_parameters",
+      "test_without_the_package_values_arrive_as_ciphertext",
+      "test_a_key_that_cant_be_decrypted_is_said_in_the_value",
+      "test_the_servers_refusal_reaches_the_application",
+      "test_wrapping_needs_the_feature",
+      "test_bulk_load_of_plain_columns_on_an_encrypting_connection",
+      "test_a_pool_lends_encrypting_connections",
+      "test_policy_counts_encrypted_parameters_results_and_transaction_boundaries",
+      "test_policy_time_spans_transactions_but_expires_inside_a_long_one",
+      "test_policy_pool_return_revokes_and_reset_precedes_parameter_preparation",
+      "test_policy_response_cancel_and_failed_preparation_release_exchange_keys",
+      "test_policy_transport_loss_revokes_and_recovery_gets_a_fresh_bank",
+      "test_policy_streamed_bulk_failure_and_channel_close_release_keys",
+      "test_policy_strict_exchange_override_leaves_broader_time_entries_separate"
+    ],
+    "clients/python/tests/test_encryption_dotnet_live.py": [
+      "test_sqlclient_and_the_driver_read_each_others_values"
+    ],
+    "clients/python/tests/test_bulk.py": [
+      "test_the_bulk_data_is_laid_out_as_the_server_describes_the_columns",
+      "test_what_cant_be_encoded_is_refused_before_sending",
+      "test_rows_from_a_source_are_framed_as_rows_and_end_with_done",
+      "test_the_channel_keeps_bulk_insert_and_bulk_rows_together",
+      "test_pending_bulk_is_not_released_or_recovered_and_close_drains_attention",
+      "test_unsent_bulk_failure_preserves_preparation_until_close"
+    ]
+  },
+  "source_sha256": {
+    "clients/python/tds/encryption/__init__.py": "9838ce6dbf34635304edd8ec415043b7627359abc9dc40c74407d0e6243503d6",
+    "clients/python/tds/encryption/policy.py": "e30852917ca21a1cecbc6d9a71c5963d486b114929774b3b096f4790a7846575",
+    "clients/python/tds/encryption/cell.py": "bd6f652e399916e76e1bb688158bd3eaa2a98c7782e7884ca175b6788950a7ca",
+    "clients/python/tds/encryption/context.py": "96bcb85a2e64122a741e1ebdfceb9c380d6f4e740306f99a7b1363e8319e8d42",
+    "clients/python/tds/encryption/keys.py": "17943c504055419ba770e8ba5ec1869f3ba708f0e171c5b39be5f116e9769fea",
+    "clients/python/tds/encryption/backend.py": "9f2af20e9c322818747472ea8f28268d16fd8f612e2afcece39536b3a395d52d",
+    "clients/python/tds/encryption/enclave.py": "609a728442f3046f7eed37ffde4bda07103d46fb6d0f71a2c8cb8a7e654d0742",
+    "clients/python/tds/encryption/normalize.py": "2a4fd03f421148508f68d57a307fb97b7c53eac78886ef56196c0633ed39a478",
+    "clients/python/tds/connection/core.py": "040fe9106defffd0ecb7938b34c70137aa79b1efc74f522396bd8fd75b3fdaf9",
+    "clients/python/tds/connection/shell.py": "a595aa4d48d05f2c6c6e57acea643240f9e0ba769b958b8f6cb10430dbb1749a",
+    "clients/python/tds/response.py": "42a819766bc355343931baa82e809cdb5f62b9e549a17ab7169e929b15d0eb66",
+    "clients/python/tests/test_encryption_policy.py": "fbb5a3468b21236695bec08d051ac3464ceafd2da6c7166e1f38b0bfbeea57a0",
+    "clients/python/tests/test_encryption.py": "1284adcd1df84de79f709c8ad9fa3965e21b45bf8f8a6f48d3efc5c6057a9b49",
+    "clients/python/tests/test_encryption_live.py": "0a2e95d60d258223efa5e7d1d39a5b42524d1c6fbcef7bf9bbd5e2ceaceb1dd7",
+    "clients/python/tests/test_encryption_dotnet_live.py": "0dc890216867600de992d363c21551deb943102b1c41a728c61960c20d9bf0db",
+    "clients/python/tests/test_bulk.py": "efb61bd9b96de514f11fa09c0d2332ab4f207c826f7c2a0eca463ddc5e8ca7dd",
+    "tools/probe_encryption_cache_identity.py": "bb62bb445bd9706ac1a2c9efb3254ae71fce4ad7f4cba9308847204179304e81"
+  },
+  "evidence_sha256": {
+    "cache-probe.json": "2ef96228f2f3c59f4c7f8826b188677cc11038c033ff52c7a6e9ba75bd18405c",
+    "controller.log": "37a0edb220ac366cbab9017ec2a4f89d623aca4c5a495ddd9ec9f7f9174d6667",
+    "full-suite.log": "57a6df9a0a1a644e67e9369c0f41940515cc18ea1012e7d48a7b205d05077044"
+  },
+  "documentation_checks": {
+    "site_page_javascript_syntax": 35,
+    "new_api_evidence_links": "resolved",
+    "git_diff_check": "passed"
+  }
+}

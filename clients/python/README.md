@@ -4,6 +4,46 @@ A TDS 7.4 and 8.0 client whose code teaches the protocol, and which can display 
 
 See [the release notes](CHANGELOG.md) for the corrections found during Rust development.
 
+## Always Encrypted key retention
+
+```python
+from tds.encryption import Encryption, LocalKeyStore, Policies, Policy
+
+encryption = Encryption([LocalKeyStore("keys")])  # transaction retention by default
+# Or reuse keys for at most five minutes within one physical connection/pool lease:
+encryption = Encryption([LocalKeyStore("keys")], policies=Policies(
+    master=Policy.time(300), column=Policy.time(300),
+))
+
+# Override only this exchange, including parameter preparation and result reading:
+async with await channel.exchange(request, policies=Policies(
+    master=Policy.exchange(), column=Policy.exchange(),
+)) as response:
+    result = await response.fetch()
+```
+
+Transaction retention falls back to exchange retention in autocommit. Fixed-age
+retention can span transactions, expires while idle, and never renews on use.
+Expiry reloads keys on demand; it does not limit transaction duration. Choose an
+age longer than acquisition itself: an acquisition exceeding its age is refused.
+Keys never cross connection/borrower boundaries. Each lease has one encryption
+wrapper. An override does not erase keys
+retained by earlier exchanges; changing lease defaults clears them.
+`connection.key_statistics`
+reports successful local master loads, unwraps and live cache sizes without
+revealing keys. Set defaults for an existing lease between exchanges with
+`connection.keys.set_policies(Policies(...))`; doing so clears retained keys.
+
+Local RSA masters and column keys have separate policies. Custom/vault/certificate
+providers retain ownership of private-key operations; only their returned column
+keys are cached here. Owned mutable CellKey buffers are overwritten on release,
+but Python and native libraries may create temporary copies that this cannot
+reliably erase. Custom backends keep their existing `bytes` input contract; those
+call-boundary copies are also outside the erasure guarantee. Direct `encryption.cell_key(key)` is now uncached and caller-owned;
+close it after use, or use `encryption.key_session()` with explicit exchange guards.
+See the [reference](../../docs/design/3-reference/always-encrypted.md#key-retention)
+and [scenarios/evidence](../../docs/design/experiments/python-encryption-retention.md).
+
 ## Run it
 
 First, from the repository root, start the local SQL Server 2025 with its test certificate. The steps are in [`docker/macos/tls`](../../docker/macos/tls/README.md):

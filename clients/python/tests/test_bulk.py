@@ -115,3 +115,21 @@ def test_pending_bulk_is_not_released_or_recovered_and_close_drains_attention():
         drain.send(Packet(PacketType.SERVER_MESSAGE, Status.LAST, b"\xfd\x22\x00" + bytes(10), None))
     assert not core.link.channels[channel].busy
     core.close_channel(channel)
+
+
+def test_unsent_bulk_failure_preserves_preparation_until_close():
+    from tds.connection.core import Produce
+    core = ConnectionCore(Options("localhost", 1433, "sa", "unused"))
+    channel, _ = core.open_channel(ALICE)
+    sent(core.exchange(channel, ALICE, tds.BulkInsert("INSERT BULK t(id int NOT NULL)")))
+    finish(core, channel, OK)
+    async def rows():
+        yield (1,)
+    sending = core.exchange(channel, ALICE, tds.BulkRows([ID], rows()))
+    assert isinstance(next(sending), Produce)  # all bytes still buffered; no packet sent
+    with pytest.raises(OSError, match="source failed"):
+        sending.throw(OSError("source failed"))
+    assert core.link.channels[channel].open == "bulk load"
+    assert not core.release()[0] and "bulk" in core.recovery_refusal()
+    assert core.begin_channel_close(channel)
+    assert core.link.channels[channel].reader.cancelling

@@ -80,12 +80,23 @@
           <pre>columns = (await fetch(channel, "SELECT TOP 0 id, ssn FROM dbo.people")).result_sets[0].columns
 await fetch(channel, tds.BulkInsert(f"INSERT BULK dbo.people (id int, ssn {columns[1].type.cipher})"))
 await fetch(channel, tds.BulkRows(columns, [(1, "123-45-6789"), …]))</pre></li>
-        <li><b>An enclave session is kept for the server</b> by the <code>Encryption</code>, and created again if the server refuses one (error 33195): the call is described again, with attestation parameters, and sent once more.</li>
-        <li><b>Column keys, once decrypted, are kept</b> by the <code>Encryption</code>, for every connection it serves.</li>
+        <li><b>An enclave session is kept within one connection lease,</b> and created again if the server refuses one (error 33195). Context changes, reset, recovery, return and close clear sessions and descriptions.</li>
+        <li><b>Column and local master keys follow explicit retention policies</b> (${D(66)}) within one physical connection and exclusive pool lease. Transaction is the default. See Key retention below.</li>
         <li><b>Without <code>tds.encryption</code>, encrypted values are shown as they arrive:</b> <code>EncryptedValue(ciphertext)</code>, with the column’s type saying what it holds (<code>int encrypted randomized</code>). A value <code>tds.encryption</code> can’t decrypt is <code>NotDecrypted(ciphertext, reason)</code>, and the rest of the response is still read.</li>
         <li><b>An encrypted large value is read whole,</b> never streamed: nothing may be released before its tag is checked.</li>
         <li><b>Only what can’t be encrypted is refused before sending:</b> a value that doesn’t fit its type (${D(48)}), a type Always Encrypted can’t encrypt, an algorithm the driver doesn’t have. The server judges everything else. For example, comparing a randomized column is error 33277, raised by the describing call.</li>
       </ul>
+
+      <h2 id="key-retention">Key retention</h2>
+      <p><code>Encryption(stores, policies=Policies(...))</code> configures independent <code>master</code> and <code>column</code> policies. Both default to <code>Policy.transaction()</code>; outside a transaction that becomes exchange retention. Local master/column caches default to 8/32 entries, with configurable bounds from 1 to 4096.</p>
+      ${table(['Policy', 'Reuse and cleanup'], [
+        ['<code>Policy.transaction()</code>', 'One server-announced outer transaction; outer commit/rollback/end releases keys. Nested commit and savepoint preserve them.'],
+        ['<code>Policy.exchange()</code>', 'Parameter preparation, streamed input and response decoding for one request; terminal response, failed submission or cancel/drain releases keys.'],
+        ['<code>Policy.time(seconds)</code>', 'Across transactions/autocommit within one physical connection and pool lease. Fixed age from acquisition start; use never extends it. Idle timers expire entries.'],
+      ], 'compact')}
+      <p>Expiry reloads keys when next needed, without limiting transaction duration. An acquisition exceeding its age is refused. Event-loop scheduling bounds timer precision. Connection close, pool return, physical failure, recovery, reset and context changes clear/revoke keys. Deferred pool reset completes before describing/encrypting application parameters.</p>
+      <p><code>channel.exchange(request, policies=Policies(...))</code> overrides one exchange and cannot borrow broader cached keys. It does not erase entries retained by earlier exchanges. To replace defaults and clear all entries between exchanges, use <code>connection.keys.set_policies(...)</code>. <code>connection.key_statistics</code> reports successful loads, unwraps, hits, evictions, expirations and live counts without key data.</p>
+      <p>Master retention controls local RSA objects. Opaque custom/vault/certificate providers own private-key operations; enclave session keys have separate lease-local ownership. The driver overwrites four owned mutable CellKey buffers; Python/library copies and native provider memory are outside that guarantee. Unscoped <code>Encryption.cell_key(key)</code> is uncached and caller-owned: close it after use. Orderly runtime task cancellation revokes banks used in that runtime; abandoning a loop without cancelling tasks requires explicit close. See ${L('python-encryption-retention', 'Python design, scenarios and evidence')} for the tested boundaries. Rust transparent SQL integration remains separate work.</p>
 
       <h2>Example</h2>
       <p>Insert into, and read from, a table with an encrypted column:</p>

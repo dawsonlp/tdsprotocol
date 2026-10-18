@@ -25,6 +25,63 @@ def utf16(text: str) -> bytes:
     return text.encode("utf-16-le")
 
 
+def test_column_key_cache_compares_complete_wrapped_evidence():
+    class Store:
+        name = "SYNTHETIC"
+        calls = 0
+
+        def decrypt_column_key(self, path, algorithm, encrypted):
+            self.calls += 1
+            return encrypted
+
+    def key(byte):
+        return types.ColumnKey(7, 1, 1, b"12345678", (
+            types.MasterKeyValue(byte * 32, "SYNTHETIC", "test.pem", "RSA_OAEP"),))
+
+    store = Store()
+    context = Encryption([store])
+    bank = context.key_session()
+    exchange = bank.exchange()
+    first = exchange.cell_key(key(b"A"))
+    second = exchange.cell_key(key(b"B"))
+    independent = Encryption([Store()]).cell_key(key(b"B"))
+    assert first is not second and exchange.cell_key(key(b"A")) is first
+    assert second.encrypt(b"probe", True) == independent.encrypt(b"probe", True)
+    assert store.calls == 2
+    exchange.close()
+    bank.close()
+
+
+def test_column_key_cache_retires_entries_on_provider_or_backend_replacement():
+    from dataclasses import dataclass
+    from tds.encryption.backend import CryptographyBackend
+
+    @dataclass  # deliberately unhashable, equal-valued provider objects
+    class Store:
+        name: str = "SYNTHETIC"
+        calls: int = 0
+
+        def decrypt_column_key(self, path, algorithm, encrypted):
+            self.calls += 1
+            return encrypted
+
+    key = types.ColumnKey(7, 1, 1, b"12345678", (
+        types.MasterKeyValue(b"A" * 32, "SYNTHETIC", "test.pem", "RSA_OAEP"),))
+    original = Store()
+    context = Encryption([original])
+    bank = context.key_session()
+    exchange = bank.exchange()
+    first = exchange.cell_key(key)
+    replacement = Store()
+    context.key_stores["SYNTHETIC"] = replacement
+    second = exchange.cell_key(key)
+    assert second is not first and original.calls == replacement.calls == 1
+    context.backend = CryptographyBackend()
+    assert exchange.cell_key(key) is not second and replacement.calls == 2
+    exchange.close()
+    bank.close()
+
+
 # --------------------------------------------------------------------------- the core: reading (MS-TDS §2.2.7.4, §2.2.5.7)
 
 KEY_TABLE = (bytes.fromhex("01 00")  # one column key

@@ -93,11 +93,62 @@ A master key allows enclave computations when it is created with its signature: 
         columns = (await fetch(channel, "SELECT TOP 0 id, ssn FROM dbo.people")).result_sets[0].columns
         await fetch(channel, tds.BulkInsert(f"INSERT BULK dbo.people (id int, ssn {columns[1].type.cipher})"))
         await fetch(channel, tds.BulkRows(columns, [(1, "123-45-6789"), …]))
-- **An enclave session is kept for the server** by the `Encryption`, and created again if the server refuses one (error 33195): the call is described again, with attestation parameters, and sent once more.
-- **Column keys, once decrypted, are kept** by the `Encryption`, for every connection it serves.
+- **An enclave session is kept within one connection lease,** and created again if the server refuses one (error 33195): the call is described again, with attestation parameters, and sent once more. Database/collation changes, reset, recovery, return and close clear its session and statement descriptions.
+- **Column and local master keys follow explicit retention policies (D-66),** within one physical connection and exclusive pool lease. Transaction is the default; see Key retention below.
 - **Without `tds.encryption`, encrypted values are shown as they arrive:** `EncryptedValue(ciphertext)`, with the column's type saying what it holds (`int encrypted randomized`). A value `tds.encryption` can't decrypt is `NotDecrypted(ciphertext, reason)`, and the rest of the response is still read.
 - **An encrypted large value is read whole,** never streamed: nothing may be released before its tag is checked.
 - **Only what can't be encrypted is refused before sending:** a value that doesn't fit its type (D-48), a type Always Encrypted can't encrypt, an algorithm the driver doesn't have. The server judges everything else. For example, comparing a randomized column is error 33277, raised by the describing call.
+
+## Key retention
+
+Python accepts `Encryption(stores, policies=Policies(...))`. Both `master` and
+`column` default to `Policy.transaction()`, with bounded capacities of 8 and 32
+entries (configurable from 1 to 4096).
+
+| Policy | Reuse boundary | Cleanup |
+|---|---|---|
+| `Policy.transaction()` | One server-announced outer transaction; exchange scope outside a transaction | Outer commit/rollback/end, including server rollback; nested commit/savepoint does not end it |
+| `Policy.exchange()` | Parameter preparation, streamed input production and response decoding for one application request | Terminal response message, failed preparation/send, or cancel/drain |
+| `Policy.time(seconds)` | Across transactions/autocommit within the same physical connection and lease | Fixed age measured from acquisition start, including idle expiry; hits do not extend it |
+
+Expiry/eviction reloads a needed key; a long transaction does not fail merely
+because a key expired. An age shorter than acquisition is refused, rather than
+retried forever. Event-loop scheduling bounds idle timer precision. Runtime
+task cancellation at orderly shutdown (such as `asyncio.run`) revokes banks used
+in that runtime. Closing/abandoning an event loop without cancelling its tasks is
+outside that guarantee; close the connection or bank explicitly. Standalone
+synchronous banks must also be closed explicitly.
+
+An exchange can choose `channel.exchange(request, policies=Policies(...))`. It
+cannot borrow keys retained under a broader policy. It does not retroactively erase
+entries retained by earlier exchanges; `set_policies` clears those entries. Each setting controls its
+own key class: retaining a column key avoids a new unwrap even when its master
+has already been released. Changing lease defaults with
+`connection.keys.set_policies(...)` requires no active exchange and clears all
+retained keys. Changes to `Encryption.policies` configure newly wrapped leases.
+
+Every policy is cleared/revoked at connection close, pool return, physical failure
+and recovery. A new borrower never inherits keys or descriptions. Deferred pool
+reset is completed with an empty batch before describing/encrypting the next
+application request, restoring its login database/collation first. A database or
+collation change invalidates old guards and descriptions. Old readers pin their
+transaction generation; they may reload exchange-local keys after that generation
+ends, but cannot join a later transaction with a reused descriptor.
+
+Master retention controls loaded `LocalKeyStore` RSA objects. Opaque custom,
+Windows certificate and vault providers retain control over private-key operations
+and any provider-internal cache. Enclave session keys have separate lease-local
+ownership and are not governed by the column-key policy. Owned CellKey root,
+AES, MAC and IV buffers are overwritten on release. Python immutable temporary
+copies and backend-native memory are outside that guarantee.
+
+`connection.key_statistics` reports local master loads, successful unwraps, hits,
+evictions, expirations and live entry counts; inspection never triggers expiry.
+Unscoped `Encryption.cell_key(key)` is uncached and caller-owned (call `close()`);
+standalone controlled use is `with encryption.key_session() as bank:` followed by
+`with bank.exchange() as exchange:`. Only server-driven connection wrappers supply
+automatic transaction and pool lifecycle events. [Design and test evidence](../experiments/python-encryption-retention.md)
+record the Python implementation; Rust's SQL integration remains separate work.
 
 ## Example
 

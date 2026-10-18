@@ -51,20 +51,38 @@ class CellKey:
     def __init__(self, column_key: bytes, backend: Backend):
         if len(column_key) != KEY_SIZE:
             raise ValueError(f"a column key for {ALGORITHM} is {KEY_SIZE} bytes, not {len(column_key)}")
-        self.root = column_key  # the column key itself, which is sent to an enclave (enclave.py)
-        self._encryption = _derived(column_key, "encryption key")
-        self._mac = _derived(column_key, "MAC key")
-        self._iv = _derived(column_key, "IV key")
+        self._closed = False
+        self.root = bytearray(column_key)  # the column key itself, which is sent to an enclave (enclave.py)
+        self._encryption = bytearray(_derived(column_key, "encryption key"))
+        self._mac = bytearray(_derived(column_key, "MAC key"))
+        self._iv = bytearray(_derived(column_key, "IV key"))
         self._backend = backend
 
+    def close(self) -> None:
+        """Overwrite owned buffers. Library/immutable temporary copies are outside this guarantee."""
+        self._closed = True
+        for name in ("root", "_encryption", "_mac", "_iv"):
+            value = getattr(self, name, None)
+            if value is not None:
+                value[:] = bytes(len(value))
+
+    def __del__(self):
+        self.close()
+
+    def _check(self):
+        if self._closed:
+            raise DecryptionFailed("the column key has been released")
+
     def encrypt(self, plaintext: bytes, deterministic: bool) -> bytes:
+        self._check()
         iv = _hmac(self._iv, plaintext)[:BLOCK] if deterministic else os.urandom(BLOCK)
-        ciphertext = self._backend.aes_cbc_encrypt(self._encryption, iv, plaintext)
+        ciphertext = self._backend.aes_cbc_encrypt(bytes(self._encryption), iv, plaintext)
         version = bytes([VERSION])
         tag = _hmac(self._mac, version + iv + ciphertext + b"\x01")
         return version + tag + iv + ciphertext
 
     def decrypt(self, value: bytes) -> bytes:
+        self._check()
         if len(value) < SMALLEST:
             raise DecryptionFailed(f"the value is {len(value)} bytes: an encrypted value is at least {SMALLEST}")
         if value[0] != VERSION:
@@ -76,6 +94,6 @@ class CellKey:
             raise DecryptionFailed("its authentication tag doesn't match: it wasn't encrypted with this column key, "
                                    "or it was changed after it was encrypted")
         try:
-            return self._backend.aes_cbc_decrypt(self._encryption, iv, ciphertext)
+            return self._backend.aes_cbc_decrypt(bytes(self._encryption), iv, ciphertext)
         except ValueError as e:  # bad padding after a matching tag means that a faulty encryptor wrote it
             raise DecryptionFailed(f"its tag matches, but its padding is wrong ({e})") from None

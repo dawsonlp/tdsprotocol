@@ -284,6 +284,13 @@ class Connection:
         self._configuration: tuple[_ConfigState, ConnectionConfig] | None = None
         self._closed_event = asyncio.Event()
         core._on_capture_failure = self._abort
+        core._on_failure = self._abort
+        self._lifecycle = None
+        core._on_session_change = lambda change: self._notify_lifecycle("session", change)
+
+    def _notify_lifecycle(self, event, change=None):
+        if self._lifecycle is not None:
+            self._lifecycle(event, change)
 
     @property
     def session(self):
@@ -348,6 +355,7 @@ class Connection:
         old = self._core
         if self.alive:
             raise SessionNotRecovered(f"session {old.session_id} isn't broken: there is nothing to recover")
+        self._notify_lifecycle("recovery")
         old.broken_while_idle = False  # one attempt for each time it's found broken
         if why := old.recovery_refusal():
             raise SessionNotRecovered(f"session {old.session_id} can't be recovered: {why}. The connection broke: "
@@ -399,6 +407,8 @@ class Connection:
         old_writer = self._writer
         self._core, self._reader, self._writer, self._failure = core, reader, writer, None
         core._on_capture_failure = self._abort
+        core._on_failure = self._abort
+        core._on_session_change = lambda change: self._notify_lifecycle("session", change)
         self._inboxes = {c: Inbox(None if core.link.mars else INBOX_PACKETS) for c in core.link.channels}
         self._write(sends)
         if configuration is not None:
@@ -420,6 +430,7 @@ class Connection:
         return SerialChannel(self, channel_id)
 
     async def close(self) -> None:
+        self._notify_lifecycle("close")
         self._closed_event.set()
         try:
             if self._core.failure is None:
@@ -439,6 +450,7 @@ class Connection:
 
     def _abort(self, failure: BaseException) -> None:
         """Revoke immediately, including when failure occurs in a synchronous API."""
+        self._notify_lifecycle("failure")
         self._failure = self._core.failure = failure
         if self._reading and self._reading is not asyncio.current_task():
             self._reading.cancel()
@@ -455,6 +467,7 @@ class Connection:
 
     def _release(self) -> bool:
         """Called when given back to a pool. True if this connection can be lent again (see ConnectionCore.release)."""
+        self._notify_lifecycle("pool_return")
         if not self.alive:
             return False
         reusable, sends = self._core.release()
@@ -543,6 +556,7 @@ class Connection:
         in_flight = [c.reader.request for c in self._core.link.channels.values() if c.busy and c.reader is not None]
         self._core.in_flight_when_broken = [str(r) for r in in_flight]
         self._core.broken_while_idle = isinstance(failure, OSError) and not in_flight  # the network, not the bytes
+        self._notify_lifecycle("failure")
         self._failure = failure
         if self._core.failure is None:  # the core refuses every later request with the reason
             self._core.failure = failure
@@ -617,7 +631,8 @@ class SerialChannel:
             raise original
         raise self._closed_error()
 
-    async def exchange(self, request: Request, *, decrypt: Callable | None = None) -> Response:
+    async def exchange(self, request: Request, *, decrypt: Callable | None = None,
+                       on_complete: Callable | None = None) -> Response:
         """One exchange in the conversation: send one request, and return its response, open and ready to be read.
 
         A conversation is the ordered sequence of messages on a serial channel. The client speaks, then the server
@@ -640,7 +655,7 @@ class SerialChannel:
             await connection.recover()  # broken with no request in progress: recover, then send (D-57)
         core = connection._core
         core.exchange_channel(self.id, asyncio.current_task())
-        reader = await self._perform(core.exchange(self.id, asyncio.current_task(), request, decrypt),
+        reader = await self._perform(core.exchange(self.id, asyncio.current_task(), request, decrypt, on_complete),
                                      undo_on_cancel=True)
         return Response(reader, _ChannelSource(self))
 
