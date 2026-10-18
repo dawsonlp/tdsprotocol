@@ -227,11 +227,25 @@
   "evidence_sha256": {
     "cache-probe.json": "2ef96228f2f3c59f4c7f8826b188677cc11038c033ff52c7a6e9ba75bd18405c",
     "controller.log": "37a0edb220ac366cbab9017ec2a4f89d623aca4c5a495ddd9ec9f7f9174d6667",
-    "full-suite.log": "57a6df9a0a1a644e67e9369c0f41940515cc18ea1012e7d48a7b205d05077044"
+    "full-suite.log": "57a6df9a0a1a644e67e9369c0f41940515cc18ea1012e7d48a7b205d05077044",
+    "release-main-suite.log": "847321d96fb1ec9944a325e9386e0a79b803272917b23d2842b9f6e2fba25ea7"
   },
   "documentation_checks": {
     "site_page_javascript_syntax": 35,
     "new_api_evidence_links": "resolved",
     "git_diff_check": "passed"
+  },
+  "release_validation": {
+    "version": "0.3.0",
+    "basis": "isolated branch from main with only Python changes",
+    "passed": 866,
+    "skipped": 13,
+    "elapsed_seconds": 148.29,
+    "log": "release-main-suite.log",
+    "source_sha256_matches_original": true,
+    "python_dotnet_interoperability": "passed",
+    "wheel_source_modules_verified": 34,
+    "wheel_isolated_import_version_cli_and_policies": "passed",
+    "fixture_setup": "existing ignored local test CA/server certificate/key linked for mock TLS tests; no key material copied or published"
   }
 }
