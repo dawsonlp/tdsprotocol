@@ -33,7 +33,7 @@ Cancel isn't a request. It is a header-only packet of type `06` that ends the ex
 | Field | Size | Meaning |
 |---|---|---|
 | transaction | u64 | the descriptor from the latest *begin transaction* announcement; 0 when none is open |
-| outstanding requests | u32 | requests active on the connection, this one included; more than 1 only under MARS |
+| outstanding requests | u32 | 1 in autocommit; otherwise requests active on the connection, this one included (more than 1 only under MARS) |
 
 **SQL batch** (packet type `01`):
 

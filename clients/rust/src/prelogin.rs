@@ -1,0 +1,144 @@
+//! PRELOGIN's directory uses big-endian offsets measured from the message start.
+//! Reference: `docs/design/3-reference/prelogin.md`; MS-TDS v20260617 §2.2.6.5.
+//! We request full encryption; MARS must be explicitly requested and accepted.
+
+use crate::{Error, ErrorKind, Result, wire::Reader};
+
+pub fn encode() -> Vec<u8> {
+    encode_with_mars(false)
+}
+
+pub fn encode_with_mars(mars: bool) -> Vec<u8> {
+    let mars = [u8::from(mars)];
+    // VERSION, ENCRYPTION, INSTOPT, THREADID, MARS; directory + terminator = 26.
+    let fields: [(u8, &[u8]); 5] = [
+        (0, &[0, 1, 0, 0, 0, 0]),
+        (1, &[1]),
+        (2, &[0]),
+        (3, &[0; 4]),
+        (4, &mars),
+    ];
+    let mut out = Vec::new();
+    let mut offset = 26_u16;
+    for (tag, bytes) in fields {
+        out.push(tag);
+        out.extend(offset.to_be_bytes());
+        out.extend((bytes.len() as u16).to_be_bytes());
+        offset += bytes.len() as u16;
+    }
+    out.push(255);
+    for (_, bytes) in fields {
+        out.extend(bytes);
+    }
+    out
+}
+
+pub fn check_reply(bytes: &[u8], strict: bool) -> Result<()> {
+    check_reply_with_mars(bytes, strict, false)
+}
+
+pub fn check_reply_with_mars(bytes: &[u8], strict: bool, mars: bool) -> Result<()> {
+    let mut accepted_mars = false;
+    let mut r = Reader::new(bytes);
+    let mut entries = Vec::new();
+    let mut seen = [false; 256];
+    loop {
+        let tag = r.u8()?;
+        if tag == 255 {
+            break;
+        }
+        if seen[usize::from(tag)] {
+            return Err(Error::malformed(r.offset - 1, "duplicate PRELOGIN option"));
+        }
+        seen[usize::from(tag)] = true;
+        entries.push((tag, usize::from(r.be16()?), usize::from(r.be16()?)));
+    }
+    let directory_end = r.offset;
+    let mut ranges: Vec<_> = entries
+        .iter()
+        .map(|(_, offset, n)| (*offset, offset.saturating_add(*n)))
+        .collect();
+    ranges.sort_unstable();
+    if ranges.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+        return Err(Error::malformed(
+            directory_end,
+            "overlapping PRELOGIN options",
+        ));
+    }
+    let mut encrypted = false;
+    for (tag, offset, n) in entries {
+        if offset < directory_end {
+            return Err(Error::malformed(offset, "PRELOGIN option offset"));
+        }
+        let end = offset
+            .checked_add(n)
+            .ok_or_else(|| Error::malformed(offset, "PRELOGIN option length"))?;
+        let data = bytes
+            .get(offset..end)
+            .ok_or_else(|| Error::malformed(offset, "PRELOGIN option bounds"))?;
+        match tag {
+            0 if n != 6 => return Err(Error::malformed(offset, "PRELOGIN version")),
+            // THREADID is a client field; the server can return an empty entry.
+            1 => {
+                if n != 1 {
+                    return Err(Error::malformed(offset, "PRELOGIN encryption length"));
+                }
+                if !strict && data != [1] && data != [3] {
+                    return Err(Error::new(ErrorKind::Unsupported(
+                        "server refused full encryption",
+                    )));
+                }
+                encrypted = true;
+            }
+            2 if data != [0] => {
+                return Err(Error::new(ErrorKind::Unsupported(
+                    "server instance mismatch",
+                )));
+            }
+            4 => {
+                if data != [0] && data != [1] {
+                    return Err(Error::malformed(offset, "PRELOGIN MARS"));
+                }
+                accepted_mars = data == [1];
+            }
+            _ => {}
+        }
+    }
+    if !strict && !encrypted {
+        return Err(Error::malformed(0, "missing PRELOGIN encryption option"));
+    }
+    if mars != accepted_mars {
+        return Err(Error::new(ErrorKind::Unsupported(if mars {
+            "server refused MARS"
+        } else {
+            "unsolicited MARS"
+        })));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn directory_requires_nonoverlapping_bounded_entries_and_full_encryption() {
+        let hello = encode();
+        check_reply(&hello, false).unwrap();
+        for n in 0..hello.len() {
+            assert!(check_reply(&hello[..n], false).is_err());
+        }
+        let mut overlap = hello.clone();
+        overlap[6..8].copy_from_slice(&26_u16.to_be_bytes());
+        assert!(matches!(
+            check_reply(&overlap, false).unwrap_err().kind,
+            ErrorKind::Malformed { .. }
+        ));
+        let mut off = hello;
+        off[32] = 0;
+        assert!(matches!(
+            check_reply(&off, false).unwrap_err().kind,
+            ErrorKind::Unsupported(_)
+        ));
+        check_reply(&off, true).unwrap(); // 8.0 already runs inside verified TLS.
+    }
+}

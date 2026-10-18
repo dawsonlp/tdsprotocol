@@ -10,8 +10,10 @@ Markdown library or build step. Existing hand-authored site pages are untouched.
 """
 
 import json
+import posixpath
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
 
@@ -19,10 +21,24 @@ ROOT = Path(__file__).resolve().parents[1]
 PAGES = (
     ("D-rust-development.md", "rust", "D", "Building the Rust Client", "explanation"),
     ("E-python-baseline.md", "python-baseline", "E", "Python Baseline", "check"),
+    ("F-rust-value-api.md", "rust-values", "F", "Rust Type and Value API", "explanation"),
+    ("G-login-credential-lifetime.md", "login-credentials", "G", "Credential Lifetime", "explanation"),
+    ("H-pool-configuration.md", "pool-configuration", "H", "Pool Configuration Snapshots", "explanation"),
+    ("I-rust-rpc-and-streaming.md", "rpc-streaming", "I", "Typed Calls and Streaming", "explanation"),
+    ("J-rust-completion.md", "rust-completion", "J", "Rust Completion and Decisions", "explanation"),
+    ("K-offline-replay.md", "offline-replay", "K", "Offline Rust Replay", "explanation"),
+    ("experiments/recovery-channel-identity.md", "recovery-experiment", "", "Recovery Channel Identity Experiment", "check"),
+    ("experiments/bulk-continuation.md", "bulk-continuation-experiment", "", "Bulk Continuation Experiment", "check"),
 )
 ROUTES = {
+    "1-model.md": "model",
+    "2-example-login.md": "example-login",
+    "4-decisions.md": "decisions",
+    "A-the-client.md": "client",
+    "B-building-the-client.md": "build",
     "C-roadmap.md": "roadmap",
     "5-done-when.md": "done-when",
+    **{f"3-reference/{path.stem}.md": f"ref/{path.stem}" for path in (ROOT / "docs/design/3-reference").glob("*.md")},
     **{source: route for source, route, *_ in PAGES},
 }
 
@@ -43,10 +59,20 @@ def render() -> None:
                         continue
                     href = child.attrGet("href") or ""
                     target, separator, anchor = href.partition("#")
-                    if target in ROUTES:
-                        child.attrSet("href", "#/" + ROUTES[target] + ("/" + anchor if separator else ""))
-                    elif href.startswith("#"):
+                    if href.startswith("#"):
                         child.attrSet("href", "#/" + route + "/" + anchor)
+                    elif target and not urlsplit(target).scheme and not target.startswith("/"):
+                        # Links are relative to the Markdown source, whereas the
+                        # generated HTML runs inside site/index.html. Preserve
+                        # that location when moving the content into the site.
+                        relative = posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
+                        if relative in ROUTES:
+                            child.attrSet("href", "#/" + ROUTES[relative] + ("/" + anchor if separator else ""))
+                        else:
+                            path = (ROOT / "docs/design" / relative).resolve()
+                            if path.is_relative_to(ROOT) and path.exists():
+                                relocated = posixpath.relpath(path.as_posix(), (ROOT / "site").as_posix())
+                                child.attrSet("href", relocated + ("#" + anchor if separator else ""))
             return markdown.renderer.render(tokens, markdown.options, {})
 
         def heading(match: re.Match) -> str:

@@ -10,6 +10,8 @@ A client for Microsoft's **Tabular Data Stream (TDS)** protocol, versions 7.4 an
 
 **[Roadmap](docs/design/C-roadmap.md):** a Rust client built with the Python code and tests as its reference, then Python conveniences, then application drivers such as DB-API.
 
+The [Rust client and command line](clients/rust/README.md) now run verified-TLS connections, pooling/recovery, typed procedure calls, borrowed large-value readers and streamed inputs against Docker under both TDS versions. The command line demonstrates query/RPC, chunked results and binary file sources. Its `--replay` mode inspects Python/Rust recordings offline. Its [acceptance record](clients/rust/ACCEPTANCE.md) distinguishes tested behavior from remaining special-type/platform work.
+
 **The design's system of record** is [docs/design/](docs/design/README.md); the site presents the same content. To read the site offline, open [site/index.html](site/index.html) in a browser.
 
 | Path | What |

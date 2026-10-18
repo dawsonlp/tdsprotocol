@@ -20,6 +20,14 @@ Read in order. Each part builds on the one before it.
 | C | [Roadmap](C-roadmap.md) | What comes after the milestones: Rust, Python conveniences, application drivers | 5 min |
 | D | [Building the Rust Client](D-rust-development.md) | Proposed ownership/permissions, exact representations, coding practices and milestones | as needed |
 | E | [Python Baseline](E-python-baseline.md) | Source analysis, current test results and server setup | 10 min |
+| F | [Rust Type and Value API](F-rust-value-api.md) | Approved heterogeneous rows, exact values and declared SQL types; scalar reads implemented | as needed |
+| G | [Credential Lifetime](G-login-credential-lifetime.md) | Server password changes, observed recovery/reset failures and the distinct pool configuration responsibility | as needed |
+| H | [Pool Configuration Snapshots](H-pool-configuration.md) | Implemented Python/Rust snapshot APIs, lifetime rules, failure boundaries and acceptance evidence | as needed |
+| I | [Typed Calls and Streaming](I-rust-rpc-and-streaming.md) | Typed RPC, forward results, runnable Rust CLI and the proposed large-value ownership surface | as needed |
+| J | [Rust Completion and Decisions](J-rust-completion.md) | Implemented transactions, batched sources, special types and metadata; table-valued/bulk input decisions | as needed |
+| K | [Offline Rust Replay](K-offline-replay.md) | Existing capture compatibility, exact input reading and located incomplete-evidence diagnostics | as needed |
+| Experiment | [Recovery Channel Identity](experiments/recovery-channel-identity.md) | Failure reproduction, intervention, shared lifetime contract and Python/Rust results | as needed |
+| Experiment | [Bulk Continuation](experiments/bulk-continuation.md) | Server behavior after preparation, explicit abort versus physical close, and the Python pool-release defect | as needed |
 
 ## How every page is built
 
@@ -66,7 +74,6 @@ What the client cannot do yet, or what has not been confirmed. Each is described
 
 | Gap | Where | Until |
 |---|---|---|
-| Replay can't decode a table-valued parameter's rows | [The Client §6](A-the-client.md#6--what-the-running-client-shows--agreed-d-12) | not scheduled |
 | Database mirroring's partner is tested only with constructed bytes, because SQL Server on Linux has no mirroring and the Windows test server was not mirrored | [Login Response](3-reference/login-response.md) | not scheduled |
 | Enhanced routing (ENVCHANGE 21, routing to a database) is not followed. The test server acknowledged the feature with 0, so enhanced routing was never observed | [Connect › Options](3-reference/connect.md#options) | a server that sends it |
 | Always Encrypted's enclaves run only without attestation. Microsoft Azure Attestation and Host Guardian Service are not built | [Always Encrypted › Enclaves](3-reference/always-encrypted.md#enclaves) | not scheduled |

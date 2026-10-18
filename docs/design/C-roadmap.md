@@ -30,12 +30,31 @@ Phase 3 depends on phase 2. Rust does not depend on completing Python M16.
 - **The Python client is a reference to compare against.** For fixed deterministic inputs and options, both clients must encode the same protocol bodies and read the same semantic response record. Variable session fields, timestamps, nonces and TLS ciphertext require explicitly scoped comparisons.
 - **The live tests run against the same SQL Server container**, with the same scenarios.
 
-**To decide before building:**
-- Where it lives. D-45's layout suggests `clients/rust/`.
-- Its asynchronous runtime, or whether its core stays independent of any runtime, with a shell for each.
-- Its TLS library, which must support ALPN: TDS 8.0 offers `tds/8.0` in the TLS handshake.
-- Whether the shared test data moves to a format that does not depend on a language, such as JSON, read by both test suites.
-- The order of its milestones.
+**Current first slice:** `clients/rust/` contains a runtime-independent core and the approved Tokio shell/in-memory rustls pairing. One persistent connection task, movable channel authority, borrowed responses and conservative abandonment are agreed. Both TDS versions now support verified TLS, independent MARS channels and explicit-return pooling for the current integer/token subset; see the [Rust reading path and evidence](../../clients/rust/README.md).
+
+**Cancellation slice:** explicit awaited Attention/drain, exchange-scoped cancel handles and a separate configurable 5-second cleanup budget are agreed and implemented. Cleanup failure preserves the original cause and discards the connection. Delegated channel close and stale-lifetime isolation are now corrected in both clients; Python additionally has MARS/partial-send evidence.
+
+**Observation slice:** the approved failure policy and one recording per physical
+connection are implemented in both clients. Rust provides initial step/message/
+packet/token observation and credential-redacted JSON-lines recording; four fresh
+Rust recordings replay through Python. Field inspection trees, detailed timings
+and Rust-native replay remain open. Python pools/routing/recovery use recording
+factories; reusing one transport across loans keeps its recording.
+
+**Routing slice:** one-hop routing, a single deadline, destination certificate
+identity and separate recordings are implemented/tested through a local router
+to Docker under both TDS versions × plain/MARS.
+
+**Recovery slice:** the [identity experiment](experiments/recovery-channel-identity.md)
+and shared correction now underpin both clients. Eligible recovery preserves
+logical channels and close permissions, allocates fresh wire ids and retires old
+exchange authority. Rust epoch guards protect replacements from old read/Drop
+controls. Both versions × plain/MARS run against Docker; interrupted requests are
+never replayed. Sixteen Rust physical recordings replay through Python with
+logical row attribution and redaction checked. Broader types/platforms and real
+failover infrastructure remain separate acceptance work.
+
+**Still to decide before affected implementation:** response interfaces beyond the implemented Python-compatible retention subset, exact value representations beyond the first integer/text subset, neutral shared-fixture format, supported Rust/platform floor and later milestone details. The broader connection features remain tracked in the Rust plan.
 
 ## 2 · Conveniences
 
