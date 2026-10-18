@@ -558,6 +558,8 @@ class ConnectionCore:
         self.observation_error: Exception | None = None
         self._on_capture_failure: Callable[[CaptureError], None] = lambda failure: None
         self.set_observe(observe)
+        self._on_session_change: Callable[[Record], None] = lambda change: None
+        self._on_failure: Callable[[BaseException], None] = lambda failure: None
         self.session = SessionState()
         self.server: Record | None = None  # the LOGINACK
         self.features: dict = {}  # the features the server accepted (FEATUREEXTACK), with each one's data
@@ -952,7 +954,8 @@ class ConnectionCore:
         return channel
 
     def exchange(self, channel_id: int, owner: Any, request: Request,
-                 decrypt: Callable | None = None) -> Generator[Action, Any, ResponseReader]:
+                 decrypt: Callable | None = None,
+                 on_complete: Callable | None = None) -> Generator[Action, Any, ResponseReader]:
         """Send one request. Returns the reader that `read` feeds the response to, packet by packet.
 
         A request is sent as it is produced: whole values at once, and each source's pieces as the source yields them
@@ -973,7 +976,7 @@ class ConnectionCore:
             encoded = request.encode(context, self.options.record)  # a whole value that doesn't fit fails here, unsent
             reset, self.reset_pending = self.reset_pending, False
             channel.reader = ResponseReader(self.options.record, lambda change: self._announce(change, request),
-                                            request.metadata, request, {**self.negotiated, "decrypt": decrypt})
+                                            request.metadata, request, {**self.negotiated, "decrypt": decrypt}, on_complete)
             channel.writer = PacketWriter(request.kind, self.link.packet_size, self.options.record,
                                           Status.RESET_SESSION if reset else Status(0))
             yield from self._send_request(request.label, encoded, channel)
@@ -981,7 +984,7 @@ class ConnectionCore:
             raise  # abandoned without cleanup: the channel stays busy, so the connection is never lent again
         except BaseException:
             if self.failure is None:  # failed recording already revoked the whole connection
-                yield from self._undo(channel)
+                yield from self._undo(channel, continues)
             raise
         channel.writer = None
         return channel.reader
@@ -1029,7 +1032,7 @@ class ConnectionCore:
                 yield AwaitWindow(channel.id)
             yield self.link.data(channel, packet)
 
-    def _undo(self, channel: Channel) -> Generator[Action, Any, None]:
+    def _undo(self, channel: Channel, continues: str | None = None) -> Generator[Action, Any, None]:
         """Undo a request that failed or was canceled while being sent, so the channel is free again (D-41).
           nothing sent yet         nothing to undo
           partly sent              the next packet carries IGNORE and LAST. The server runs nothing, and answers
@@ -1037,6 +1040,10 @@ class ConnectionCore:
                                    error 4002 for a call, message 3621 for bulk rows
           all of it sent           Attention, as for any cancel. The response is read to the server's acknowledgement"""
         writer, reader = channel.writer, channel.reader
+        if continues and (writer is None or not writer.started):
+            # Preparation already succeeded on the server. No data was sent,
+            # so the earlier obligation survives and awaited close must drain it.
+            channel.open = continues
         channel.writer = None
         if writer is not None and writer.started and reader is not None:
             if writer.finished:
@@ -1086,6 +1093,7 @@ class ConnectionCore:
             reader.feed(packet.body, packet.last, packet.header)
         except Exception as e:  # malformed, or a value that can't be decoded (such as an unknown collation)
             self.failure = e  # the token stream can't be followed further, so the connection can't continue
+            self._on_failure(e)
             raise
         if reader.ended:
             self._ended(channel)
@@ -1115,7 +1123,12 @@ class ConnectionCore:
         reader = channel.reader
         if reader is None or reader.ended:
             return
-        reader.resume()
+        try:
+            reader.resume()
+        except Exception as failure:
+            self.failure = failure
+            self._on_failure(failure)
+            raise
         if reader.ended:
             self._ended(channel)
             self._show_response(channel, reader)
@@ -1382,6 +1395,7 @@ class ConnectionCore:
             if self.recovery is not None:
                 self.recovery.reset()
         self.session.apply(change)
+        self._on_session_change(change)
         if self.observing:
             self.observe(Event("state", f"session · {change.node.shown if change.node else change.kind.name.lower()}"))
 

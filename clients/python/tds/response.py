@@ -695,7 +695,8 @@ class ResponseReader:
     completion that acknowledges the cancel, which may come in a later message."""
 
     def __init__(self, record: bool, announce: Callable[[Record], None], metadata: tuple = (), request: Any = None,
-                 negotiated: dict | None = None):
+                 negotiated: dict | None = None, on_complete: Callable | None = None):
+        self._on_complete = on_complete
         self.record = record
         self.request = request  # the request this response answers, for errors that name it
         self.timing = Timing()
@@ -758,6 +759,9 @@ class ResponseReader:
     def _timed(self) -> None:
         if self.ended and self.timing.ended is None:
             self.timing.ended = time.perf_counter()
+            callback, self._on_complete = self._on_complete, None
+            if callback is not None:
+                callback()
 
     def _decode(self) -> None:
         last = self._last

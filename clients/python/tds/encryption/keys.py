@@ -125,7 +125,13 @@ class LocalKeyStore:
     def decrypt_column_key(self, key_path: str, algorithm: str, encrypted: bytes) -> bytes:
         if algorithm.upper() != RSA_OAEP:
             raise KeyNotDecrypted(f"{self.name} decrypts column keys encrypted with {RSA_OAEP}, not {algorithm}")
-        return unwrap(encrypted, key_path, self._master_key(key_path), self.backend, self.name)
+        return self._decrypt_with_master(key_path, algorithm, encrypted, self._master_key(key_path))
+
+    def _decrypt_with_master(self, key_path: str, algorithm: str, encrypted: bytes, master) -> bytes:
+        """Driver-owned retention can reuse a loaded master without changing standalone provider behavior."""
+        if algorithm.upper() != RSA_OAEP:
+            raise KeyNotDecrypted(f"{self.name} decrypts column keys encrypted with {RSA_OAEP}, not {algorithm}")
+        return unwrap(encrypted, key_path, master, self.backend, self.name)
 
     def sign_master_key_metadata(self, key_path: str, enclaves: bool = True) -> bytes:
         """The signature for CREATE COLUMN MASTER KEY … ENCLAVE_COMPUTATIONS (SIGNATURE = …)."""

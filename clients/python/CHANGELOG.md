@@ -1,5 +1,32 @@
 # Python client release notes
 
+## Unreleased
+
+Implementing explicit key ownership and lifecycle handling in Rust exposed a
+necessary correction in the Python reference: decrypted keys were shared across
+connections for the lifetime of an Encryption context. Python now provides the
+same agreed transaction, exchange and fixed-age retention choices, with explicit
+connection and pool-lease boundaries. The Rust implementation prompted this
+change; this release delivers the Python implementation.
+
+- Always Encrypted key-cache lookup now compares complete wrapped-key evidence,
+  rather than database-local numeric identifiers alone. Replacing a configured
+  provider or crypto backend retires cached keys. This corrects the synthetic
+  collision discovered during Rust key-policy development.
+- Add transaction (default), exchange and fixed maximum-age key retention, with
+  independent local master/column policies, bounded caches, idle expiry and
+  per-exchange overrides. Keys and statement descriptions belong to one physical
+  connection and exclusive pool lease. Commit/rollback, context changes, pool
+  return, reset, recovery and close enforce the agreed boundaries. A deferred
+  pool reset completes before describing/encrypting application parameters.
+- Overwrite the four owned CellKey buffers on release, expiry and eviction.
+  Python/library temporary copies and provider-owned native secrets remain
+  outside the erasure guarantee. Local RSA objects follow the selected master
+  policy; opaque providers keep control of their private-key operations.
+- Preserve the pending bulk continuation when row production fails before any
+  data packet is sent. Awaited channel close must cancel/drain that preparation;
+  unresolved connections cannot return to the pool or recover.
+
 ## 0.2.0 — 2026-10-18
 
 Developing and independently exercising the Rust client exposed defects and

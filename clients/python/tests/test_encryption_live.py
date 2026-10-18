@@ -336,3 +336,211 @@ def test_a_pool_lends_encrypting_connections(ae):
                     return (await fetch(channel, "SELECT v FROM dbo.t")).result_sets[0].rows
 
     assert run(go()) == ((9,),)
+
+
+# D-66: actual SQL integration of key retention (same four transport modes as Rust).
+from tds.encryption import KeyNotDecrypted, Policies, Policy
+from tds.transactions import Begin, Commit, Rollback, Save
+
+
+@pytest.mark.parametrize("version", ["7.4", "8.0"])
+@pytest.mark.parametrize("mars", [False, True])
+@pytest.mark.parametrize("master,column,expected", [
+    (Policy.transaction(), Policy.transaction(), (1, 1)),
+    (Policy.exchange(), Policy.exchange(), (20, 20)),
+    (Policy.transaction(), Policy.exchange(), (1, 20)),
+    (Policy.exchange(), Policy.transaction(), (1, 1)),
+])
+def test_policy_counts_encrypted_parameters_results_and_transaction_boundaries(ae, version, mars, master, column, expected):
+    options, encryption = ae
+    encryption.policies = Policies(master, column)
+    async def go():
+        async with await encryption.connect(**options, tds_version=version, mars=mars) as connection:
+            async with connection.serial_channel() as channel:
+                await fetch(channel, f"CREATE TABLE dbo.t ({encrypted('v', 'int', 'DETERMINISTIC')})")
+                await fetch(channel, executesql("INSERT dbo.t VALUES (@v)", "@v int", tds.Param("@v", types.int, 7)))
+                connection.keys.invalidate()
+                start = connection.key_statistics
+                await fetch(channel, Begin())
+                for _ in range(20):
+                    answer = await fetch(channel, executesql("SELECT v FROM dbo.t WHERE v=@v", "@v int",
+                                                             tds.Param("@v", types.int, 7)))
+                    assert answer.result_sets[0].rows == ((7,),)
+                end = connection.key_statistics
+                assert (end.master_loads-start.master_loads, end.unwraps-start.unwraps) == expected
+                await fetch(channel, Begin())
+                await fetch(channel, Save("savepoint"))
+                await fetch(channel, Rollback("savepoint"))
+                await fetch(channel, Commit())  # inner commit does not end outer generation
+                assert connection.key_statistics.live_columns == (1 if column.kind == "transaction" else 0)
+                await fetch(channel, Commit())
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 0
+                await fetch(channel, Begin())
+                assert (await fetch(channel, "SELECT v FROM dbo.t")).result_sets[0].rows == ((7,),)
+                await fetch(channel, Rollback())
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 0
+        assert connection.key_statistics.closed
+    run(go())
+
+
+@pytest.mark.parametrize("version", ["7.4", "8.0"])
+@pytest.mark.parametrize("mars", [False, True])
+def test_policy_time_spans_transactions_but_expires_inside_a_long_one(ae, version, mars):
+    options, encryption = ae
+    encryption.policies = Policies(Policy.time(.4), Policy.time(.4))
+    async def go():
+        async with await encryption.connect(**options, tds_version=version, mars=mars) as connection:
+            async with connection.serial_channel() as channel:
+                await fetch(channel, f"CREATE TABLE dbo.t ({encrypted('v', 'int', 'DETERMINISTIC')})")
+                await fetch(channel, Begin())
+                await fetch(channel, executesql("INSERT dbo.t VALUES (@v)", "@v int", tds.Param("@v", types.int, 7)))
+                await fetch(channel, Commit())
+                assert (await fetch(channel, "SELECT v FROM dbo.t")).result_sets[0].rows == ((7,),)
+                assert connection.key_statistics.unwraps == 1
+                await fetch(channel, Begin())
+                await asyncio.sleep(.6)
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 0
+                assert (await fetch(channel, "SELECT v FROM dbo.t")).result_sets[0].rows == ((7,),)
+                assert connection.key_statistics.master_loads == connection.key_statistics.unwraps == 2
+                await fetch(channel, Rollback())
+    run(go())
+
+
+@pytest.mark.parametrize("version", ["7.4", "8.0"])
+@pytest.mark.parametrize("mars", [False, True])
+def test_policy_pool_return_revokes_and_reset_precedes_parameter_preparation(ae, version, mars):
+    options, encryption = ae
+    encryption.policies = Policies(Policy.time(60), Policy.time(60))
+    async def go():
+        async with encryption.pool(**options, size=1, tds_version=version, mars=mars) as pool:
+            async with pool.connection() as first:
+                async with first.serial_channel() as channel:
+                    await fetch(channel, f"CREATE TABLE dbo.t ({encrypted('v', 'int', 'DETERMINISTIC')})")
+                    await fetch(channel, executesql("INSERT dbo.t VALUES (@v)", "@v int", tds.Param("@v", types.int, 7)))
+                    spid = first.session_id
+                    guard = first.keys.exchange()
+                    # A database change invalidates cached keys/plans before return.
+                    await fetch(channel, "USE master")
+                    assert first.key_statistics.live_columns == 0
+            assert first.key_statistics.closed
+            with pytest.raises(KeyNotDecrypted):
+                first.keys.exchange()
+            guard.close()
+            async with pool.connection() as second:
+                assert second.session_id == spid  # same physical connection, fresh lease bank
+                async with second.serial_channel() as channel:
+                    # First application request has encrypted parameters. Its describe
+                    # must happen after reset restored the original database.
+                    answer = await fetch(channel, executesql("SELECT v FROM dbo.t WHERE v=@v", "@v int",
+                                                             tds.Param("@v", types.int, 7)))
+                    assert answer.result_sets[0].rows == ((7,),)
+                    assert second.session.database == DATABASE
+                    assert second.key_statistics.master_loads == second.key_statistics.unwraps == 1
+                    with pytest.raises(KeyNotDecrypted, match="lease has ended"):
+                        await first._ready(channel.channel)
+            assert second.key_statistics.closed
+    run(go())
+
+
+@pytest.mark.parametrize("version", ["7.4", "8.0"])
+@pytest.mark.parametrize("mars", [False, True])
+def test_policy_response_cancel_and_failed_preparation_release_exchange_keys(ae, version, mars):
+    options, encryption = ae
+    encryption.policies = Policies(Policy.exchange(), Policy.exchange())
+    async def go():
+        async with await encryption.connect(**options, tds_version=version, mars=mars) as connection:
+            async with connection.serial_channel() as channel:
+                await fetch(channel, f"CREATE TABLE dbo.t ({encrypted('v', 'int', 'DETERMINISTIC')})")
+                await fetch(channel, executesql("INSERT dbo.t VALUES (@v)", "@v int", tds.Param("@v", types.int, 7)))
+                response = await channel.exchange(tds.Batch("SELECT v FROM dbo.t; RAISERROR ('ready', 0, 1) WITH NOWAIT; "
+                                                               "WAITFOR DELAY '00:00:10'"))
+                result = await anext(aiter(response))
+                assert await anext(aiter(result)) == (7,)
+                assert not response.ended and connection.key_statistics.live_columns == 1
+                await response.close()
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 0
+                with pytest.raises(types.ValueRefused):
+                    await channel.exchange(executesql("INSERT dbo.t VALUES (@v)", "@v int",
+                                                       tds.Param("@v", types.int, "wrong")))
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 0
+                assert not connection.keys._guards
+    run(go())
+
+
+@pytest.mark.parametrize("version", ["7.4", "8.0"])
+@pytest.mark.parametrize("mars", [False, True])
+def test_policy_transport_loss_revokes_and_recovery_gets_a_fresh_bank(ae, version, mars):
+    from test_session_recovery_live import Relay
+    options, encryption = ae
+    encryption.policies = Policies(Policy.time(60), Policy.time(60))
+    async def go():
+        async with asyncio.timeout(20), Relay(options) as relay, await encryption.connect(
+                **{**options, "port": relay.port}, tds_version=version, mars=mars) as connection:
+            async with connection.serial_channel() as channel:
+                await fetch(channel, f"CREATE TABLE dbo.t ({encrypted('v', 'int', 'DETERMINISTIC')})")
+                await fetch(channel, executesql("INSERT dbo.t VALUES (@v)", "@v int", tds.Param("@v", types.int, 7)))
+                old = connection.keys
+                assert old.statistics.live_columns == 1
+                relay.cut()
+                await connection.connection._reading
+                assert old.statistics.closed and old.statistics.live_columns == old.statistics.live_masters == 0
+                answer = await fetch(channel, executesql("SELECT v FROM dbo.t WHERE v=@v", "@v int",
+                                                         tds.Param("@v", types.int, 7)))
+                assert answer.result_sets[0].rows == ((7,),)
+                assert connection.recoveries == 1 and connection.keys is not old
+                assert connection.key_statistics.master_loads == connection.key_statistics.unwraps == 1
+    run(go())
+
+
+@pytest.mark.parametrize("version", ["7.4", "8.0"])
+@pytest.mark.parametrize("mars", [False, True])
+def test_policy_streamed_bulk_failure_and_channel_close_release_keys(ae, version, mars):
+    options, encryption = ae
+    encryption.policies = Policies(Policy.exchange(), Policy.exchange())
+    async def go():
+        async with await encryption.connect(**options, tds_version=version, mars=mars) as connection:
+            async with connection.serial_channel() as channel:
+                await fetch(channel, f"CREATE TABLE dbo.t ({encrypted('v', 'int', 'DETERMINISTIC')})")
+                columns = (await fetch(channel, "SELECT TOP 0 v FROM dbo.t")).result_sets[0].columns
+                await fetch(channel, tds.BulkInsert(f"INSERT BULK dbo.t (v {columns[0].type.cipher})"))
+                async def rows():
+                    yield (7,)
+                    assert connection.key_statistics.live_columns == 1
+                    raise RuntimeError("source stopped deliberately")
+                with pytest.raises(RuntimeError, match="source stopped deliberately"):
+                    await channel.exchange(tds.BulkRows(columns, rows()))
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 0
+                assert not connection.keys._guards
+                assert connection._core.link.channels[channel.id].open == "bulk load"
+                await channel.close()  # no data packet was sent; preparation still needs Attention
+            async with connection.serial_channel() as channel:
+                await fetch(channel, executesql("INSERT dbo.t VALUES (@v)", "@v int", tds.Param("@v", types.int, 7)))
+                response = await channel.exchange(tds.Batch("SELECT v FROM dbo.t; RAISERROR ('ready', 0, 1) "
+                                                           "WITH NOWAIT; WAITFOR DELAY '00:00:10'"))
+                result = await anext(aiter(response))
+                assert await anext(aiter(result)) == (7,)
+                assert not response.ended and connection.key_statistics.live_columns == 1
+                await channel.close()  # private drainer must invoke terminal callback too
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 0
+                assert not connection.keys._guards
+    run(go())
+
+
+@pytest.mark.parametrize("version", ["7.4", "8.0"])
+@pytest.mark.parametrize("mars", [False, True])
+def test_policy_strict_exchange_override_leaves_broader_time_entries_separate(ae, version, mars):
+    options, encryption = ae
+    encryption.policies = Policies(Policy.time(60), Policy.time(60))
+    async def go():
+        async with await encryption.connect(**options, tds_version=version, mars=mars) as connection:
+            async with connection.serial_channel() as channel:
+                await fetch(channel, f"CREATE TABLE dbo.t ({encrypted('v', 'int', 'DETERMINISTIC')})")
+                await fetch(channel, executesql("INSERT dbo.t VALUES (@v)", "@v int", tds.Param("@v", types.int, 7)))
+                request = executesql("SELECT v FROM dbo.t WHERE v=@v", "@v int", tds.Param("@v", types.int, 7))
+                async with await channel.exchange(request, policies=Policies(Policy.exchange(), Policy.exchange())) as response:
+                    assert (await response.fetch()).result_sets[0].rows == ((7,),)
+                assert connection.key_statistics.master_loads == connection.key_statistics.unwraps == 2
+                assert connection.key_statistics.live_columns == connection.key_statistics.live_masters == 1
+                assert (await fetch(channel, request)).result_sets[0].rows == ((7,),)
+                assert connection.key_statistics.unwraps == 2  # broader bank was neither borrowed nor replaced
+    run(go())

@@ -1,8 +1,8 @@
 """Always Encrypted over a connection: the shared context, and the connections and serial channels it wraps (D-60).
 
-An Encryption holds the key stores, the column keys they have decrypted, and what describing each statement found.
-It opens connections (and pools) whose login asks for column encryption, or wraps a connection already opened that
-way. Their serial channels do what Always Encrypted needs around each exchange:
+An Encryption holds provider bindings and default retention policies. Each connection lease owns its key bank,
+statement descriptions and enclave sessions. Encryption opens connections (and pools) whose login asks for column
+encryption, or wraps a connection already opened that way. Their serial channels do what Always Encrypted needs around each exchange:
 
   a call with parameters    First, a separate exchange: sp_describe_parameter_encryption says which parameters go
                             into encrypted columns, with which column key, and how. Each of those parameters is
@@ -19,7 +19,10 @@ Everything else belongs to the connection: requests, responses, observability, r
 errors arrive as they would without encryption.
 """
 
+import asyncio
 import contextlib
+import copy
+import weakref
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -29,12 +32,14 @@ from ..connection.shell import Connection, Pool, SerialChannel, connect
 from ..login7 import DEFAULT_FEATURES, Feature
 from ..requests import Builtin, BulkRows, Call, Calls, CipherInfo, Param
 from ..response import Error, ServerError
+from ..tokens import EnvKind, TRANSACTION_KINDS
 from ..types import Character, ColumnKey, Collation, Encrypted, EncryptionType, MasterKeyValue, ValueRefused, is_source
 from .backend import Backend, CryptographyBackend
 from . import enclave
 from .cell import ALGORITHM, CellKey, DecryptionFailed
 from .keys import KeyNotDecrypted, KeyStore
 from .normalize import VERSION, denormalize, normalize
+from .policy import KeySession, Policies
 
 DESCRIBE = "sp_describe_parameter_encryption"
 REFUSED_AS_STALE = (206, 33514, 33195)  # errors that refuse a call encrypted with information no longer valid.
@@ -71,17 +76,18 @@ class _Encrypting:
 
 
 class Encryption:
-    """Always Encrypted's keys and kept answers, shared by every connection that it opens or wraps (D-60).
+    """Always Encrypted providers and default policies, shared by the connections it opens/wraps (D-60, D-66).
 
         encryption = Encryption([LocalKeyStore("keys")])
         async with await encryption.connect(host, port, user=…, password=…) as connection: …
         async with encryption.pool(host, port, user=…, password=…) as pool: …
         encrypted = encryption.wrap(connection)       # a connection opened with Feature.COLUMN_ENCRYPTION
 
-    Column keys, once decrypted, are kept for as long as the Encryption exists."""
+    Keys belong to each connection lease; transaction retention is the default.
+    Outside a transaction the default retains them only through the exchange."""
 
     def __init__(self, key_stores: Iterable[KeyStore], backend: Backend | None = None,
-                 enclave_attestation: str | None = None):
+                 enclave_attestation: str | None = None, *, policies: Policies | None = None):
         """`enclave_attestation`: use the server's enclave, attested this way. Only "none" is built. It is for Azure
         SQL Database's VBS enclaves without attestation, and it trusts the server to run a real enclave (enclave.py)."""
         if enclave_attestation not in (None, "none"):
@@ -90,7 +96,9 @@ class Encryption:
         self.key_stores = {store.name.upper(): store for store in key_stores}
         self.backend = backend or CryptographyBackend()
         self.enclave_attestation = enclave_attestation
-        self._keys: dict[tuple, CellKey] = {}  # by database, key id, version and metadata version
+        self.policies = Policies() if policies is None else policies
+        if not isinstance(self.policies, Policies):
+            raise TypeError("policies must be Policies")
         self._plans: dict[tuple, _Described] = {}  # by statement and declarations
         self._sessions: dict[str, enclave.EnclaveSession] = {}  # the enclave sessions made, by server
 
@@ -120,11 +128,14 @@ class Encryption:
 
     # ----------------------------------------------------------------------- keys
 
-    def cell_key(self, key: ColumnKey) -> CellKey:
-        """The column key, decrypted by the first of its master keys that one of these key stores holds."""
-        found = self._keys.get(id_ := (key.database_id, key.key_id, key.version, key.metadata_version))
-        if found is not None:
-            return found
+    def key_session(self, policies: Policies | None = None) -> KeySession:
+        """Standalone explicit lifetime. Connections create their own lease-local session."""
+        return KeySession(self, policies)
+
+    def cell_key(self, key: ColumnKey, *, exchange=None) -> CellKey:
+        """A column key. Without an exchange this is uncached; the caller owns/should close it."""
+        if exchange is not None:
+            return exchange.cell_key(key)
         failures = []
         for value in key.values:
             store = self.key_stores.get(value.key_store.upper())
@@ -136,15 +147,24 @@ class Encryption:
             except (KeyNotDecrypted, ValueError) as e:
                 failures.append(str(e))
                 continue
-            self._keys[id_] = found
             return found
         held = ", ".join(self.key_stores) or "none"
         raise KeyNotDecrypted(f"column key {key.key_id} (version {key.version}) of database {key.database_id} can't be "
                               f"decrypted: {'; '.join(failures)}. The key stores here: {held}")
 
+    @contextlib.contextmanager
+    def _using_key(self, key, exchange):
+        cell = self.cell_key(key, exchange=exchange)
+        try:
+            yield cell
+        finally:
+            if exchange is None:
+                cell.close()
+
     # ----------------------------------------------------------------------- values
 
-    def decrypt(self, encrypted: Encrypted, ciphertext: bytes, plan: dict[str, _Encrypting] | None = None) -> Any:
+    def decrypt(self, encrypted: Encrypted, ciphertext: bytes, plan: dict[str, _Encrypting] | None = None,
+                *, exchange=None) -> Any:
         """The decrypted value. The core's decrypt hook calls this with the plan of the call being answered."""
         if encrypted.algorithm != ALGORITHM_ID:
             raise DecryptionFailed(f"{encrypted.algorithm_label} isn't an algorithm this driver has: only {ALGORITHM}")
@@ -158,19 +178,21 @@ class Encryption:
                 raise DecryptionFailed(f"output parameter {encrypted.parameter} is encrypted, but its call's "
                                        "describing didn't name its column key")
             key = planned.key
-        return denormalize(encrypted.base, self.cell_key(key).decrypt(ciphertext))
+        with self._using_key(key, exchange) as cell:
+            return denormalize(encrypted.base, cell.decrypt(ciphertext))
 
-    def encrypt_value(self, column: Encrypted, value: Any) -> bytes | None:
+    def encrypt_value(self, column: Encrypted, value: Any, *, exchange=None) -> bytes | None:
         """A value for an encrypted column, as bulk data carries it: its ciphertext, with the column's key."""
         if value is None:
             return None
         if column.algorithm != ALGORITHM_ID:
             raise ValueRefused(f"the column is encrypted with {column.algorithm_label}; this driver has only {ALGORITHM}")
         collation = column.base.collation if isinstance(column.base, Character) else None
-        return self.cell_key(column.key).encrypt(normalize(column.base, value, collation),
-                                                 column.encryption_type == EncryptionType.DETERMINISTIC)
+        with self._using_key(column.key, exchange) as cell:
+            return cell.encrypt(normalize(column.base, value, collation),
+                                column.encryption_type == EncryptionType.DETERMINISTIC)
 
-    def encrypt(self, param: Param, how: _Encrypting, collation: Collation | None) -> Param:
+    def encrypt(self, param: Param, how: _Encrypting, collation: Collation | None, *, exchange=None) -> Param:
         """A parameter, as its encrypted column takes it: varbinary ciphertext, with its cipher info."""
         if how.algorithm != ALGORITHM_ID:
             raise ValueRefused(f"parameter {param.name} goes into a column encrypted with algorithm {how.algorithm}; "
@@ -179,8 +201,9 @@ class Encryption:
                             how.key.metadata_version, how.algorithm, None, how.normalization)
         if param.value is None:
             return Param(param.name, types.varbinary(8000), None, param.output, cipher)
-        ciphertext = self.cell_key(how.key).encrypt(normalize(param.type, param.value, collation),
-                                                    how.encryption_type == EncryptionType.DETERMINISTIC)
+        with self._using_key(how.key, exchange) as cell:
+            ciphertext = cell.encrypt(normalize(param.type, param.value, collation),
+                                      how.encryption_type == EncryptionType.DETERMINISTIC)
         sent = types.varbinary(types.MAX) if param.output or len(ciphertext) > 8000 else types.varbinary(len(ciphertext))
         return Param(param.name, sent, ciphertext, param.output, cipher)
 
@@ -190,7 +213,9 @@ class Encryption:
         """Drop a kept answer and the server's enclave session, because the server refused a call made with them."""
         self._plans.pop((statement, declarations), None)
         if server is not None:
-            self._sessions.pop(server, None)
+            session = self._sessions.pop(server, None)
+            if session is not None:
+                session.key.close()
 
     async def plan(self, channel: SerialChannel, statement: str, declarations: str,
                    server: str | None = None) -> tuple[_Described, bool]:
@@ -231,7 +256,7 @@ class Encryption:
         self._plans[id_] = answer
         return answer, False
 
-    def enclave_package(self, server: str, statement: str, needed: dict) -> bytes:
+    def enclave_package(self, server: str, statement: str, needed: dict, *, exchange=None) -> bytes:
         """The enclave package for a call, with the column keys that the enclave asked for. A key is sent only if its
         master key's signature allows its keys to go to an enclave. SqlClient checks this too. Without the check, a
         server could ask for any key."""
@@ -239,6 +264,10 @@ class Encryption:
         if session is None:
             raise DecryptionFailed("the statement needs the server's enclave, but no session with it was made: "
                                    "describing it returned no attestation info")
+        with contextlib.ExitStack() as stack:
+            return self._enclave_keys(session, statement, needed, exchange, stack)
+
+    def _enclave_keys(self, session, statement, needed, exchange, stack):
         sent = []
         for key, masters in needed.values():
             allowed = any(self.key_stores.get(m.key_store.upper()) is not None and
@@ -248,7 +277,12 @@ class Encryption:
                 raise KeyNotDecrypted(f"column key {key.key_id} of database {key.database_id} would go to the server's "
                                       "enclave, but no master key holding it signs that it allows enclave computations "
                                       "(CREATE COLUMN MASTER KEY … ENCLAVE_COMPUTATIONS (SIGNATURE = …))")
-            sent.append((key.database_id, key.metadata_version, key.key_id, self.cell_key(key).root))
+            cell = stack.enter_context(self._using_key(key, exchange))
+            # Cache eviction while collecting several keys must not zero an
+            # earlier package input. Own a temporary mutable copy until packaged.
+            root = bytearray(cell.root)
+            stack.callback(lambda root=root: root.__setitem__(slice(None), bytes(len(root))))
+            sent.append((key.database_id, key.metadata_version, key.key_id, root))
         return session.package(statement, sent)
 
 
@@ -275,7 +309,71 @@ class EncryptedConnection:
     to the wrapped connection. `connection` is that connection, and its attributes can be read through this object."""
 
     def __init__(self, encryption: Encryption, connection: Connection):
+        existing = getattr(connection, "_encrypted_wrapper", None)
+        if existing is not None and existing() is not None and not existing()._returned:
+            raise EncryptionNotAgreed("this connection already has an encryption wrapper for its current lease")
         self.encryption, self.connection = encryption, connection
+        self._context = copy.copy(encryption)
+        self._context._plans, self._context._sessions = {}, {}
+        self._core = connection._core
+        self._returned = False
+        self.keys = encryption.key_session()
+        if connection.session.transaction:
+            self.keys.transaction_begin(connection.session.transaction)
+        connection._encrypted_wrapper = weakref.ref(self)
+        # The physical connection owns its extension until return/close. A live
+        # response must still be revoked even if the application drops its facade.
+        connection._lifecycle = self._lifecycle
+
+    def _clear_metadata(self):
+        self._context._plans.clear()
+        for session in self._context._sessions.values():
+            session.key.close()
+        self._context._sessions.clear()
+
+    def _lifecycle(self, event, change):
+        if event != "session":
+            self.keys.close()
+            self._clear_metadata()
+            if event in ("pool_return", "close"):
+                self._returned = True
+            return
+        if change.kind in TRANSACTION_KINDS:
+            if self.connection.session.transaction:
+                self.keys.transaction_begin(self.connection.session.transaction)
+            else:
+                self.keys.transaction_end()
+        elif change.kind in (EnvKind.DATABASE, EnvKind.COLLATION, EnvKind.RESET_COMPLETE):
+            self.keys.invalidate()
+            self._clear_metadata()
+
+    async def _ready(self, channel):
+        if self._returned:
+            raise KeyNotDecrypted("the encrypted connection lease has ended")
+        raw = self.connection
+        if not raw.alive and raw._core.broken_while_idle:
+            await raw.recover()
+        if self._core is not raw._core:
+            self.keys.close()
+            self.keys = self.encryption.key_session()
+            self._core = raw._core
+            self._clear_metadata()
+            if raw.session.transaction:
+                self.keys.transaction_begin(raw.session.transaction)
+        self.keys._check_open()
+        raw._core.exchange_channel(channel.id, asyncio.current_task())
+        # Deferred pool reset must restore database/collation BEFORE describing
+        # or encrypting parameters. No key guard is acquired for this empty batch.
+        if raw._core.reset_pending:
+            from ..requests import Batch
+            async with await channel.exchange(Batch("")) as response:
+                await response.finish()
+        self._context.key_stores = self.encryption.key_stores
+        self._context.backend = self.encryption.backend
+
+    @property
+    def key_statistics(self):
+        return self.keys.statistics
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.connection, name)
@@ -300,28 +398,37 @@ class EncryptedSerialChannel:
         self.connection, self.channel = connection, channel
         self.id = channel.id
 
-    async def exchange(self, request: Any):
-        """The request, encrypted as its columns need, and its response, decrypted as it is read. If the server refuses
-        a call encrypted by a kept answer before running it (REFUSED_AS_STALE), the call is described again and sent
-        once more. The refused call ran nothing, so nothing runs twice."""
-        encryption = self.connection.encryption
+    async def exchange(self, request: Any, *, policies: Policies | None = None):
+        """Prepare, send and decrypt under one guard, released at terminal response completion.
+
+        The optional policies override applies only to this exchange. Exact scope
+        matching prevents a stricter override from borrowing broader cached keys.
+        """
+        await self.connection._ready(self.channel)
+        encryption = self.connection._context
         for attempt in (1, 2):
-            plan: dict[str, _Encrypting] = {}
-            kept: list[tuple[str, str]] = []  # the statements encrypted by a kept answer, or with an enclave session
-            sent = await self._prepared(request, plan, kept)
-            response = await self.channel.exchange(sent, decrypt=lambda encrypted, ciphertext, plan=plan:
-                                                   encryption.decrypt(encrypted, ciphertext, plan))
-            if not kept or attempt == 2:
-                return response
-            first = await response.peek()
-            if not (isinstance(first, Error) and first.number in REFUSED_AS_STALE):
-                return response
-            with contextlib.suppress(ServerError):
-                await response.finish()  # read the refusal to its end, so that the channel is free again
-            for statement, declarations in kept:
-                encryption.forget(statement, declarations, self._server())
-            self._show(f"the server refused {request}, encrypted by an earlier describing (error {first.number}: "
-                       f"{first.text[:120]}): describing it again, and sending it once more")
+            guard = self.connection.keys.exchange(policies)
+            try:
+                plan: dict[str, _Encrypting] = {}
+                kept: list[tuple[str, str]] = []
+                sent = await self._prepared(request, plan, kept, guard)
+                response = await self.channel.exchange(sent, decrypt=lambda encrypted, ciphertext, plan=plan, guard=guard:
+                                                       encryption.decrypt(encrypted, ciphertext, plan, exchange=guard),
+                                                       on_complete=guard.close)
+                if not kept or attempt == 2:
+                    return response
+                first = await response.peek()
+                if not (isinstance(first, Error) and first.number in REFUSED_AS_STALE):
+                    return response
+                with contextlib.suppress(ServerError):
+                    await response.finish()
+                for statement, declarations in kept:
+                    encryption.forget(statement, declarations, self._server())
+                self._show(f"the server refused {request}, encrypted by an earlier describing (error {first.number}: "
+                           f"{first.text[:120]}): describing it again, and sending it once more")
+            except BaseException:
+                guard.close()
+                raise
 
     def _server(self) -> str | None:
         """The server whose enclave this connection uses, if its login agreed to enclaves. The enclave session is kept
@@ -336,21 +443,21 @@ class EncryptedSerialChannel:
         if core.observing:
             core.observe(Event("encryption", text))
 
-    async def _prepared(self, request: Any, plan: dict, kept: list) -> Any:
+    async def _prepared(self, request: Any, plan: dict, kept: list, guard) -> Any:
         if isinstance(request, Call):
-            return await self._encrypted(request, plan, kept)
+            return await self._encrypted(request, plan, kept, guard)
         if isinstance(request, Calls):
-            return Calls(*[await self._encrypted(call, plan, kept) for call in request.calls])
+            return Calls(*[await self._encrypted(call, plan, kept, guard) for call in request.calls])
         if isinstance(request, BulkRows):
-            return self._bulk(request)
+            return self._bulk(request, guard)
         return request
 
-    def _bulk(self, request: BulkRows) -> BulkRows:
+    def _bulk(self, request: BulkRows, guard) -> BulkRows:
         """Bulk data whose encrypted columns' values are encrypted, row by row, as the rows are sent."""
         columns = request.columns
         if not any(isinstance(c.type, Encrypted) for c in columns):
             return request
-        encryption = self.connection.encryption
+        encryption = self.connection._context
 
         def encrypted(n: int, row: Any) -> Any:
             if not isinstance(row, (tuple, list)) or len(row) != len(columns):
@@ -358,7 +465,7 @@ class EncryptedSerialChannel:
             out = []
             for i, (column, value) in enumerate(zip(columns, row), 1):
                 try:
-                    out.append(encryption.encrypt_value(column.type, value) if isinstance(column.type, Encrypted)
+                    out.append(encryption.encrypt_value(column.type, value, exchange=guard) if isinstance(column.type, Encrypted)
                                else value)
                 except ValueRefused as e:
                     e.within(f"column {column.name or i} ({column.type})")
@@ -377,13 +484,13 @@ class EncryptedSerialChannel:
             return BulkRows(columns, produced())
         return BulkRows(columns, [encrypted(n, row) for n, row in enumerate(rows, 1)])
 
-    async def _encrypted(self, call: Call, plan: dict, kept: list) -> Call:
+    async def _encrypted(self, call: Call, plan: dict, kept: list, guard) -> Call:
         described = _statement(call)
         if described is None:
             return call
         statement, declarations, params = described
         server = self._server()
-        answer, was_kept = await self.connection.encryption.plan(self.channel, statement, declarations, server)
+        answer, was_kept = await self.connection._context.plan(self.channel, statement, declarations, server)
         found = answer.params
         if was_kept or answer.enclave:
             kept.append((statement, declarations))
@@ -394,14 +501,14 @@ class EncryptedSerialChannel:
         if answer.enclave:  # the statement needs the enclave: its keys go with the call
             query = call.params[0].value if call.target == Builtin.SP_EXECUTESQL else (
                 Builtin(call.target).name.lower() if isinstance(call.target, Builtin) else call.target)
-            package = self.connection.encryption.enclave_package(server, query, answer.enclave)
+            package = self.connection._context.enclave_package(server, query, answer.enclave, exchange=guard)
         session = self.connection.connection.session.collation
         collation = Collation(session) if session else None
         encrypted = []
         for name, param in params:
             how = found.get(name.lower())
             try:
-                encrypted.append(self.connection.encryption.encrypt(param, how, collation) if how else param)
+                encrypted.append(self.connection._context.encrypt(param, how, collation, exchange=guard) if how else param)
             except ValueRefused as e:
                 e.within(f"parameter {param.name} ({param.type}, encrypted)")
                 e.within(str(call))
@@ -432,7 +539,11 @@ class EncryptedPool:
     @contextlib.asynccontextmanager
     async def connection(self):
         async with self.pool.connection() as connection:
-            yield self.encryption.wrap(connection)
+            wrapped = self.encryption.wrap(connection)
+            try:
+                yield wrapped
+            finally:
+                wrapped._lifecycle("pool_return", None)
 
     async def close(self) -> None:
         await self.pool.close()

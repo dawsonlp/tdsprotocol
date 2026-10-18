@@ -17,7 +17,8 @@ cryptography library provides).
 from .backend import Backend, CryptographyBackend
 from .cell import DecryptionFailed
 from .context import EncryptedConnection, EncryptedPool, EncryptedSerialChannel, Encryption, EncryptionNotAgreed
+from .policy import KeyExchange, KeySession, Policies, Policy, Statistics
 from .keys import KeyNotDecrypted, KeyStore, LocalKeyStore
 
 __all__ = ["Encryption", "EncryptedConnection", "EncryptedSerialChannel", "EncryptedPool", "EncryptionNotAgreed",
-           "KeyStore", "LocalKeyStore", "KeyNotDecrypted", "DecryptionFailed", "Backend", "CryptographyBackend"]
+           "KeySession", "KeyExchange", "Policy", "Policies", "Statistics", "KeyStore", "LocalKeyStore", "KeyNotDecrypted", "DecryptionFailed", "Backend", "CryptographyBackend"]
