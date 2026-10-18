@@ -117,6 +117,65 @@ pub fn check_reply_with_mars(bytes: &[u8], strict: bool, mars: bool) -> Result<(
     Ok(())
 }
 
+/// Read the PRELOGIN directory without imposing a live negotiation policy.
+pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<(u8, Vec<u8>)>> {
+    let mut entries = vec![];
+    while r.peek() != Some(0xff) {
+        entries.push(r.indexed("option", entries.len() + 1, |r| {
+            Ok((
+                r.field("tag", |r| r.u8())?,
+                usize::from(r.field("offset", |r| r.be16())?),
+                usize::from(r.field("length", |r| r.be16())?),
+            ))
+        })?);
+    }
+    r.field("terminator", |r| r.u8())?;
+    let mut ranges = entries
+        .iter()
+        .map(|(_, at, n)| (*at, at + n))
+        .collect::<Vec<_>>();
+    ranges.sort_unstable();
+    if ranges.windows(2).any(|p| p[0].1 > p[1].0) {
+        return Err(Error::malformed(r.offset, "PRELOGIN overlapping options"));
+    }
+    let mut result = vec![];
+    for (tag, at, n) in entries {
+        if at < r.offset || result.iter().any(|(t, _)| *t == tag) {
+            return Err(Error::malformed(at, "PRELOGIN option offset/duplicate"));
+        }
+        let label = match tag {
+            0 => "version",
+            1 => "encryption",
+            2 => "instance",
+            3 => "thread id",
+            4 => "mars",
+            _ => "option data",
+        };
+        let data = r.at(at, label, |r| {
+            match (tag, n) {
+                (0, 6) => {
+                    r.field("major", |r| r.u8())?;
+                    r.field("minor", |r| r.u8())?;
+                    r.field("build", |r| r.be16())?;
+                    r.field("sub build", |r| r.u16())?;
+                }
+                (1 | 4, 1) => {
+                    r.field("value", |r| r.u8())?;
+                }
+                (3, 4) => {
+                    r.field("value", |r| r.u32())?;
+                }
+                _ => {
+                    r.take(n)?;
+                }
+            }
+            Ok(r.bytes()[at..r.offset].to_vec())
+        })?;
+        result.push((tag, data));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

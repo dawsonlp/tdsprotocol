@@ -425,8 +425,17 @@ async fn run(args: Args) -> Result<()> {
     if args.observe != Level::Off {
         options.observe = Some(Observer::new(args.observe, |event| {
             eprintln!("{:>8.3}s {}", event.elapsed.as_secs_f64(), event.text);
+            if let Some(timing) = event.timing {
+                let summary = timing.summary();
+                if !summary.is_empty() {
+                    eprintln!("           {summary}");
+                }
+            }
             if let Some(inspection) = &event.inspection {
-                eprintln!("  {inspection:?}");
+                eprintln!("{}", inspection.render());
+            }
+            for node in &event.fields {
+                eprintln!("{}", node.render());
             }
             Ok(())
         }));

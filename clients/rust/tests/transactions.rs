@@ -49,6 +49,7 @@ fn transaction_messages_match_python_exactly_and_refuse_unencodable_inputs() {
         serde_json::from_str(include_str!("fixtures/transactions/python.json")).unwrap();
     for (i, case) in cases.as_array().unwrap().iter().enumerate() {
         let context = Context {
+            column_encryption: false,
             transaction: case["transaction"].as_u64().unwrap(),
             outstanding: case["outstanding"].as_u64().unwrap() as u32,
         };
@@ -59,6 +60,7 @@ fn transaction_messages_match_python_exactly_and_refuse_unencodable_inputs() {
         assert_eq!(encoded.body, hex(case["body"].as_str().unwrap()));
     }
     let context = Context {
+        column_encryption: false,
         transaction: 0,
         outstanding: 1,
     };

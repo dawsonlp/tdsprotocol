@@ -95,6 +95,7 @@ async fn structured_iteration_streams_rows_and_advancing_sets_discards_unread_ro
             legacy: None,
             clr_assembly: None,
             json_utf8: false,
+            encryption: None,
         },
         name: "v".into(),
     }];

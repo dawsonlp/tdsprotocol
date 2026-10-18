@@ -13,7 +13,10 @@ pub mod browser;
 pub mod capture;
 pub mod config;
 pub mod connection;
+#[cfg(feature = "encryption")]
+pub mod encryption;
 pub mod error;
+pub mod inspection;
 pub mod large;
 pub mod login7;
 pub mod mars;
@@ -53,7 +56,7 @@ pub use requests::{
     RowSource, Sort, Source, SourceRead, StreamedCall, StreamedCalls, TableColumn, TableType,
 };
 pub use response::{
-    FetchedResponse, Item, ProcedureReturn, ResultSet, Row, RowsNotAvailable, Unread,
+    FetchedResponse, Item, ProcedureReturn, ResultSet, Row, RowsNotAvailable, Timing, Unread,
 };
 pub use tokens::{OutputValue, Record, SqlText};
 

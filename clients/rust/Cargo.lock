@@ -351,6 +351,7 @@ dependencies = [
 name = "tds-client"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "base64",
  "hostname",
  "rustls",
@@ -358,6 +359,7 @@ dependencies = [
  "serde_json",
  "time",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]

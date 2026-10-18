@@ -4,8 +4,8 @@ Observed locally through 2026-10-18, branch `rust-client`. This is a development
 not a release or a claim of Python connection-package parity.
 
 The check table is current. The sections below retain earlier checkpoints;
-[interrupted I/O acceptance](#interrupted-io-acceptance)
-records the latest scope and shared corrections.
+[transparent Always Encrypted](#transparent-always-encrypted) is the latest
+checkpoint; the key-policy and earlier completion sections are historical.
 
 ## Environment
 
@@ -30,13 +30,17 @@ Run from `clients/rust/`:
 
 | Command | Evidence |
 |---|---|
-| `cargo test --offline` | 190 checks pass, including 15 deterministic interruption tests and 11 rustdoc checks; 56 Docker tests are explicitly ignored in the ordinary run |
-| `cargo test --offline --tests -- --ignored --test-threads=1` | All 56 live test functions pass, each exercising its documented protocol/framing or feature matrix |
-| `cargo test --no-default-features --offline` | 73 checks pass, including 4 rustdoc checks; the shell/executable are excluded |
+| `cargo test --offline --all-features` | 240 pass; includes transparent SQL normalization/fault/capture tests and 3 core encrypted-wire tests; 61 live tests explicitly ignored |
+| `cargo test --offline --all-features --tests -- --ignored --test-threads=1` | All 61 live functions pass, including independent .NET and the transparent AE lifecycle matrix under 7.4/8.0 × plain/MARS |
+| `cargo test --offline` | 209 checks pass, including 3 encrypted-wire tests without the crypto feature; 57 Docker tests explicitly ignored |
+| `cargo test --offline --tests -- --ignored --test-threads=1` | All 57 live test functions pass, each exercising its documented protocol/framing or feature matrix |
+| `cargo test --no-default-features --offline` | 90 checks pass, including 3 encrypted-wire tests and 4 rustdoc checks; shell/executable excluded |
 | `cargo fmt --all -- --check` | Pass |
 | `cargo clippy --offline --all-targets -- -D warnings` | Pass, zero warnings |
+| `cargo clippy --offline --all-features --all-targets -- -D warnings` | Pass, zero warnings, including key service and release cost example |
 | `cargo clippy --offline --no-default-features --all-targets -- -D warnings` | Pass, zero warnings |
 | `cargo doc --offline --no-deps` | Pass |
+| `cargo doc --offline --all-features --no-deps` | Pass, including public key-service API |
 | `cargo build --offline --bin tds` | Pass; runnable debug binary |
 
 These results do not assert a minimum Rust version or any other
@@ -1042,3 +1046,187 @@ saturation, every successful credit-update schedule, every handshake/recovery
 write boundary, all type/TVP combinations, other native platforms and remote
 failover remain outside this evidence. Memory, latency and throughput were not
 measured. Field inspection trees and timing detail remain separate work.
+
+## Connection/scalar-query field inspection
+
+Approved slice, implemented 2026-10-18. [Design L](../../docs/design/L-rust-field-inspection.md)
+defines the representation, delivery, exact coverage and limits. Definition-owned
+field readers now supply names, packet/message/token-relative ranges, bounded
+raw evidence, decoded displays and protocol reference paths. Live Full events
+carry `fields`; `replay_with_inspection` emits the same nodes from saved packets.
+The default replay API and Outline/Off build no trees. Healthy Outline/Full
+lines, observer/recording failure policies and capture JSONL are unchanged.
+
+Coverage: packet headers, PRELOGIN, selected LOGIN7 identity/options, SQL batches,
+LOGINACK, INFO/ERROR, COLMETADATA/scalar cells in ROW/NBCROW, and completions.
+The CLI renders readable trees with bounded hex previews. Credential packet
+headers retain only eight bytes; LOGIN7 trees retain no aggregate payload and
+mask password/new-password/SSPI spans even for keep-password recordings.
+
+Five new pure tests exercise nine independently generated Python inspection
+cases, byte ranges/raw values, one-byte token fragments, malformed bounded-token
+prefixes, disabled inspection, bounded raw/display retention, credential spans
+across saved packets, replay diagnostic parity, and zero-width NBCROW NULL cells.
+The actual offline CLI test now asserts ranges and reference paths in Full output.
+
+A controlled verified-TLS peer fragments every response payload byte into its
+own TDS packet and compares live/replayed trees in all four 7.4/8.0 × non-MARS/MARS
+modes. A new SQL Server test records and compares actual login, INFO, scalar/NULL/
+Unicode rows, metadata and completion trees in the same modes. The server chose
+valid ROW framing in the initial check; the test accepts ROW or NBCROW and checks
+the actual observed trees. Deterministic NBCROW coverage is separate.
+
+Two findings were resolved:
+
+- Python's LOGIN7 inspection fixture exposed an existing Rust offline identity
+  reader defect: it used big-endian for the TDS version. The shared reader now
+  uses little-endian; the sender was already correct. LOGINACK remains big-endian.
+  No Python correction was indicated.
+- The previous iteration's MARS blocked-write failure test could count zero raw
+  tail bytes because its first TLS read had already buffered the later five-byte
+  prefix. A one-shot checkpoint now proves that the first sibling request was
+  consumed before the second write begins. This fixes test measurement, without
+  changing production lifecycle policy.
+
+Fresh verification:
+
+```sh
+PYTHONPATH=clients/python clients/python/.venv/bin/python tools/generate_rust_inspection.py
+cargo test --offline --manifest-path clients/rust/Cargo.toml
+cargo test --offline --manifest-path clients/rust/Cargo.toml --no-default-features
+cargo test --offline --manifest-path clients/rust/Cargo.toml --tests -- --ignored --test-threads=1
+cargo clippy --offline --manifest-path clients/rust/Cargo.toml --all-targets -- -D warnings
+cargo clippy --offline --manifest-path clients/rust/Cargo.toml --no-default-features --all-targets -- -D warnings
+cargo fmt --all --manifest-path clients/rust/Cargo.toml -- --check
+cargo doc --offline --manifest-path clients/rust/Cargo.toml --no-deps
+cargo build --offline --manifest-path clients/rust/Cargo.toml --bin tds
+uv run --offline tools/render_planning_pages.py
+```
+
+Results: **196 default checks**, **78 core-only checks**, and **57 serial Docker
+test functions** pass with zero failures. Both strict Clippy modes, formatting,
+documentation and executable build pass. All **37 site JavaScript files** pass
+syntax checks; design L is generated and loaded by the offline site. The actual
+live CLI Full check prints the query result, field ranges, references and masked
+credential nodes. Logs use `/private/tmp/tds-inspect-*.log` and
+`/private/tmp/tds-inspect-cli.{out,err}`. Python implementation is unchanged and
+its prior full-suite result is not represented as fresh validation here.
+
+Limits: broader RPC/TVP/bulk/streamed-value and extension trees, saved NO_METADATA
+context, and detailed exchange timing remain separate. Raw/display and live
+assembly bounds are diagnostic bounds, not a total retained-memory promise.
+No platform/failover or performance claim follows from local acceptance. The
+changes are working-tree work on `rust-client`; Rust publication is separate.
+
+## Local completion continuation
+
+Implemented 2026-10-18 as working-tree work after the connection/query inspection
+slice. `response::Timing` records optional monotonic physical-epoch-relative send,
+first-consumed-packet and terminal-message milestones, independently of observation
+level. Live responses, fetched records and error snapshots retain them; first/end
+intervals require both endpoints. Cancellation measures acknowledged cleanup,
+not SQL success. Core clocks are supplied, never acquired internally.
+
+Four deterministic clock tests exercise partial packets, final tokens before EOM,
+ordinary completion before Attention ACK, unsent/unknown milestones, channel
+isolation and fresh exchanges. Controlled verified TLS checks snapshots, events,
+recorded `took` and replay under 7.4/8.0 × plain/MARS × Off/Outline/Full. Existing
+partial-write tests now assert that a failed incomplete send invents no timing;
+real cancellation and Docker inspection checks verify completed intervals.
+
+RPC/TVP/transaction/Attention/bulk field trees use the existing request readers.
+Streamed rows and output parameters expose current-step fragments with offsets
+relative to their enclosing token, including committed framing on calls yielding
+no semantic item. They do not retain a second whole large value. Independent
+Python request fixtures cover every truncated prefix; a bulk test preserves actual
+known-length wire data rather than synthetic PLP framing. Every small input stride
+checks complete streamed row/output coverage and raw ranges. A deterministic
+2,048-case malformed-input corpus explores bounded parser failure/inspection;
+this is finite testing, not exhaustive fuzzing.
+
+Replay now identifies absent caller-supplied NO_METADATA columns as incomplete
+recording evidence, preserving the prefix rather than claiming malformed wire.
+It does not introduce sidecars, change capture schemas or guess absent columns.
+Existing captures remain readable; timing uses the existing optional `took` field.
+
+Full default: **206 passed**, **57 live ignored**; core-only: **87 passed**; explicit
+serial Docker: **57 passed**, zero skips/failures. Both strict Clippy modes, fmt,
+rustdoc and CLI build pass. Eight new actual CLI full-observation bulk/stream
+captures pass both Rust and Python replay and credential masking. The bulk demo
+exceeds 1 MiB and explicitly exercises diagnostic omission; streamed output shows
+incremental token ranges. Evidence lives under `/private/tmp/tds-completion-*`.
+
+Two test corrections accompany these changes: cross-exchange response parity
+excludes only measured timing, while same-exchange snapshot equality still checks
+it; cancellation peers stay open through client teardown so peer EOF cannot race
+the reuse check. No production cleanup policy was changed to make those tests pass.
+
+Encryption preparation exposed a separate Python cache-identity collision; the
+[synthetic experiment](../../docs/design/experiments/encryption-cache-identity.md)
+records it and the pending shared-lifetime decision. Python client behavior was
+not changed and its full regression was not rerun. No encryption implementation,
+GCP deployment, platform/MSRV acceptance or performance claim follows from this
+local checkpoint.
+
+## Key-policy foundation
+
+Historical foundation checkpoint; see the transparent SQL checkpoint below for
+the now-implemented metadata/value/facade and independent .NET campaign.
+
+The optional `encryption` feature implements D-66's transaction default,
+exchange and fixed-age time policies, independently for parsed master and
+working column keys. The local provider reads bounded PKCS#8 PEM files; actual
+RSA verification/unwrap, HMAC derivation and authenticated value crypto are
+implemented. Timer expiry, capacity eviction, cancellation/late results and
+runtime destruction clear authority and owned secrets.
+
+`Connection::key_session` supplies actual decoded transaction/database/collation
+and pool/reset/recovery/close boundaries. The caller owns a manual crypto
+exchange guard. The live campaign found and corrected deferred-reset handling
+for a newly borrowed service; it also tests a changed database context on reuse.
+Controlled TLS recovery proves that old keys cannot act on a replacement epoch.
+
+Read the [30-scenario plan](../../docs/design/experiments/encryption-policy-scenarios.md),
+[implementation design](../../docs/design/N-encryption-policy-implementation.md)
+and [retained evidence](../../docs/design/experiments/encryption-policy-evidence.md).
+There are 31 new Rust test functions: 28 controller/crypto tests, one controlled
+recovery matrix and two live SQL functions. Five owned buffer stages are checked
+zero before deallocation; default native destruction paths are separately
+source-reviewed with hashes. This does not prove register/stack-copy erasure,
+process-abort cleanup or custom allocator behavior.
+
+Python's matching cache-identity correction passes 96 focused unit/live tests.
+It does not change Python's older context-wide lifetime or immutable-byte limit.
+
+Transparent encrypted SQL metadata, normalization, parameter/result orchestration
+and independent Rust/.NET interoperability remain unimplemented. The live tests
+use manual byte encryption over ordinary binary SQL values. The default Rust
+build still refuses unsupported encrypted metadata. No GCP resources were created.
+
+
+## Transparent Always Encrypted
+
+The optional adapter now implements local-key SQL encryption on top of the
+existing key service: feature version one, key/crypto metadata, exact normalized
+values, fresh named-parameter preparation, authenticated results and outputs,
+owned bulk inputs and returned result sets. Invalid application values and
+parameter-discovery failures leave application SQL `NotSent`. Successful SQL is
+not replayed. Raw protocol observation/capture/replay retain ciphertext.
+
+The [design](../../docs/design/O-rust-transparent-encryption.md) and
+[retained evidence](../../docs/design/experiments/rust-transparent-encryption.md)
+record 28-type independent .NET reads/lookups of Rust inserts and bulk writes,
+mutual writes for 27 types (SqlClient's documented `time(0)` write limit), four
+transport/framing lifecycle combinations, and controlled good/corrupt/NULL/good
+cells, failed discovery, discarded-row cost and bulk returned-row authentication.
+The current top table matches the retained successful check summary.
+
+Rust 1.99.1/macOS ARM64 is the tested minimum/platform; strict lint, rustdoc,
+examples, MIT notice and local package verification are covered. The repeatable
+entry point is `python3 tools/check_rust.py --live` from the repository root.
+Owned AE values are bounded at 16 MiB. Encrypted producer APIs and borrowed
+plaintext chunks are not provided; physical recovery requires a fresh adapter.
+
+Windows NTLM/Kerberos, native Windows builds/Browser, GCP deployment and teardown
+remain pending the [provider/campaign decision](../../docs/design/P-windows-authentication-campaign.md).
+No Rust publication or cloud deployment is implied by these local results.

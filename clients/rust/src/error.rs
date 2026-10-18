@@ -47,6 +47,8 @@ pub enum Execution {
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    #[cfg(feature = "encryption")]
+    Encryption(crate::encryption::Error),
     NotYetRead(&'static str),
     Parameter(&'static str),
     Configuration(crate::config::ConfigError),
@@ -188,6 +190,8 @@ impl fmt::Display for Error {
         }
         write!(f, "TDS {:?}: ", self.step)?;
         match &self.kind {
+            #[cfg(feature = "encryption")]
+            ErrorKind::Encryption(e) => e.fmt(f),
             ErrorKind::NotYetRead(reason) => write!(f, "not yet read: {reason}"),
             ErrorKind::Parameter(reason) => write!(f, "parameter refused: {reason}"),
             ErrorKind::Configuration(error) => error.fmt(f),
@@ -272,5 +276,12 @@ impl From<std::io::Error> for Error {
 impl From<rustls::Error> for Error {
     fn from(e: rustls::Error) -> Self {
         Self::new(ErrorKind::Tls(e))
+    }
+}
+
+#[cfg(feature = "encryption")]
+impl From<crate::encryption::Error> for Error {
+    fn from(e: crate::encryption::Error) -> Self {
+        Self::new(ErrorKind::Encryption(e))
     }
 }

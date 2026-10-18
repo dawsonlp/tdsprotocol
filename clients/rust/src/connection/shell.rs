@@ -80,6 +80,8 @@ pub struct ConnectOptions {
     pub data_classification: u8,
     /// Advertise exact UTF-8 transport rather than server substitution.
     pub utf8_support: bool,
+    /// Request Always Encrypted version one (without enclaves).
+    pub column_encryption: bool,
 }
 impl ConnectOptions {
     pub fn new(
@@ -115,6 +117,7 @@ impl ConnectOptions {
             vector_support: 2,
             data_classification: 2,
             utf8_support: true,
+            column_encryption: false,
         }
     }
 }
@@ -130,6 +133,11 @@ impl fmt::Debug for ConnectOptions {
 
 type Reply<T> = oneshot::Sender<Result<T>>;
 enum Command {
+    #[cfg(feature = "encryption")]
+    AttachKeys(
+        crate::encryption::LifecycleLink,
+        oneshot::Sender<crate::encryption::Result<()>>,
+    ),
     Recover(Reply<()>),
     Observe(Option<Observer>, Reply<()>),
     Capture(Option<Capture>, Reply<()>),
@@ -155,6 +163,10 @@ enum Command {
 impl Command {
     fn fail(self, endpoint: &Endpoint) {
         match self {
+            #[cfg(feature = "encryption")]
+            Self::AttachKeys(_, reply) => {
+                let _ = reply.send(Err(crate::encryption::Error::Closed));
+            }
             Self::Recover(reply) | Self::Observe(_, reply) | Self::Capture(_, reply) => {
                 let _ = reply.send(Err(endpoint.closed_error()));
             }
@@ -180,6 +192,8 @@ impl Command {
     }
 }
 struct Endpoint {
+    #[cfg(feature = "encryption")]
+    keys: Mutex<Option<crate::encryption::LifecycleLink>>,
     #[cfg(test)]
     writes: interruptions::Writes,
     observation_error: Arc<Mutex<Option<Arc<std::io::Error>>>>,
@@ -215,7 +229,19 @@ impl Endpoint {
 
     fn revoke(&self) {
         self.revoked.store(true, Ordering::Release);
+        #[cfg(feature = "encryption")]
+        self.revoke_keys();
         self.changed.notify_one();
+    }
+    #[cfg(feature = "encryption")]
+    fn revoke_keys(&self) {
+        if let Some(link) = &*self
+            .keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            link.revoke();
+        }
     }
     fn is_closed(&self) -> bool {
         self.is_revoked() || self.returning.load(Ordering::Acquire)
@@ -448,6 +474,8 @@ impl Connection {
         let endpoint = Arc::new(Endpoint {
             #[cfg(test)]
             writes: Default::default(),
+            #[cfg(feature = "encryption")]
+            keys: Mutex::new(None),
             observation_error: Arc::new(Mutex::new(None)),
             commands: send,
             revoked: AtomicBool::new(false),
@@ -505,10 +533,14 @@ impl Connection {
         }
         let mut old_guard = Abandon::new(self.endpoint.clone());
         self.endpoint.returning.store(true, Ordering::Release);
+        #[cfg(feature = "encryption")]
+        self.endpoint.revoke_keys();
         let (send, commands) = mpsc::channel(1);
         let next = Arc::new(Endpoint {
             #[cfg(test)]
             writes: Default::default(),
+            #[cfg(feature = "encryption")]
+            keys: Mutex::new(None),
             observation_error: self.endpoint.observation_error.clone(),
             commands: send,
             revoked: AtomicBool::new(false),
@@ -599,6 +631,27 @@ impl Connection {
         let (reply, receive) = oneshot::channel();
         self.endpoint.submit(Command::Session(reply)).await?;
         receive.await.map_err(|_| self.endpoint.closed_error())?
+    }
+    /// Bind the optional byte-crypto service to this physical epoch and lease.
+    /// This does not negotiate Always Encrypted SQL metadata. The caller owns
+    /// an exchange guard around each manual encrypt/send/read/decrypt sequence.
+    /// Only one live service may attach; dropping it permits a replacement.
+    #[cfg(feature = "encryption")]
+    pub async fn key_session(
+        &self,
+        providers: Vec<crate::encryption::LocalKeyStore>,
+        policies: crate::encryption::Policies,
+    ) -> crate::encryption::Result<crate::encryption::KeySession> {
+        let keys = crate::encryption::KeySession::new(providers, policies)?;
+        let (reply, receive) = oneshot::channel();
+        self.endpoint
+            .submit(Command::AttachKeys(keys.link(), reply))
+            .await
+            .map_err(|_| crate::encryption::Error::Closed)?;
+        receive
+            .await
+            .map_err(|_| crate::encryption::Error::Closed)??;
+        Ok(keys)
     }
     pub fn observation_error(&self) -> Option<Arc<std::io::Error>> {
         self.endpoint
@@ -940,6 +993,10 @@ impl Response<'_> {
     /// authority to advance this response and does not read ahead.
     pub fn snapshot(&self) -> FetchedResponse {
         self.control.retention().record.clone()
+    }
+    /// Exchange timing at every observation level. Snapshot only; no read-ahead.
+    pub fn timing(&self) -> crate::response::Timing {
+        self.control.retention().record.timing
     }
     /// Drain normally, discarding unread rows. Metadata, messages, errors and
     /// completions remain inspectable through `snapshot()`. This sends no Attention.
@@ -1634,6 +1691,7 @@ impl Driver {
     /// autonomous cancellation drains. Unrequested responses stay in their SMP
     /// credit queues. Session announcements apply when those bytes are consumed.
     fn poll_response(&mut self) -> Result<bool> {
+        self.core.set_elapsed(self.began.elapsed());
         let mut ids: Vec<_> = self.channels.keys().copied().collect();
         let split = ids.partition_point(|id| *id <= self.last_polled);
         ids.rotate_left(split);
@@ -1649,11 +1707,25 @@ impl Driver {
                 continue;
             };
             self.failure_channel = Some(id);
-            let record = self.core.next_record(id, active.control.exchange)?;
+            let result = self.core.next_record(id, active.control.exchange);
+            if let Some(timing) = self.core.channel_timing(id) {
+                active.control.retention().record.timing = timing;
+            }
+            let record = result?;
             self.failure_channel = None;
             let Some(record) = record else {
                 continue;
             };
+            #[cfg(feature = "encryption")]
+            if let Some(link) = &*self
+                .endpoint
+                .keys
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+            {
+                link.observe(&record)
+                    .map_err(|_| Error::malformed(0, "encryption lifecycle announcement"))?;
+            }
             active.control.retention().take(&record)?;
             // Commit the semantic prefix before diagnostic delivery, but do not
             // publish a record/completion until its requested recording succeeds.
@@ -1725,6 +1797,30 @@ impl Driver {
             return Ok(());
         }
         match command {
+            #[cfg(feature = "encryption")]
+            Command::AttachKeys(link, reply) => {
+                let mut slot = self
+                    .endpoint
+                    .keys
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if self.endpoint.is_closed() || self.broken.is_some() {
+                    let _ = reply.send(Err(crate::encryption::Error::Closed));
+                } else if self.core.is_busy()
+                    || slot
+                        .as_ref()
+                        .is_some_and(crate::encryption::LifecycleLink::alive)
+                {
+                    let _ = reply.send(Err(crate::encryption::Error::Busy));
+                } else {
+                    let result = link.transaction(self.core.session().transaction);
+                    if result.is_ok() {
+                        link.expect_reuse_reset(self.core.reuse_reset_pending());
+                        *slot = Some(link);
+                    }
+                    let _ = reply.send(result);
+                }
+            }
             Command::Recover(reply) => {
                 let _ = reply.send(Err(recovery_error("connection is not broken", None)));
             }
@@ -1955,6 +2051,7 @@ impl Driver {
             {
                 return Err(self.endpoint.closed_error());
             }
+            self.core.set_elapsed(self.began.elapsed());
             for (&id, channel) in &self.channels {
                 if channel.closing().is_none()
                     && channel.begin.is_some()
@@ -1963,6 +2060,10 @@ impl Driver {
                     && !self.core.channel_sending(id)
                 {
                     self.core.observe_request_sent(id);
+                    if let Some(active) = &channel.active {
+                        active.control.retention().record.timing =
+                            self.core.channel_timing(id).unwrap();
+                    }
                 }
             }
             self.deliver_observations()?;
@@ -2152,6 +2253,8 @@ mod tests {
         let (commands, _) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
             writes: Default::default(),
+            #[cfg(feature = "encryption")]
+            keys: Mutex::new(None),
             observation_error: Arc::new(Mutex::new(None)),
             commands,
             revoked: AtomicBool::new(false),
@@ -2181,6 +2284,8 @@ mod tests {
         let (commands, _receive) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
             writes: Default::default(),
+            #[cfg(feature = "encryption")]
+            keys: Mutex::new(None),
             observation_error: Arc::new(Mutex::new(None)),
             commands,
             revoked: AtomicBool::new(false),
@@ -2231,6 +2336,8 @@ mod tests {
         let (commands, mut receive) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
             writes: Default::default(),
+            #[cfg(feature = "encryption")]
+            keys: Mutex::new(None),
             observation_error: Arc::new(Mutex::new(None)),
             commands,
             revoked: AtomicBool::new(false),

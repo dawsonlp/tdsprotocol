@@ -29,6 +29,8 @@ pub struct Login {
     pub data_classification: u8,
     /// Advertise exact UTF-8 transport rather than server substitution.
     pub utf8_support: bool,
+    /// Request Always Encrypted version one (without enclaves).
+    pub column_encryption: bool,
     pub recovery_data: Option<Vec<u8>>,
 }
 
@@ -51,6 +53,7 @@ impl Default for Login {
             vector_support: 0,
             data_classification: 0,
             utf8_support: false,
+            column_encryption: false,
             recovery_data: None,
         }
     }
@@ -70,6 +73,9 @@ impl Login {
             return Err(Error::new(ErrorKind::State(
                 "recovery data without its login feature",
             )));
+        }
+        if self.column_encryption {
+            features.insert(4, vec![1]);
         }
         if self.data_classification != 0 {
             features.insert(9, vec![self.data_classification]);
@@ -170,6 +176,90 @@ impl Login {
         out[..4].copy_from_slice(&len.to_le_bytes());
         Ok(out)
     }
+}
+
+/// Offline identity evidence. Authentication payloads are never decoded here.
+#[derive(Clone, Debug)]
+pub struct Identity {
+    pub version: u32,
+    pub packet_size: u32,
+    pub options: [u8; 4],
+    pub host: crate::SqlText,
+    pub user: crate::SqlText,
+    pub application: crate::SqlText,
+    pub server: crate::SqlText,
+    pub language: crate::SqlText,
+    pub database: crate::SqlText,
+}
+pub(crate) fn read(r: &mut wire::Reader<'_>) -> Result<Identity> {
+    let length = r.field("length", |r| r.u32())? as usize;
+    if length != r.bytes().len() {
+        return Err(Error::malformed(0, "LOGIN7 length"));
+    }
+    let version = r.field("tds version", |r| r.u32())?;
+    let packet_size = r.field("packet size", |r| r.u32())?;
+    r.field("program version", |r| r.u32())?;
+    r.field("process id", |r| r.u32())?;
+    r.field("connection id", |r| r.u32())?;
+    let options = [
+        r.field("option flags 1", |r| r.u8())?,
+        r.field("option flags 2", |r| r.u8())?,
+        r.field("type flags", |r| r.u8())?,
+        r.field("option flags 3", |r| r.u8())?,
+    ];
+    r.field("time zone", |r| r.u32())?;
+    r.field("client lcid", |r| r.u32())?;
+    if r.bytes().len() < 94 {
+        return Err(Error::malformed(r.bytes().len(), "LOGIN7 fixed portion"));
+    }
+    fn name(r: &mut wire::Reader<'_>, at: usize, label: &str) -> Result<crate::SqlText> {
+        r.at(at, label, |r| {
+            let offset = usize::from(r.field("offset", |r| r.u16())?);
+            let n = usize::from(r.field("length", |r| r.u16())?);
+            if n == 0 {
+                return Ok(crate::SqlText(vec![]));
+            }
+            if offset < 94 {
+                return Err(Error::malformed(at, "LOGIN7 identity offset"));
+            }
+            r.at(offset, "value", |r| {
+                r.text("text", |r| crate::requests::decode::text(r, n))
+            })
+        })
+    }
+    let value = Identity {
+        version,
+        packet_size,
+        options,
+        host: name(r, 36, "host")?,
+        user: name(r, 40, "user")?,
+        application: name(r, 48, "application")?,
+        server: name(r, 52, "server")?,
+        language: name(r, 64, "language")?,
+        database: name(r, 68, "database")?,
+    };
+    // Opaque credential entries: byte counts are visible, values stay zeroed.
+    if r.inspecting() {
+        for (at, label, multiplier) in [
+            (44, "password", 2),
+            (86, "new password", 2),
+            (78, "sspi", 1),
+        ] {
+            r.at(at, label, |r| {
+                let offset = usize::from(r.u16()?);
+                let n = usize::from(r.u16()?);
+                if n != 0 && n != 0xffff {
+                    r.at(offset, "redacted", |r| {
+                        r.take(n * multiplier)?;
+                        Ok(())
+                    })?;
+                }
+                Ok(())
+            })?;
+            r.sensitive();
+        }
+    }
+    Ok(value)
 }
 
 #[cfg(test)]

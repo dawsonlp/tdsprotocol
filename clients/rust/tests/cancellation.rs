@@ -45,6 +45,7 @@ async fn close_waits_for_later_ack_and_repeated_or_stale_handles_emit_no_attenti
         // Attention ahead of the replacement exchange.
         assert_eq!(peer.message().await.0, packet::BATCH);
         peer.reply(&done(0)).await;
+        peer.drain_to_eof().await;
     });
     let connection = Connection::connect(config).await.unwrap();
     let mut channel = connection.serial_channel().await.unwrap();
@@ -90,6 +91,7 @@ async fn external_cancel_wakes_an_advancing_reader_only_after_acknowledgement() 
         peer.reply(&done(0x20)).await;
         assert_eq!(peer.message().await.0, packet::BATCH);
         peer.reply(&done(0)).await;
+        peer.drain_to_eof().await;
     });
     let connection = Connection::connect(config).await.unwrap();
     let mut channel = connection.serial_channel().await.unwrap();
@@ -101,6 +103,8 @@ async fn external_cancel_wakes_an_advancing_reader_only_after_acknowledgement() 
     });
     let error = response.next().await.unwrap_err();
     assert!(matches!(error.kind, ErrorKind::Canceled));
+    assert!(response.timing().until_first_packet().is_some());
+    assert!(response.timing().until_end().is_some());
     assert!(!connection.is_closed());
     assert!(response.next().await.unwrap().is_none());
     drop(response);

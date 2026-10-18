@@ -3,7 +3,7 @@
 **Where this sits:** the next phase of the [Roadmap](C-roadmap.md). The protocol model and reference pages remain common to both clients.
 **After reading this you can** explain who owns each resource, what each caller may do, how Rust will preserve the protocol's rules, and what evidence completes each milestone.
 
-> **Status: first connection slice implemented, broader development proposal, 2026-10-17.** Rust before Python M16, explicit ownership/permissions and the learning intent are agreed. The user approved movable channel authority, Tokio/rustls, one persistent connection task, borrowed responses and conservative connection discard on abandonment. The [Rust crate](../../clients/rust/README.md) now runs verified-TLS exchanges against Docker under TDS 7.4 and 8.0; its [acceptance record](../../clients/rust/ACCEPTANCE.md) identifies actual evidence and gaps. Awaited cancellation cleanup and Python-compatible response retention/checked completion are implemented for the current subset. Full response interfaces, exact value types beyond that subset and other unresolved choices below remain open. The [Python baseline](E-python-baseline.md) remains the precursor evidence.
+> **Status: substantial local implementation; completion scope agreed 2026-10-18 (D-65).** The [support matrix](../../clients/rust/SUPPORT.md) and [acceptance record](../../clients/rust/ACCEPTANCE.md) identify current behavior and evidence. Earlier slice notes below are historical. The [roadmap](C-roadmap.md) now requires local completion including local-key Always Encrypted, followed by a transient Terraform GCP Windows lab, Windows-authentication implementation/acceptance and verified teardown. Entra, Azure-specific providers and Windows certificate-store key-provider support are deferred. The Rust crate remains unpublished; detailed new API/provider choices still need agreement.
 
 ## 0 · Vision and requirements
 
@@ -173,7 +173,7 @@ throughput claim.
 
 ## 5 · Proposed milestones and completion evidence
 
-R numbers are Rust proposals. They do not mark Python milestones complete or change existing acceptance records. Final scope and each unresolved choice are agreed before the affected code begins. Each implementation milestone includes its teaching documentation and relevant offline and live checks; skipped checks remain incomplete evidence.
+R numbers retain the original milestone proposals. D-65 supersedes R8's full-authentication/provider scope and its ordering: local-key Always Encrypted precedes the GCP campaign; Windows authentication follows; Entra and the excluded providers are deferred. R numbers do not mark Python milestones complete or change existing acceptance records. Each unresolved choice is agreed before the affected code begins. Each implementation milestone includes its teaching documentation and relevant offline and live checks; skipped checks remain incomplete evidence.
 
 | Milestone | Deliverable | Completion evidence |
 |---|---|---|

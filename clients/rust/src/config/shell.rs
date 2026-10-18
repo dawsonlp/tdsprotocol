@@ -51,6 +51,7 @@ impl ConnectionServices {
             vector_support: c.vector_support,
             data_classification: c.data_classification,
             utf8_support: c.utf8_support,
+            column_encryption: c.column_encryption,
             roots: self.roots.clone(),
             server_name: self.server_name.clone(),
             observe: self.observe.clone(),
@@ -94,6 +95,7 @@ impl ConnectionConfig {
             vector_support: o.vector_support,
             data_classification: o.data_classification,
             utf8_support: o.utf8_support,
+            column_encryption: o.column_encryption,
         }
     }
 }

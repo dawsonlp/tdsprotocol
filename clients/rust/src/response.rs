@@ -4,7 +4,7 @@
 //! policy. Fetch keeps complete result sets only. A set partly streamed before
 //! fetch still has metadata and a row count, but cannot offer a complete row list.
 
-use std::fmt;
+use std::{fmt, time::Duration};
 
 #[cfg(feature = "tokio")]
 use crate::{Error, ErrorKind, Record, Result};
@@ -16,6 +16,41 @@ use crate::tokens::DoneKind;
 use crate::tokens::{Column, Done, EnvironmentChange, OutputValue, ServerMessage, SqlText};
 
 pub type Row = Vec<Option<crate::values::Value>>;
+
+/// Exchange milestones on a monotonic clock relative to one physical connection.
+/// Collected at every observation level. `first_packet` is when the response
+/// reader consumes its first complete TDS packet, not kernel arrival or server
+/// execution time. Slow application consumption can delay it and `ended`.
+/// Missing milestones remain unknown, including after partial sends/failures.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Timing {
+    pub sent: Option<Duration>,
+    pub first_packet: Option<Duration>,
+    /// Terminal completion and its enclosing message have both been consumed.
+    /// For cancellation this means acknowledged cleanup, not SQL success.
+    pub ended: Option<Duration>,
+}
+impl Timing {
+    pub fn until_first_packet(&self) -> Option<Duration> {
+        self.first_packet?.checked_sub(self.sent?)
+    }
+    pub fn until_end(&self) -> Option<Duration> {
+        self.ended?.checked_sub(self.sent?)
+    }
+    /// Presentation shared by live observation and saved recording events.
+    pub fn summary(&self) -> String {
+        [
+            ("first packet", self.until_first_packet()),
+            ("done", self.until_end()),
+        ]
+        .into_iter()
+        .filter_map(|(label, elapsed)| {
+            elapsed.map(|t| format!("{label} {:.3} ms", t.as_secs_f64() * 1000.0))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+    }
+}
 
 /// End-of-response access never reads ahead without the caller choosing what
 /// happens to unread rows. This is Python's REFUSE/KEEP/DISCARD contract.
@@ -87,7 +122,7 @@ pub struct ResultSet {
     pub column_info: Option<Vec<crate::tokens::ColumnInfo>>,
     pub completion: Option<Done>,
     pub rows_read: usize,
-    kept: Option<Vec<Row>>,
+    pub(crate) kept: Option<Vec<Row>>,
 }
 impl ResultSet {
     pub fn rows(&self) -> std::result::Result<&[Row], RowsNotAvailable> {
@@ -107,11 +142,12 @@ impl ResultSet {
 /// snapshot can be incomplete; a successful fetch has reached the terminal end.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FetchedResponse {
-    sequence: Vec<Item>,
-    result_sets: Vec<ResultSet>,
-    returns: Vec<ProcedureReturn>,
+    pub(crate) sequence: Vec<Item>,
+    pub(crate) result_sets: Vec<ResultSet>,
+    pub(crate) returns: Vec<ProcedureReturn>,
     pub ended: bool,
     pub canceled: bool,
+    pub timing: Timing,
 }
 impl FetchedResponse {
     pub fn returns(&self) -> &[ProcedureReturn] {

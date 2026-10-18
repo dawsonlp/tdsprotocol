@@ -17,6 +17,7 @@ fn columns() -> Vec<Column> {
             legacy: None,
             clr_assembly: None,
             json_utf8: false,
+            encryption: None,
         },
     }]
 }

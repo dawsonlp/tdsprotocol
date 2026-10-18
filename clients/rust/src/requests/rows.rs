@@ -225,16 +225,47 @@ fn payload(sql_type: &SqlType, value: Option<&Value>) -> Result<Vec<u8>> {
 }
 pub(crate) const BULK_DONE: [u8; 13] = [0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 #[cfg_attr(not(feature = "tokio"), allow(dead_code))]
-pub(crate) fn bulk_header(columns: &[Column]) -> Result<Vec<u8>> {
+pub(crate) fn bulk_header(columns: &[Column], encrypted: bool) -> Result<Vec<u8>> {
     let mut b = vec![0x81];
     count(columns.len(), &mut b)?;
+    let mut keys = Vec::new();
     for column in columns {
+        if let Some(how) = &column.type_info.encryption {
+            if !encrypted {
+                return Err(refused(
+                    "encrypted bulk requires negotiated column encryption",
+                ));
+            }
+            let key = how
+                .key
+                .as_ref()
+                .ok_or_else(|| refused("encrypted bulk lacks column key"))?;
+            if !keys.contains(key) {
+                keys.push(key.clone());
+            }
+        }
+    }
+    if encrypted {
+        crate::types::crypto::write_key_table(&keys, &mut b)?;
+    }
+    for column in columns {
+        if (column.flags & 0x800 != 0) != column.type_info.encryption.is_some() {
+            return Err(refused("bulk encrypted flag/metadata mismatch"));
+        }
         b.extend(column.user_type.to_le_bytes());
         b.extend(column.flags.to_le_bytes());
         if fixed(column.type_info.code) {
             b.push(column.type_info.code);
         } else {
             b.extend(type_info(&column.type_info.sql_type)?);
+        }
+        if let Some(how) = &column.type_info.encryption {
+            let ordinal = keys
+                .iter()
+                .position(|k| Some(k) == how.key.as_ref())
+                .expect("collected key");
+            b.extend((ordinal as u16).to_le_bytes());
+            how.write(&mut b)?;
         }
         short(&column.name, &mut b)?;
     }

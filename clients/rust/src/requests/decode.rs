@@ -59,7 +59,7 @@ fn short(r: &mut Reader<'_>) -> Result<SqlText> {
     text(r, usize::from(n))
 }
 fn headers(r: &mut Reader<'_>) -> Result<Vec<Header>> {
-    let n = r.u32()? as usize;
+    let n = r.field("headers length", |r| r.u32())? as usize;
     if n < 4 {
         return Err(Error::malformed(0, "ALL_HEADERS length"));
     }
@@ -69,19 +69,30 @@ fn headers(r: &mut Reader<'_>) -> Result<Vec<Header>> {
     let mut result = vec![];
     while r.offset < n {
         let start = r.offset;
-        let length = r.u32()? as usize;
+        let length = r.field("header length", |r| r.u32())? as usize;
         if length < 6 || length > n - start {
             return Err(Error::malformed(start, "header length"));
         }
-        result.push(Header {
-            kind: r.u16()?,
-            bytes: r.take(length - 6)?.to_vec(),
-        });
+        let kind = r.field("header type", |r| r.u16())?;
+        let bytes = r.field("header data", |r| {
+            let start = r.offset;
+            if kind == 2 && length == 18 {
+                r.field("transaction descriptor", |r| r.u64())?;
+                r.field("outstanding requests", |r| r.u32())?;
+            } else {
+                r.take(length - 6)?;
+            }
+            Ok(r.bytes()[start..r.offset].to_vec())
+        })?;
+        result.push(Header { kind, bytes });
     }
     Ok(result)
 }
 /// Decode one complete supported request body. Errors refer to body offsets.
 pub fn request(kind: u8, bytes: &[u8]) -> Result<Request> {
+    request_reader(kind, &mut Reader::new(bytes))
+}
+pub(crate) fn request_reader(kind: u8, r: &mut Reader<'_>) -> Result<Request> {
     if ![
         crate::packet::BATCH,
         crate::packet::RPC,
@@ -92,12 +103,11 @@ pub fn request(kind: u8, bytes: &[u8]) -> Result<Request> {
     {
         return Err(Error::new(ErrorKind::Unsupported("request message")));
     }
-    let mut r = Reader::new(bytes);
     if kind == crate::packet::ATTENTION {
         r.end()?;
         return Ok(Request::Attention);
     }
-    let headers = headers(&mut r)?;
+    let headers = headers(r)?;
     let result = match kind {
         crate::packet::BATCH => {
             if !r.remaining().is_multiple_of(2) {
@@ -106,45 +116,17 @@ pub fn request(kind: u8, bytes: &[u8]) -> Result<Request> {
             let n = r.remaining() / 2;
             Request::Batch {
                 headers,
-                sql: text(&mut r, n)?,
+                sql: r.text("sql", |r| text(r, n))?,
             }
         }
         crate::packet::RPC => {
             let mut calls = vec![];
             loop {
-                let n = r.u16()?;
-                let procedure = if n == 0xffff {
-                    Procedure::Number(r.u16()?)
-                } else {
-                    Procedure::Name(text(&mut r, usize::from(n))?)
-                };
-                let options = r.u16()?;
-                let mut parameters = vec![];
-                while r.peek().is_some_and(|b| b != 0xff && b != 0xfe) {
-                    let name = short(&mut r)?;
-                    let status = r.u8()?;
-                    if status & !3 != 0 {
-                        return Err(Error::new(ErrorKind::Unsupported(
-                            "encrypted/extended RPC parameter",
-                        )));
-                    }
-                    let (type_info, value) = parameter(&mut r)?;
-                    parameters.push(Parameter {
-                        name,
-                        status,
-                        type_info,
-                        value,
-                    });
-                }
-                calls.push(Call {
-                    procedure,
-                    options,
-                    parameters,
-                });
+                calls.push(r.indexed("call", calls.len(), call)?);
                 if r.remaining() == 0 {
                     break;
                 }
-                if r.u8()? != 0xff {
+                if r.field("call separator", |r| r.u8())? != 0xff {
                     return Err(Error::new(ErrorKind::Unsupported("NO_EXEC RPC separator")));
                 }
             }
@@ -152,41 +134,128 @@ pub fn request(kind: u8, bytes: &[u8]) -> Result<Request> {
         }
         crate::packet::TRANSACTION => Request::Transaction {
             headers,
-            operation: transaction(&mut r)?,
+            operation: r.field("operation", transaction)?,
         },
         _ => return Err(Error::new(ErrorKind::Unsupported("request message"))),
     };
     r.end()?;
     Ok(result)
 }
+fn call(r: &mut Reader<'_>) -> Result<Call> {
+    let n = r.field("procedure name length", |r| r.u16())?;
+    let procedure = if n == 0xffff {
+        Procedure::Number(r.field("procedure number", |r| r.u16())?)
+    } else {
+        Procedure::Name(r.text("procedure name", |r| text(r, usize::from(n)))?)
+    };
+    let options = r.field("options", |r| r.u16())?;
+    let mut parameters = vec![];
+    while r.peek().is_some_and(|b| b != 0xff && b != 0xfe) {
+        parameters.push(r.indexed("parameter", parameters.len(), |r| {
+            let name = r.text("name", short)?;
+            let status = r.field("status", |r| r.u8())?;
+            if status & !11 != 0 {
+                return Err(Error::new(ErrorKind::Unsupported(
+                    "encrypted/extended RPC parameter",
+                )));
+            }
+            let (mut type_info, mut value) = parameter(r)?;
+            if status & 8 != 0 {
+                let base = TypeInfo::read_parameter(r)?;
+                let algorithm = r.u8()?;
+                let algorithm_name = if algorithm == 0 {
+                    Some(short(r)?)
+                } else {
+                    None
+                };
+                let encryption_type = r.u8()?;
+                let database_id = r.u32()?;
+                let key_id = r.u32()?;
+                let version = r.u32()?;
+                let metadata_version = r.take(8)?.try_into().expect("eight bytes");
+                let normalization = r.u8()?;
+                if ![1, 2].contains(&encryption_type) {
+                    return Err(Error::malformed(r.offset, "parameter encryption type"));
+                }
+                type_info.encryption = Some(Box::new(crate::types::crypto::CryptoMetadata {
+                    base,
+                    user_type: 0,
+                    algorithm,
+                    algorithm_name,
+                    encryption_type,
+                    normalization,
+                    key: Some(crate::types::crypto::ColumnKey {
+                        database_id,
+                        key_id,
+                        version,
+                        metadata_version,
+                        values: vec![],
+                    }),
+                }));
+                value = match value {
+                    ParamValue::Scalar(Some(Value::Binary(bytes))) => {
+                        ParamValue::Scalar(Some(Value::Encrypted(crate::values::Ciphertext(bytes))))
+                    }
+                    ParamValue::Scalar(None) => ParamValue::Scalar(None),
+                    _ => {
+                        return Err(Error::malformed(
+                            r.offset,
+                            "encrypted parameter must be binary",
+                        ));
+                    }
+                };
+            }
+            Ok(Parameter {
+                name,
+                status,
+                type_info,
+                value,
+            })
+        })?);
+    }
+    Ok(Call {
+        procedure,
+        options,
+        parameters,
+    })
+}
 fn parameter(r: &mut Reader<'_>) -> Result<(TypeInfo, ParamValue)> {
     if r.peek() != Some(0xf3) {
-        let info = TypeInfo::read_parameter(r)?;
-        let value = input_value(&info, r)?;
+        let info = r.field("type", TypeInfo::read_parameter)?;
+        let value = r.field("value", |r| input_value(&info, r))?;
         return Ok((info, ParamValue::Scalar(value)));
     }
-    r.u8()?;
-    let database = short(r)?;
+    r.field("table type code", |r| r.u8())?;
+    let database = r.text("database", short)?;
     if !database.0.is_empty() {
         return Err(Error::malformed(r.offset, "TVP database must be empty"));
     }
-    let mut table = TableType::new(short(r)?, short(r)?, vec![]);
-    let n = r.u16()?;
+    let mut table = TableType::new(
+        r.text("schema", short)?,
+        r.text("table type", short)?,
+        vec![],
+    );
+    let n = r.field("column count", |r| r.u16())?;
     let rows = if n == 0xffff {
-        if r.u8()? != 0 || r.u8()? != 0 {
+        if r.field("metadata terminator", |r| r.u8())? != 0
+            || r.field("rows terminator", |r| r.u8())? != 0
+        {
             return Err(Error::malformed(r.offset, "NULL TVP terminators"));
         }
         None
     } else {
         let mut infos = vec![];
-        for _ in 0..n {
-            r.u32()?; // user type retained in raw packet evidence
-            let flags = r.u16()?;
-            if r.peek() == Some(0xf3) {
-                return Err(Error::new(ErrorKind::Unsupported("nested table input")));
-            }
-            let info = TypeInfo::read_parameter(r)?;
-            short(r)?; // unnamed TVP column
+        for column in 0..n {
+            let (info, flags) = r.indexed("column", usize::from(column), |r| {
+                r.field("user type", |r| r.u32())?;
+                let flags = r.field("flags", |r| r.u16())?;
+                if r.peek() == Some(0xf3) {
+                    return Err(Error::new(ErrorKind::Unsupported("nested table input")));
+                }
+                let info = r.field("type", TypeInfo::read_parameter)?;
+                r.text("name", short)?; // unnamed TVP column
+                Ok((info, flags))
+            })?;
             table.columns.push(TableColumn {
                 sql_type: info.sql_type.clone(),
                 server_default: flags & 0x200 != 0,
@@ -196,13 +265,13 @@ fn parameter(r: &mut Reader<'_>) -> Result<(TypeInfo, ParamValue)> {
         let mut order_seen = false;
         let mut placement_seen = false;
         loop {
-            match r.u8()? {
+            match r.field("table metadata tag", |r| r.u8())? {
                 0 => break,
                 0x10 if !order_seen => {
                     order_seen = true;
-                    for _ in 0..r.u16()? {
-                        let column = r.u16()?;
-                        let flags = r.u8()?;
+                    for _ in 0..r.field("order count", |r| r.u16())? {
+                        let column = r.field("ordered column", |r| r.u16())?;
+                        let flags = r.field("order flags", |r| r.u8())?;
                         if flags & !7 != 0 || flags & 3 == 3 {
                             return Err(Error::malformed(r.offset, "TVP order flags"));
                         }
@@ -218,8 +287,10 @@ fn parameter(r: &mut Reader<'_>) -> Result<(TypeInfo, ParamValue)> {
                 }
                 0x11 if !placement_seen => {
                     placement_seen = true;
-                    for _ in 0..r.u16()? {
-                        table.send_order.push(r.u16()?);
+                    for _ in 0..r.field("placement count", |r| r.u16())? {
+                        table
+                            .send_order
+                            .push(r.field("placed column", |r| r.u16())?);
                     }
                     let mut sorted = table.send_order.clone();
                     sorted.sort_unstable();
@@ -237,14 +308,14 @@ fn parameter(r: &mut Reader<'_>) -> Result<(TypeInfo, ParamValue)> {
         };
         let mut rows = vec![];
         loop {
-            match r.u8()? {
+            match r.field("table row tag", |r| r.u8())? {
                 0 => break,
                 1 => {
                     let mut cells = vec![None; usize::from(n)];
                     for column in &order {
                         let i = usize::from(*column) - 1;
                         if !table.columns[i].server_default {
-                            cells[i] = input_value(&infos[i], r)?;
+                            cells[i] = r.indexed("cell", i, |r| input_value(&infos[i], r))?;
                         }
                     }
                     rows.push(
@@ -268,6 +339,7 @@ fn parameter(r: &mut Reader<'_>) -> Result<(TypeInfo, ParamValue)> {
             legacy: None,
             clr_assembly: None,
             json_utf8: false,
+            encryption: None,
         },
         ParamValue::Table(rows),
     ))
@@ -278,11 +350,11 @@ pub(crate) fn input_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<
         info.sql_type,
         SqlType::LegacyText { .. } | SqlType::LegacyImage
     ) {
-        let n = r.u32()?;
+        let n = r.field("length", |r| r.u32())?;
         if n == u32::MAX {
             return Ok(None);
         }
-        let bytes = r.take(n as usize)?;
+        let bytes = r.field("data", |r| r.take(n as usize))?;
         let mut value = large::empty(&info.sql_type);
         let chunk = match &info.sql_type {
             SqlType::LegacyText { unicode: true, .. } => {
@@ -307,7 +379,7 @@ pub(crate) fn input_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<
         large::append(&mut value, chunk)?;
         return Ok(Some(value));
     }
-    if !info.sql_type.is_large() {
+    if info.encryption.is_some() || !info.sql_type.is_large() {
         return info.read_value(r);
     }
     let Some(mut decoder) = large::Decoder::start(info, r)? else {
@@ -322,15 +394,15 @@ pub(crate) fn input_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<
     }
 }
 fn transaction_name(r: &mut Reader<'_>) -> Result<SqlText> {
-    let n = usize::from(r.u8()?);
+    let n = usize::from(r.field("name byte length", |r| r.u8())?);
     if !n.is_multiple_of(2) {
         return Err(Error::malformed(r.offset, "transaction name length"));
     }
-    text(r, n / 2)
+    r.text("name", |r| text(r, n / 2))
 }
 fn begin(r: &mut Reader<'_>) -> Result<crate::transactions::Begin> {
     use crate::Isolation::*;
-    let isolation = match r.u8()? {
+    let isolation = match r.field("isolation", |r| r.u8())? {
         0 => Unchanged,
         1 => ReadUncommitted,
         2 => ReadCommitted,
@@ -346,9 +418,9 @@ fn begin(r: &mut Reader<'_>) -> Result<crate::transactions::Begin> {
 }
 fn transaction(r: &mut Reader<'_>) -> Result<crate::Transaction> {
     use crate::Transaction::*;
-    Ok(match r.u16()? {
+    Ok(match r.field("operation code", |r| r.u16())? {
         0 => {
-            if r.u16()? != 0 {
+            if r.field("coordinator flags", |r| r.u16())? != 0 {
                 return Err(Error::new(ErrorKind::Unsupported(
                     "coordinator address flags",
                 )));
@@ -356,14 +428,14 @@ fn transaction(r: &mut Reader<'_>) -> Result<crate::Transaction> {
             CoordinatorAddress
         }
         1 => {
-            let n = usize::from(r.u16()?);
-            Propagate(r.take(n)?.to_vec())
+            let n = usize::from(r.field("propagation length", |r| r.u16())?);
+            Propagate(r.field("propagation data", |r| r.take(n))?.to_vec())
         }
         5 => Begin(begin(r)?),
         6 => Promote,
         code @ (7 | 8) => {
             let name = transaction_name(r)?;
-            let begin = match r.u8()? {
+            let begin = match r.field("end flags", |r| r.u8())? {
                 0 => None,
                 1 => Some(begin(r)?),
                 _ => return Err(Error::malformed(r.offset, "transaction end flags")),
@@ -383,26 +455,57 @@ fn transaction(r: &mut Reader<'_>) -> Result<crate::Transaction> {
 /// Bulk metadata has input declarations and whole-cell input payloads. A known
 /// PLP length in bulk is followed by the raw bytes, without chunk headers.
 pub fn bulk(bytes: &[u8]) -> Result<Vec<crate::Record>> {
+    bulk_with_encryption(bytes, false)
+}
+pub fn bulk_with_encryption(bytes: &[u8], encrypted: bool) -> Result<Vec<crate::Record>> {
+    bulk_reader(&mut Reader::new(bytes), encrypted)
+}
+pub(crate) fn bulk_reader(r: &mut Reader<'_>, encrypted: bool) -> Result<Vec<crate::Record>> {
     use crate::tokens::{Column, Done, DoneKind};
-    let mut r = Reader::new(bytes);
-    if r.u8()? != 0x81 {
+    if r.field("metadata tag", |r| r.u8())? != 0x81 {
         return Err(Error::malformed(0, "bulk COLMETADATA"));
     }
     let mut columns = vec![];
-    for _ in 0..r.u16()? {
-        let user_type = r.u32()?;
-        let flags = r.u16()?;
-        let type_info = TypeInfo::read_parameter(&mut r)?;
+    let count = r.field("column count", |r| r.u16())?;
+    if count > 4096 {
+        return Err(Error::new(ErrorKind::Limit("bulk column count")));
+    }
+    let keys = if encrypted {
+        crate::types::crypto::key_table(r)?
+    } else {
+        vec![]
+    };
+    for _ in 0..count {
+        let user_type = r.field("user type", |r| r.u32())?;
+        let flags = r.field("column flags", |r| r.u16())?;
+        let mut type_info = r.field("type", TypeInfo::read_parameter)?;
+        if flags & 0x800 != 0 {
+            if !encrypted {
+                return Err(Error::malformed(
+                    r.offset,
+                    "encrypted bulk without negotiation",
+                ));
+            }
+            let ordinal = usize::from(r.u16()?);
+            let key = keys
+                .get(ordinal)
+                .ok_or_else(|| Error::malformed(r.offset, "bulk column key ordinal"))?
+                .clone();
+            type_info.encryption = Some(Box::new(crate::types::crypto::CryptoMetadata::read(
+                r,
+                Some(key),
+            )?));
+        }
         columns.push(Column {
             user_type,
             flags,
             type_info,
-            name: short(&mut r)?,
+            name: r.text("column name", short)?,
         });
     }
     let mut records = vec![crate::Record::Columns(columns.clone())];
     loop {
-        match r.u8()? {
+        match r.field("token tag", |r| r.u8())? {
             0xd1 => {
                 let mut row = vec![];
                 for column in &columns {
@@ -414,11 +517,11 @@ pub fn bulk(bytes: &[u8]) -> Result<Vec<crate::Record>> {
                             SqlType::LegacyText { .. } | SqlType::LegacyImage
                         )
                     {
-                        let total = r.u64()?;
+                        let total = r.field("total length", |r| r.u64())?;
                         if total < u64::MAX - 1 {
                             let n = usize::try_from(total)
                                 .map_err(|_| Error::malformed(at, "bulk length"))?;
-                            let raw = r.take(n)?;
+                            let raw = r.field("data", |r| r.take(n))?;
                             // Reuse the normal PLP reader by supplying its missing
                             // chunk header; exact input encodings still apply.
                             let size = u32::try_from(n)
@@ -434,14 +537,14 @@ pub fn bulk(bytes: &[u8]) -> Result<Vec<crate::Record>> {
                         }
                         r.offset = at;
                     }
-                    row.push(input_value(info, &mut r)?);
+                    row.push(r.indexed("cell", row.len(), |r| input_value(info, r))?);
                 }
                 records.push(crate::Record::Row(row));
             }
             0xfd => {
-                let status = r.u16()?;
-                let command = r.u16()?;
-                let rows = r.u64()?;
+                let status = r.field("status", |r| r.u16())?;
+                let command = r.field("command", |r| r.u16())?;
+                let rows = r.field("row count", |r| r.u64())?;
                 records.push(crate::Record::Done(Done {
                     kind: DoneKind::Statement,
                     status,

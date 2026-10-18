@@ -549,6 +549,30 @@ Python's TLS engine works entirely in memory (`ssl.MemoryBIO`), so the core driv
 
 ---
 
+**D-65 · Finish Rust locally, validate Windows authentication on transient GCP, then destroy** · *Agreed, 2026-10-18* · [Roadmap](C-roadmap.md#rust-completion-sequence--agreed-2026-10-18-d-65)
+
+- Finish the solid local Rust implementation first, including local-key Always Encrypted and independent .NET interoperability checks. API/provider designs are agreed before affected implementation.
+- Add a parallel Terraform test setup under `infra/gcp/`. Create the Windows/domain infrastructure only when local work is ready; use it to implement and validate Windows authentication (NTLM/Kerberos), then destroy it. Preserve the historical Azure setup.
+- Entra authentication is deferred because tenant access is unavailable. Azure-specific providers/features, Windows certificate-store key-provider support and enclaves/attestation are outside this completion scope. Rust completion is explicitly scoped, not full Python parity.
+- Require an explicit target project, cost estimate, finite test window, expiry fallback and verified full teardown. Keep evidence after infrastructure is gone. No deployment is established by accepting this sequence.
+- Once local and Windows acceptance pass and teardown is verified, finish the scoped Rust phase and proceed to Python M16. Publishing Rust is a separate action.
+
+*Why:* GCP is accessible from the current development location, Windows authentication needs a real Windows/domain test environment, and the user wants cloud resources present only for the test campaign.
+
+---
+
+**D-66 · Encryption key reuse defaults to the transaction; applications choose the tradeoff** · *Agreed direction, 2026-10-18* · [Lifetimes and cost](M-rust-encryption-lifetimes.md)
+
+- Transaction scope is the default for retained encryption key material. Preserve the proposed exchange fallback outside explicit transactions; never create or extend a SQL transaction to retain keys.
+- Applications can select exchange scope or time-based handling to trade repeated key work against secret retention. The user clarified that time-based handling is the broader-retention option: it may reuse keys across transactions and autocommit exchanges within the same physical connection and exclusive pool lease, until a fixed application-selected maximum age. Reuse does not refresh that deadline. Pool return, reset, recovery, close and explicit invalidation still revoke the owner; it is not an application-global cache.
+- RAII cleanup erases owned plaintext keys and backend-owned secret copies when their permitted lifetime ends. Key expiry requires reloading on later use, rather than imposing a SQL transaction-duration limit.
+- Implementation checkpoint: [design N](N-encryption-policy-implementation.md) records the optional key-policy/local-crypto service, independent settings, bounded entries and actual driver lifecycle link. [Acceptance evidence](experiments/encryption-policy-evidence.md) distinguishes those results from the remaining transparent encrypted SQL and Rust/.NET work.
+- This changes D-60's long-lived shared-cache direction. Python implements the same retention choices in its existing transparent SQL facade ([Python design and evidence](experiments/python-encryption-retention.md)); it clears owned mutable key buffers without claiming Rust's stronger guarantees for Python/library copies. Rust's implemented foundation remains distinct from its pending transparent encrypted SQL support.
+
+*Why:* the user accepted transaction scope as the default and explicitly requested application control over exchange and time-based handling after reviewing measured setup and value costs.
+
+---
+
 ## Proposed and open
 
 **D-64 · Rust channels use movable authority rather than task identity** · *Proposed direction selected by the user, 2026-10-17* · [Rust ownership and permissions](D-rust-development.md#1--ownership-and-permissions-come-first)

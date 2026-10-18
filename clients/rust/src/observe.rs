@@ -2,8 +2,8 @@
 //!
 //! The core queues owned descriptions; the shell invokes callbacks only after
 //! the core step returns. Off allocates no descriptions. Outline and Full have
-//! the same lines; Full additionally exposes packet bytes and decoded records.
-//! Per-field inspection trees and their reference links are a later layer.
+//! the same lines; Full additionally exposes packet bytes, decoded records and
+//! selected field trees with bounded raw bytes and protocol references.
 
 use crate::{Record, packet};
 use std::{io, sync::Arc, time::Duration};
@@ -25,6 +25,19 @@ pub enum Inspection {
     },
     Record(Record),
 }
+impl Inspection {
+    pub fn render(&self) -> String {
+        match self {
+            Self::Record(record) => crate::inspection::shown(record),
+            Self::Packet { header, body } => format!(
+                "header {header:02x?}; body {} bytes: {:02x?}{}",
+                body.len(),
+                &body[..body.len().min(32)],
+                if body.len() > 32 { " …" } else { "" }
+            ),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Event {
@@ -34,6 +47,10 @@ pub struct Event {
     /// Monotonic time since this physical connection's observation began.
     pub elapsed: Duration,
     pub inspection: Option<Inspection>,
+    /// Additional field trees at Full only. Empty at Outline/Off.
+    pub fields: Vec<crate::inspection::Node>,
+    /// Present on a completed response event; event text remains unchanged.
+    pub timing: Option<crate::response::Timing>,
 }
 
 /// A short synchronous callback. It must not block or reenter the connection.
@@ -67,8 +84,18 @@ pub(crate) struct Observations {
     pub level: Level,
     pub capture: bool,
     pub keep_password: bool,
+    pub column_encryption: bool,
     pending: Vec<Trace>,
     incoming: packet::Unpacker,
+    bodies: std::collections::BTreeMap<(bool, Option<u64>), Body>,
+    expect_prelogin: bool,
+    token_fields: std::collections::BTreeMap<Option<u64>, crate::inspection::Node>,
+}
+#[derive(Default)]
+struct Body {
+    bytes: Vec<u8>,
+    length: usize,
+    omitted: bool,
 }
 pub enum Trace {
     Event(Box<Event>),
@@ -79,6 +106,96 @@ pub enum Trace {
     },
 }
 impl Observations {
+    pub fn timing(&mut self, timing: crate::response::Timing) {
+        if self.enabled()
+            && let Some(Trace::Event(event)) = self.pending.last_mut()
+        {
+            event.timing = Some(timing);
+        }
+    }
+    pub fn fields(
+        &mut self,
+        direction: &'static str,
+        channel: Option<u64>,
+        node: crate::inspection::Node,
+    ) {
+        if self.level != Level::Full {
+            return;
+        }
+        if !matches!(self.pending.last(), Some(Trace::Event(event)) if event.channel == channel) {
+            // A malformed token can fail before it produces a semantic record.
+            self.event(
+                "inspection",
+                || format!("{direction} field diagnostic"),
+                channel,
+                None,
+            );
+        }
+        if let Some(Trace::Event(event)) = self.pending.last_mut() {
+            event.fields.push(node);
+        }
+    }
+    pub fn token_fields(&mut self, channel: Option<u64>, node: crate::inspection::Node) {
+        self.token_fields.insert(channel, node);
+    }
+    fn message_fields(&mut self, direction: &'static str, channel: Option<u64>, bytes: &[u8]) {
+        if self.level != Level::Full {
+            return;
+        }
+        if let Ok(node) = packet::inspect_header(&bytes[..8]) {
+            self.fields(direction, channel, node);
+        }
+        let send = direction == "send";
+        let kind = bytes[0];
+        let prelogin_reply = !send && self.expect_prelogin && kind == packet::REPLY;
+        if !(send
+            && matches!(
+                kind,
+                packet::HELLO
+                    | packet::LOGIN
+                    | packet::BATCH
+                    | packet::RPC
+                    | packet::TRANSACTION
+                    | packet::BULK
+                    | packet::ATTENTION
+            ))
+            && !prelogin_reply
+        {
+            return;
+        }
+        let key = (send, channel);
+        let body = self.bodies.entry(key).or_default();
+        body.length = body.length.saturating_add(bytes.len() - 8);
+        if body.length <= crate::wire::MAX_PENDING {
+            body.bytes.extend_from_slice(&bytes[8..]);
+        } else {
+            body.omitted = true;
+            body.bytes.clear();
+        }
+        if bytes[1] & 1 == 0 {
+            return;
+        }
+        let body = self.bodies.remove(&key).unwrap();
+        if prelogin_reply {
+            self.expect_prelogin = false;
+        }
+        if body.omitted {
+            self.fields(
+                direction,
+                channel,
+                crate::inspection::omitted_message(body.length),
+            );
+        } else if let Some(node) = crate::inspection::message_with_encryption(
+            if prelogin_reply { packet::HELLO } else { kind },
+            &body.bytes,
+            self.column_encryption,
+        ) {
+            if send && kind == packet::HELLO {
+                self.expect_prelogin = true;
+            }
+            self.fields(direction, channel, node);
+        }
+    }
     pub fn enabled(&self) -> bool {
         self.level != Level::Off || self.capture
     }
@@ -100,6 +217,8 @@ impl Observations {
                 } else {
                     None
                 },
+                fields: Vec::new(),
+                timing: None,
             })));
         }
     }
@@ -140,6 +259,9 @@ impl Observations {
             channel,
             inspection,
         );
+        if let Some(node) = self.token_fields.remove(&channel) {
+            self.fields("receive", channel, node);
+        }
     }
     pub fn message(&mut self, direction: &'static str, what: &str, channel: Option<u64>) {
         self.event(
@@ -186,12 +308,16 @@ impl Observations {
             channel,
             inspection,
         );
+        self.message_fields(direction, channel, view);
     }
     pub fn take(&mut self) -> Vec<Trace> {
         std::mem::take(&mut self.pending)
     }
     pub fn reset_input(&mut self) {
         self.incoming = packet::Unpacker::default();
+        self.bodies.clear();
+        self.expect_prelogin = false;
+        self.token_fields.clear();
     }
     pub fn received(&mut self, channel: Option<u64>, packet: &packet::Packet) {
         if self.enabled() {

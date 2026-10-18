@@ -23,6 +23,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use super::ProtocolVersion;
@@ -64,8 +65,27 @@ struct ResponseStream {
     message_end: bool,
     terminal: Option<Record>,
     session_id: u16,
+    timing: crate::response::Timing,
+    first_packet_seen: bool,
 }
 impl ResponseStream {
+    fn decoded(
+        &mut self,
+        observations: &mut Observations,
+        channel: Option<u64>,
+    ) -> Result<Option<Record>> {
+        self.decoder
+            .set_inspection(observations.level == Level::Full);
+        let result = self.decoder.next_record();
+        if let Some(node) = self.decoder.take_inspection() {
+            if !matches!(result, Ok(Some(_))) {
+                observations.fields("receive", channel, node);
+            } else {
+                observations.token_fields(channel, node);
+            }
+        }
+        result
+    }
     /// Deliver final completion only after its enclosing message also ends.
     /// A final token may precede an empty LAST packet; extra payload is invalid.
     fn next_token(
@@ -74,6 +94,7 @@ impl ResponseStream {
         observations: &mut Observations,
         channel: Option<u64>,
         record_packets: bool,
+        elapsed: Option<Duration>,
     ) -> Result<Option<Record>> {
         loop {
             if self.terminal.is_some() {
@@ -84,7 +105,7 @@ impl ResponseStream {
                     self.message_end = false;
                     return Ok(self.terminal.take());
                 }
-            } else if let Some(record) = self.decoder.next_record()? {
+            } else if let Some(record) = self.decoded(observations, channel)? {
                 if matches!(&record,Record::Done(done) if
                     if canceling { done.acknowledges_cancel() } else { done.is_final() })
                 {
@@ -115,12 +136,18 @@ impl ResponseStream {
             if packet.kind != packet::REPLY {
                 return Err(Error::malformed(0, "response packet type"));
             }
+            if !self.first_packet_seen {
+                self.first_packet_seen = true;
+                self.timing.first_packet = elapsed;
+            }
             self.session_id = packet.session_id;
             self.decoder.feed(&packet.body)?;
             self.message_end = packet.last;
         }
     }
     fn configure_features(&mut self, features: &BTreeMap<u8, Vec<u8>>) -> Result<()> {
+        self.decoder
+            .set_column_encryption(features.get(&4).is_some_and(|v| v == &[1]));
         self.decoder
             .set_utf8_support(features.get(&10).is_some_and(|v| v == &[1]));
         self.decoder
@@ -172,6 +199,7 @@ pub struct ConnectionCore {
     reset_pending: bool,
     login_route: Option<crate::tokens::RoutingChange>,
     observations: Observations,
+    elapsed: Option<Duration>,
 }
 
 impl ConnectionCore {
@@ -257,6 +285,7 @@ impl ConnectionCore {
             reset_pending: false,
             login_route: None,
             observations: Observations::default(),
+            elapsed: None,
         })
     }
     pub fn step(&self) -> Step {
@@ -347,10 +376,20 @@ impl ConnectionCore {
     pub fn take_observations(&mut self) -> Vec<Trace> {
         self.observations.take()
     }
+    /// Supply monotonic time since this physical epoch began. No clock is read
+    /// by the core. A caller that supplies no time receives unknown milestones.
+    pub fn set_elapsed(&mut self, elapsed: Duration) {
+        self.elapsed = Some(elapsed);
+    }
+    /// Latest milestones for this channel's current or most recent exchange.
+    pub fn channel_timing(&self, id: u64) -> Option<crate::response::Timing> {
+        self.channels.get(&id).map(|channel| channel.stream.timing)
+    }
     pub fn disable_observer(&mut self) {
         self.observations.level = Level::Off;
     }
     pub fn observe_request_sent(&mut self, id: u64) {
+        self.channels.get_mut(&id).unwrap().stream.timing.sent = self.elapsed;
         // Attention is announced by send_channel, including private drains that
         // have no public Begin reply. A public bulk abort must not announce it
         // twice: saved replay pairs one event with one physical message.
@@ -393,6 +432,10 @@ impl ConnectionCore {
     }
     pub fn session(&self) -> &Session {
         &self.session
+    }
+    #[cfg(feature = "encryption")]
+    pub(crate) fn reuse_reset_pending(&self) -> bool {
+        self.reset_pending
     }
     pub fn is_failed(&self) -> bool {
         self.failure.is_some()
@@ -707,7 +750,7 @@ impl ConnectionCore {
     fn read_login(&mut self) -> Result<()> {
         while let Some(record) =
             self.stream
-                .next_token(false, &mut self.observations, None, false)?
+                .next_token(false, &mut self.observations, None, false, None)?
         {
             self.observations.record(None, &record);
             self.session.session_id = self.stream.session_id;
@@ -734,6 +777,7 @@ impl ConnectionCore {
                             self.initial_states = Some(data.clone());
                         } else {
                             let valid = match id {
+                                4 => data == [1],
                                 9 => {
                                     data.len() == 2
                                         && [1, 2].contains(&data[0])
@@ -755,6 +799,9 @@ impl ConnectionCore {
                                     "invalid feature acknowledgement version",
                                 ));
                             }
+                        }
+                        if id == 4 {
+                            self.observations.column_encryption = true;
                         }
                         self.session.features.insert(id, data);
                     }
@@ -1004,6 +1051,7 @@ impl ConnectionCore {
             .count()
             + 1;
         Ok(crate::requests::Context {
+            column_encryption: self.session.features.get(&4).is_some_and(|v| v == &[1]),
             transaction: self.session.transaction,
             outstanding: outstanding as u32,
         })
@@ -1042,6 +1090,8 @@ impl ConnectionCore {
         channel.exchange_failed = false;
         channel.request_label = label;
         channel.request_kind = encoded.kind;
+        channel.stream.timing = crate::response::Timing::default();
+        channel.stream.first_packet_seen = false;
         channel.stream.decoder.set_metadata(encoded.metadata);
         if streaming {
             return Ok(encoded.body);
@@ -1111,8 +1161,9 @@ impl ConnectionCore {
             if let Some(record) = channel.stream.next_token(
                 channel.canceling,
                 &mut self.observations,
-                self.mars.then_some(id),
+                Some(id),
                 self.mars,
+                self.elapsed,
             )? {
                 self.observations.record(Some(id), &record);
                 self.session.session_id = channel.stream.session_id;
@@ -1175,6 +1226,8 @@ impl ConnectionCore {
             channel.opening_bulk = false;
             channel.exchange = None;
             channel.canceling = false;
+            channel.stream.timing.ended = self.elapsed;
+            let timing = channel.stream.timing;
             self.observations.message(
                 "receive",
                 if canceling {
@@ -1184,6 +1237,7 @@ impl ConnectionCore {
                 },
                 self.mars.then_some(id),
             );
+            self.observations.timing(timing);
         }
         Ok(Some(record))
     }
@@ -1192,6 +1246,181 @@ impl ConnectionCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn timing_requires_complete_packets_and_terminal_message_proof_at_every_level() {
+        for level in [Level::Off, Level::Outline, Level::Full] {
+            let mut core = ready_core();
+            core.configure_observation(level, false, false).unwrap();
+            core.channels.insert(
+                1,
+                ChannelState {
+                    exchange: Some(1),
+                    ..Default::default()
+                },
+            );
+            core.set_elapsed(Duration::from_millis(10));
+            core.observe_request_sent(1);
+            let mut first = done(0);
+            first[1] = 0; // Terminal token is not yet the message boundary.
+            core.channels
+                .get_mut(&1)
+                .unwrap()
+                .stream
+                .packets
+                .feed(&first[..7])
+                .unwrap();
+            core.set_elapsed(Duration::from_millis(15));
+            assert!(core.next_record(1, 1).unwrap().is_none());
+            assert_eq!(core.channel_timing(1).unwrap().first_packet, None);
+            core.channels
+                .get_mut(&1)
+                .unwrap()
+                .stream
+                .packets
+                .feed(&first[7..])
+                .unwrap();
+            core.set_elapsed(Duration::from_millis(20));
+            assert!(core.next_record(1, 1).unwrap().is_none());
+            assert_eq!(core.channel_timing(1).unwrap().ended, None);
+            core.channels
+                .get_mut(&1)
+                .unwrap()
+                .stream
+                .packets
+                .feed(&packet::split(packet::REPLY, &[], 4096).unwrap())
+                .unwrap();
+            core.set_elapsed(Duration::from_millis(35));
+            assert!(core.next_record(1, 1).unwrap().is_some());
+            let timing = core.channel_timing(1).unwrap();
+            assert_eq!(timing.until_first_packet(), Some(Duration::from_millis(10)));
+            assert_eq!(timing.until_end(), Some(Duration::from_millis(25)));
+            let traces = core.take_observations();
+            if level == Level::Off {
+                assert!(traces.is_empty());
+            } else {
+                assert!(
+                    traces
+                        .iter()
+                        .any(|t| matches!(t, Trace::Event(e) if e.timing == Some(timing)))
+                );
+            }
+            core.begin(1, 2, &Batch::new("next")).unwrap();
+            assert_eq!(
+                core.channel_timing(1),
+                Some(crate::response::Timing::default())
+            );
+        }
+    }
+    #[test]
+    fn cancel_timing_waits_for_ack_and_never_invents_an_unsent_milestone() {
+        let mut core = ready_core();
+        core.channels.insert(
+            1,
+            ChannelState {
+                exchange: Some(1),
+                canceling: true,
+                ..Default::default()
+            },
+        );
+        core.set_elapsed(Duration::from_secs(2));
+        core.channels
+            .get_mut(&1)
+            .unwrap()
+            .stream
+            .packets
+            .feed(&done(0))
+            .unwrap();
+        assert!(core.next_record(1, 1).unwrap().is_some());
+        assert_eq!(core.channel_timing(1).unwrap().ended, None);
+        core.set_elapsed(Duration::from_secs(4));
+        core.channels
+            .get_mut(&1)
+            .unwrap()
+            .stream
+            .packets
+            .feed(&done(0x20))
+            .unwrap();
+        assert!(core.next_record(1, 1).unwrap().is_some());
+        let timing = core.channel_timing(1).unwrap();
+        assert_eq!(timing.sent, None);
+        assert_eq!(timing.first_packet, Some(Duration::from_secs(2)));
+        assert_eq!(timing.ended, Some(Duration::from_secs(4)));
+        assert_eq!(timing.until_end(), None);
+        assert_eq!(timing.summary(), "");
+    }
+    #[test]
+    fn a_missing_first_packet_clock_is_not_reconstructed_from_later_packets() {
+        let mut core = ready_core();
+        core.channels.insert(
+            1,
+            ChannelState {
+                exchange: Some(1),
+                ..Default::default()
+            },
+        );
+        let mut first = done(0);
+        first[1] = 0;
+        core.channels
+            .get_mut(&1)
+            .unwrap()
+            .stream
+            .packets
+            .feed(&first)
+            .unwrap();
+        assert!(core.next_record(1, 1).unwrap().is_none());
+        core.set_elapsed(Duration::from_secs(8));
+        core.channels
+            .get_mut(&1)
+            .unwrap()
+            .stream
+            .packets
+            .feed(&packet::split(packet::REPLY, &[], 4096).unwrap())
+            .unwrap();
+        assert!(core.next_record(1, 1).unwrap().is_some());
+        assert_eq!(core.channel_timing(1).unwrap().first_packet, None);
+        let reversed = crate::response::Timing {
+            sent: Some(Duration::from_secs(9)),
+            ended: Some(Duration::from_secs(8)),
+            ..Default::default()
+        };
+        assert_eq!(reversed.until_end(), None);
+    }
+    #[test]
+    fn sibling_channels_have_independent_exchange_clocks() {
+        let mut core = ready_core();
+        core.mars = true;
+        for id in [1, 2] {
+            core.channels.insert(
+                id,
+                ChannelState {
+                    exchange: Some(id),
+                    ..Default::default()
+                },
+            );
+            core.set_elapsed(Duration::from_secs(id));
+            core.observe_request_sent(id);
+            core.channels
+                .get_mut(&id)
+                .unwrap()
+                .stream
+                .packets
+                .feed(&done(0))
+                .unwrap();
+        }
+        core.set_elapsed(Duration::from_secs(4));
+        assert!(core.next_record(2, 2).unwrap().is_some());
+        assert_eq!(core.channel_timing(1).unwrap().first_packet, None);
+        core.set_elapsed(Duration::from_secs(8));
+        assert!(core.next_record(1, 1).unwrap().is_some());
+        assert_eq!(
+            core.channel_timing(2).unwrap().until_end(),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            core.channel_timing(1).unwrap().until_end(),
+            Some(Duration::from_secs(7))
+        );
+    }
     fn core() -> ConnectionCore {
         ConnectionCore::new(
             Login {
@@ -1248,8 +1477,20 @@ mod tests {
             core.read_login()?;
             Ok(core)
         }
-        let requested = [(9, vec![2]), (10, vec![1]), (13, vec![1]), (14, vec![2])];
-        let acknowledged = [(9, vec![1, 0]), (10, vec![0]), (13, vec![1]), (14, vec![1])];
+        let requested = [
+            (4, vec![1]),
+            (9, vec![2]),
+            (10, vec![1]),
+            (13, vec![1]),
+            (14, vec![2]),
+        ];
+        let acknowledged = [
+            (4, vec![1]),
+            (9, vec![1, 0]),
+            (10, vec![0]),
+            (13, vec![1]),
+            (14, vec![1]),
+        ];
         let core = login_reply(&requested, &acknowledged).unwrap();
         assert!(core.is_ready());
         assert_eq!(core.session.features, acknowledged.into_iter().collect());
@@ -1261,6 +1502,9 @@ mod tests {
                 .is_empty()
         );
         for invalid in [
+            vec![(4, vec![0])],
+            vec![(4, vec![2])],
+            vec![(4, vec![1, 0])],
             vec![(9, vec![2])],
             vec![(9, vec![2, 2])],
             vec![(9, vec![0, 1])],

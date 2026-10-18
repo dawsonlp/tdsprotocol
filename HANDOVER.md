@@ -1,11 +1,15 @@
 # Rust client handover
 
-Prepared 2026-10-18. Branch: `rust-client`. Committed baseline `a562803` contains
-the Rust implementation, tests, fixtures, design records, probes and offline site.
-The interrupted-I/O iteration below adds its tests and acceptance records.
+Prepared 2026-10-18. Branch: `rust-client`. Committed baseline `6e2da04` contains
+the implementation and interrupted-I/O tests/acceptance records. Field inspection,
+roadmap decisions and the local completion continuation below are subsequent
+working-tree work.
 Inspect `git status` before editing to distinguish any further changes.
-Python corrections are committed and released as **v0.2.0** on `main`; the Rust
-implementation remains unpublished. The active checkout stays on `rust-client`.
+Python key-retention changes are committed and released as **v0.3.0** on `main`
+and annotated tag `v0.3.0` at `1e974dc`. The Rust implementation remains unpublished.
+The active checkout stays on `rust-client`, with Python metadata aligned to the
+release and its unfinished Rust source preserved. See the v0.3.0 checkpoint below;
+earlier v0.2.0 and implementation checkpoints are historical.
 
 The aim is a clear, literate Rust TDS client with Python's assessed correct
 behavior, explicit ownership, exact values and visible wire conversations.
@@ -38,10 +42,12 @@ sequential. Rust release/publication is a separate future task.
 - [Support matrix](clients/rust/SUPPORT.md): current implemented features and
   remaining gaps. It supersedes older historical gap lists.
 - [Acceptance evidence](clients/rust/ACCEPTANCE.md): the top check table and final
-  **Interrupted I/O acceptance** section are the latest checkpoint. Earlier sections
+  **Transparent Always Encrypted** section are the latest checkpoint. Earlier sections
   retain historical results, including the preceding table/bulk slice.
 - [Interruption matrix](clients/rust/INTERRUPTIONS.md): named submission, partial
   socket write, cleanup, pool/recovery and runtime-shutdown boundaries and limits.
+- [Field inspection](docs/design/L-rust-field-inspection.md): shared definitions,
+  packet/message/token coordinates, bounded evidence, masking and current scope.
 - [Rust README](clients/rust/README.md): public API, lifetime rules and CLI.
 - [Offline replay design](docs/design/K-offline-replay.md): approved representation,
   capture compatibility, failure boundaries and evidence limits.
@@ -50,7 +56,140 @@ sequential. Rust release/publication is a separate future task.
 - [Design index](docs/design/README.md) and [checklist](RUST_CHECKLIST.md).
   Markdown is authoritative; `site/` is its offline presentation.
 
-## Latest slice: interrupted I/O acceptance
+## Latest checkpoint: transparent local-key Always Encrypted
+
+The local SQL integration is implemented in [design O](docs/design/O-rust-transparent-encryption.md):
+version-one negotiation and wire metadata, exact normalization, fresh parameter
+descriptions, named parameter encryption, authenticated rows/outputs and owned
+bulk, including bulk returned result sets. Raw/default/core reading and replay
+preserve explicit ciphertext; crypto failures use `NotDecrypted` cells. Decrypted
+values never enter the core observation/capture pipeline. Ordinary plaintext SQL
+and parameters keep their existing capture policy.
+
+`Connection::encrypted` attaches one key owner for the current physical epoch/
+lease and flushes deferred reset before key use. Transaction retention remains
+the default; exchange and fixed-age overrides are explicit. `finish` skips crypto
+for discarded rows. A discovery error means application SQL `NotSent`; application
+SQL is not replayed. Close/drop and reattach after physical recovery. Applications
+can explicitly retire keys with `invalidate_keys()`.
+
+Current checks are **209 default, 90 core-only, 240 encryption-enabled**,
+**61 all-feature live and 57 default live**; strict Clippy in all three modes,
+formatting, rustdoc and all-feature local package verification pass.
+
+The [retained report](docs/design/experiments/rust-transparent-encryption.md)
+contains independent .NET read/write/lookup/bulk evidence across all 28 type cases,
+a four-mode live lifecycle matrix and synthetic fault/capture checks. The tested
+minimum is Rust 1.99.1 on macOS ARM64; examples, license/packaging and repeatable
+`tools/check_rust.py --live` checks are included. Encrypted source producers and
+borrowed plaintext chunk readers are not provided; crypto values are bounded at
+16 MiB. This is the finite local AE scope, not full Python parity.
+
+Next is the [Windows/provider campaign](docs/design/P-windows-authentication-campaign.md).
+The owner has been asked to approve the optional portable/native SSPI provider
+approach and supply an explicit GCP project/region plus maximum spend/window.
+No authentication dependency, Windows-authentication implementation, cloud
+resource, Rust release or new commit is claimed. Changes stay on `rust-client`.
+The local checklist remains excluded from Git. Scoped Rust is not done until
+Windows acceptance and verified lab teardown are complete.
+
+## Previous checkpoint: local completion continuation
+
+The local-only `RUST_COMPLETION.local.md` checklist is excluded through
+`.git/info/exclude`. Its first five finite slices are checked: baseline, timing,
+supported request/streamed-response inspection, replay evidence diagnostics and
+targeted robustness. Read its scope notes; it does not assert every metadata
+extension or reconstruct columns absent from a recording.
+
+Rust exposes `Timing` on live/owned response snapshots at all levels. The shell
+supplies physical-epoch-relative monotonic time to the core; the first packet is
+stamped on reader consumption as Python does. Completion waits for terminal
+message proof; cancellation measures cleanup. Recorded `took` descriptions are
+preserved by replay. RPC/TVP/transaction/bulk input inspection and incremental
+row/RETURNVALUE fragments share the existing checked readers. Large request
+inspection retains its 1 MiB diagnostic omission bound.
+
+Current checks: **206 default**, **87 core-only**, **57 serial Docker**; both
+strict Clippy configurations, fmt, rustdoc and CLI build. Eight actual full-level
+bulk/stream CLI captures across both versions × plain/MARS replay through both
+clients with masking and timing checked. Logs: `/private/tmp/tds-completion-*`;
+captures: `/private/tmp/tds-completion-cli-xxt77an8`.
+
+**Encryption policy/local-crypto foundation implemented (D-66):** the optional
+`encryption` feature provides local PKCS#8 RSA loading, signed unwrap, derived
+AES/HMAC handles and authenticated byte encryption/decryption. Independent master
+and column policies default to transaction; exchange and fixed-age time options
+are implemented. Time can span transactions within one connection/lease. Idle
+expiry, capacity eviction, cancellation/late-result checks, guarded memory and
+runtime-shutdown cleanup are covered by named scenarios.
+
+Read [scenarios](docs/design/experiments/encryption-policy-scenarios.md), then
+[implementation N](docs/design/N-encryption-policy-implementation.md), then
+[evidence](docs/design/experiments/encryption-policy-evidence.md). The source is
+`clients/rust/src/encryption/`; `Connection::key_session` binds to actual decoded
+transaction/context, pool return, recovery and close. At that foundation checkpoint applications owned a manual byte-crypto exchange
+guard; the transparent SQL adapter above now supplies it.
+The deferred-reset correction clears pre-ACK keys without retiring a newly
+borrowed service. Opaque security-context changes require explicit invalidation.
+
+Twenty exchanges prove 1/1 loads/unwraps for transaction defaults, 20/20 for
+exchange, 1/20 for a retained master and 1/1 for retained columns only. The
+30-scenario campaign has 28 unit/controller tests, one controlled recovery matrix
+and two live SQL functions across 7.4/8.0 × plain/MARS. Source review traces native
+RSA consistency and default destruction paths; test instrumentation separately
+checks five owned buffer stages before deallocation. Stronger stack/register,
+abort, custom-allocator, swap/dump guarantees are not claimed.
+
+Python's reproduced cache collision is corrected using complete wrapped evidence
+and provider/backend identity retirement. The probe now yields false/2/true;
+96 focused Python encryption tests passed at that Rust-foundation checkpoint.
+The subsequent Python retention checkpoint below replaces context-wide key
+retention; erasure limits for Python/library temporary copies remain explicit.
+
+New checks: 235 encryption-enabled default checks, 206 normal checks, 87 core-only,
+59 serial Docker; strict Clippy in all three configurations, formatting and
+all-feature rustdoc. The release `key_policy_cost` example measures the actual
+service with guarded PEM loading, worker scheduling and value round trips.
+Retained counters, raw logs, source hashes and cost JSON are linked from evidence.
+
+Those local SQL integration requirements are now completed by the latest
+checkpoint above. Scoped Rust remains unfinished until Windows acceptance.
+
+All source changes remain uncommitted. No GCP resources have been created.
+
+## Previous slice: connection/scalar-query field inspection
+
+`inspection::Node` and optional recording in the checked reader implement named
+fields/groups, explicit packet/message/token byte ranges, bounded raw/display
+prefixes, protocol-reference paths and located issues. Definitions provide the
+field names/ranges. Packet headers, PRELOGIN, selected LOGIN7 identity/options,
+SQL batches, LOGINACK, INFO/ERROR, column/scalar row metadata/cells, NBCROW and
+completion tokens form the agreed vertical slice.
+
+Live `observe::Event.fields` is populated only at Full, alongside the existing
+packet/record inspection. Healthy Outline/Full lines remain identical. The native
+`replay_with_inspection(input, true, callback)` adds `Content::Inspection`; the
+existing `replay` API builds no trees. Both CLI modes render the shared trees.
+Capture JSONL remains unchanged. LOGIN7 inspection retains no aggregate login
+payload and keeps credential spans masked even for keep-password recordings.
+The whole-message diagnostic assembly bound is 1 MiB and does not limit SQL;
+nodes retain at most 8,192 raw bytes and 1,024 display bytes plus a marker.
+
+Independent Python fixtures exposed a Rust offline LOGIN7-version byte-order
+defect. That field now reads little-endian, matching Python and the correct
+sender; LOGINACK remains big-endian. Python code is unchanged. The prior MARS
+interruption peer gained a missing first-request read checkpoint so its measured
+five-byte raw tail cannot be swallowed by an earlier buffered TLS read.
+
+Five pure inspection tests and one controlled TLS test supplement the existing
+suite. Nine artificial Python cases check field ranges/bytes. Controlled tests
+compare live/replayed trees with one-byte TDS payload packets in all four modes.
+A new live SQL Server test compares actual login, INFO, scalar/NULL/Unicode row
+and completion trees under 7.4/8.0 × non-MARS/MARS. It accepts the valid ROW or
+NBCROW framing actually returned. Detailed timings and broader RPC/TVP/bulk/
+streamed-value trees remain separate work. See the current acceptance check table.
+
+## Preceding slice: interrupted I/O acceptance
 
 The approved next iteration adds fifteen deterministic private driver tests in
 `clients/rust/src/connection/shell/interruptions.rs`. A `cfg(test)`-only endpoint
@@ -95,8 +234,7 @@ issues produce located diagnostics and preserve the valid emitted prefix. The
 CLI exits nonzero on issues; reader/callback I/O errors are separate failures.
 Zero decode issues does not prove session closure or every obligation created
 by arbitrary SQL. Missing saved NO_METADATA context and unsupported extensions
-are explicit limits. Full field trees/reference links and timing analysis remain
-separate work.
+are explicit limits. Broader field trees and timing analysis remain separate work.
 
 Python's `types.TableInput` now retains saved TVP declarations and rows, separate
 from result cells. It reads default columns, sort/unique/placement hints and exact
@@ -111,14 +249,20 @@ fix. No implicit commit/rollback or request execution/retry is introduced.
 
 ## Fresh evidence and limits
 
+The field-inspection checkpoint passes **196 default**, **78 core-only**, and
+**57 serial Docker** checks. Both strict Clippy modes, fmt/docs/build and all
+**37 JavaScript syntax checks** pass. The actual Full CLI shows field ranges,
+reference paths and masked credentials with the expected scalar result.
+Logs use `/private/tmp/tds-inspect-*`. Design L has an offline generated page.
+No Python implementation or full Python regression was changed/run in this slice.
+
 The preceding replay checkpoint had **175 default**, **73 core-only**, **56 serial
 Docker tests**, with final affected replay tests rerun. The interrupted-I/O
 checkpoint passes **190 default**, **73 core-only**, and **56 serial Docker**
 checks. Both strict Clippy modes, formatting, documentation and executable build
-pass. Python's preceding full run was **782 passed,
-13 skipped**, 120.60 seconds; it was not rerun for these Rust-only tests. Generated
-design pages are unchanged because this iteration changes acceptance records,
-not the shared design.
+pass. Python's preceding full run was **782 passed, 13 skipped**, 120.60 seconds;
+it was not rerun for those Rust-only tests. Generated design pages were unchanged
+at that interrupted-I/O checkpoint.
 
 Both offline readers accept **48 fresh saved physical recordings** (32 two-client
 scenario captures plus 16 Rust recovery epochs) with credential masking. Native
@@ -134,13 +278,24 @@ policy or claiming every placement combination succeeds.
 
 ## Continuing work
 
-Use the support matrix: field inspection/timings, binary XML, alternate compute
+Use the support matrix: remaining metadata-extension fields, binary XML, alternate compute
 tokens, authentication/encryption providers, broader platform/failover evidence,
 additional interruption offsets/schedules and readability/release review remain open.
 Native replay and Python TVP replay are completed; older pending notes are stale.
-The approved finite interrupted-I/O matrix is implemented; it does not promise
-exhaustive scheduling coverage. Field inspection trees and timing detail are the
-recommended next feature iteration, subject to user approval.
+The approved finite interrupted-I/O and connection/query inspection slices are
+implemented; they do not promise exhaustive scheduling or field coverage.
+The user agreed a broader completion sequence on 2026-10-18 (D-65): finish local
+Rust work including local-key Always Encrypted and independent .NET checks; add
+Terraform GCP Windows/domain infrastructure; implement/test Windows NTLM/Kerberos
+authentication; retain evidence and verify full teardown, then finish the scoped
+Rust phase and move to M16. Entra and Azure-specific providers/features, Windows
+certificate-store key-provider support and enclaves/attestation are deferred.
+Timing is part of local completion rather than the overall roadmap objective.
+See [the roadmap](docs/design/C-roadmap.md) for gates and cost/lifecycle requirements.
+No GCP resources have been provisioned. `gcloud` and Terraform are installed;
+the current gcloud default project belongs to another production workload and
+must not be used implicitly. A target project/region and finite cost/test window
+are still needed before deployment. Cloud permissions/quotas are unverified.
 
 The existing server is `mssql-2025`, `127.0.0.1:14325`, database `tds_test`.
 Recheck availability. Use existing Compose and ignored credentials/test CA; do not
@@ -160,3 +315,59 @@ Rust recovery tests can save masked files with `TDS_RECOVERY_CAPTURE_DIR`; the
 current sixteen are in `/private/tmp/tds-replay-recovery-iteration`. Test logs use
 `/private/tmp/tds-replay-*`. Temporary evidence is not a committed fixture corpus.
 After design edits run `uv run --offline tools/render_planning_pages.py`.
+
+
+## Python key-retention implementation checkpoint — 2026-10-18 (before release)
+
+Python now implements D-66 in its transparent Always Encrypted facade: transaction
+(default with exchange fallback), exchange and fixed-age retention; independent
+local master/column policies; bounded caches; idle expiry and exchange overrides.
+One bank and statement/enclave context belongs to each physical connection/lease.
+Decoded server events, pool return/reset, transport failure/recovery and close
+clear/revoke authority. Deferred reset completes before parameter describing.
+Owned mutable root/AES/MAC/IV buffers are overwritten; Python/library and native
+provider copies remain outside that guarantee. Provider overrides and custom
+backends' existing bytes contract are preserved. See the [API reference](docs/design/3-reference/always-encrypted.md#key-retention)
+and [design/scenarios/evidence](docs/design/experiments/python-encryption-retention.md).
+
+Full Python checks: **866 passed, 13 Windows/Azure infrastructure skips** in
+153.30 seconds, including the existing Python/.NET encryption interoperability
+check. Focused core/encryption/controller checks: **77 passed**. Forty new live
+policy cases cover TDS 7.4/8.0 × plain/MARS. An unsent BulkRows source failure
+exposed a prior continuation bug: preparation is now retained until awaited
+channel close cancels/drains it; unresolved return/recovery remains refused.
+
+No commit, release or cloud infrastructure was created. Rust source was preserved;
+its transparent encrypted SQL integration and independent Rust/.NET acceptance
+remain next. Do not confuse Python's completed SQL integration with Rust's service
+foundation or equate the two memory-erasure guarantees.
+
+
+## Python v0.3.0 release checkpoint — 2026-10-18
+
+Python retention work is committed on the active branch as `98d25fd`, and copied
+without Rust commits to main as `ce9566c`. Release commit `1e974dc` updates version,
+lockfile, compatibility notes, policy decision and documentation. Main and the
+annotated `v0.3.0` tag were pushed and remotely verified at that release commit.
+GitHub Release: https://github.com/dawsonlp/tdsprotocol/releases/tag/v0.3.0
+Its notes explicitly say Rust implementation exposed the need for these policies.
+
+The isolated main-based checkout passed **866 tests, 13 Windows/Azure infrastructure
+skips** in 148.29 seconds, including Python/.NET encryption interoperability.
+An initial run lacked ignored mock-server TLS fixtures; linking the existing
+local test CA, server certificate and server key fixed setup without source changes.
+When repeating isolated tests, supply all three TLS fixtures and the test password
+through the environment; never commit/copy key material into release assets.
+
+Wheel and source builds passed offline. All 34 packaged Python modules match the
+release checkout. An isolated installed wheel verified version 0.3.0, API imports,
+CLI help, all policy choices, value crypto and cleanup. The three GitHub assets
+(wheel, source archive, SHA256SUMS) were downloaded and verified against the local
+artifacts and published checksums. GitHub Pages run `39171122479` succeeded; its
+live index, Python retention page and Always Encrypted reference match the release.
+
+The active branch has metadata/evidence alignment commit `82998a9`;
+`git diff main -- clients/python` is empty. Other snapshotted source/draft files
+were preserved by hash; this handover was updated intentionally. The temporary
+release worktree is removed after verification. Existing Rust work remains
+uncommitted and unpublished; Rust SQL encryption/.NET acceptance is still next.

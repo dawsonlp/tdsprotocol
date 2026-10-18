@@ -1,0 +1,385 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running unittests src/lib.rs (clients/rust/target/debug/deps/tds_client-ef4a449d767bb878)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 85 filtered out; finished in 0.00s
+
+     Running unittests src/bin/tds/main.rs (clients/rust/target/debug/deps/tds-5a973c248b3ddfa7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/browser.rs (clients/rust/target/debug/deps/browser-d3d8d25fe1364078)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/bulk_shell.rs (clients/rust/target/debug/deps/bulk_shell-c86e26ed47dae6ce)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/cancellation.rs (clients/rust/target/debug/deps/cancellation-2f91ca740f11f1fb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/channel_close.rs (clients/rust/target/debug/deps/channel_close-02738531f7954222)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (clients/rust/target/debug/deps/cli-01f1160cfac5ecad)
+
+running 4 tests
+test executable_demonstrates_explicit_transaction_state ... ok
+test executable_demonstrates_streamed_bulk_finish_and_explicit_abort ... ok
+test executable_reads_rows_calls_output_parameters_and_reports_sql_errors ... ok
+test executable_streams_result_chunks_and_binary_file_parameters ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 2.61s
+
+     Running tests/collations.rs (clients/rust/target/debug/deps/collations-cb56ca2cd2b6337e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/config.rs (clients/rust/target/debug/deps/config-19f591d06f6851f6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/connection_failures.rs (clients/rust/target/debug/deps/connection_failures-6b700e88ad2a6957)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/decoder_robustness.rs (clients/rust/target/debug/deps/decoder_robustness-5af7e0b94fe64d92)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/encryption_live.rs (clients/rust/target/debug/deps/encryption_live-fc506cfeae14f3e7)
+
+running 2 tests
+test kp26_live_pool_return_and_next_borrower_reset ... KP_LIVE V7_4 mars=false pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V7_4 mars=true pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=false pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=true pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+ok
+test kp26_live_transaction_boundaries_and_manual_encrypted_echo ... KP_LIVE V7_4 mars=false transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V7_4 mars=false timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V7_4 mars=true transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V7_4 mars=true timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=false transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V8_0 mars=false timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=true transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V8_0 mars=true timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.87s
+
+     Running tests/encryption_wire.rs (clients/rust/target/debug/deps/encryption_wire-3bfcce8c71a8cd7f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/inspection.rs (clients/rust/target/debug/deps/inspection-8019f68678506291)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/inspection_extended.rs (clients/rust/target/debug/deps/inspection_extended-2c9959dee5286757)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/inspection_shell.rs (clients/rust/target/debug/deps/inspection_shell-82888bd755791519)
+
+running 1 test
+test sql_server_login_and_scalar_query_have_equal_live_and_saved_field_trees ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.35s
+
+     Running tests/json.rs (clients/rust/target/debug/deps/json-e556e6329ab1394d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/large_values.rs (clients/rust/target/debug/deps/large_values-c26cf19ec046574d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/live_bulk.rs (clients/rust/target/debug/deps/live_bulk-36c2ca753b1a3f66)
+
+running 3 tests
+test borrowed_bulk_finish_abort_encoding_failures_and_row_sources_preserve_the_session ... ok
+test bulk_drop_and_unresolved_pool_return_discard_instead_of_handing_off_the_continuation ... ok
+test bulk_uses_result_fixed_codes_and_incremental_large_cells_without_rounding ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.85s
+
+     Running tests/live_connection.rs (clients/rust/target/debug/deps/live_connection-6986538b44b3ad38)
+
+running 22 tests
+test abandoned_forgotten_and_canceled_reads_cannot_reuse_the_connection ... ok
+test aborting_the_channel_owner_revokes_its_in_flight_exchange ... ok
+test awaited_attention_cleanup_reuses_the_channel_without_inferring_rollback ... ok
+test broken_transport_after_transmission_reports_uncertainty_without_reconnect ... ok
+test certificate_identity_and_login_failures_are_not_bypassed ... ok
+test channel_moves_to_another_task_and_sql_errors_remain_ordered ... ok
+test checked_finish_fetch_and_partial_fetch_preserve_python_reading_rules ... ok
+test close_permission_wakes_a_waiting_reader_and_parent_drop_revokes_channels ... ok
+test delegated_channel_close_drains_before_reopen_and_stale_authority_is_rejected ... ok
+test login_options_choose_session_defaults_and_identify_the_connection ... ok
+test mars_busy_channel_close_preserves_sibling_and_stale_handles_are_inert ... ok
+test mars_external_cancel_preserves_siblings_but_abandonment_discards_them ... ok
+test mars_interleaves_readers_and_a_stalled_reader_does_not_block_its_sibling ... ok
+test mars_large_request_resumes_credit_and_channels_observe_one_session ... ok
+test observation_failure_and_recording_work_in_each_transport_mode ... ok
+test one_hop_router_reaches_docker_with_two_independent_recordings ... ok
+test pool_capacity_waiting_and_borrowers_use_independent_sessions ... ok
+test pool_reset_restores_session_and_revokes_surviving_authority ... ok
+test pool_reuses_proven_cancellation_but_discards_dropped_leases ... ok
+test restricted_database_principal_receives_denial_without_automatic_grants ... ok
+test shared_cancel_handles_acknowledge_and_cannot_cancel_the_next_exchange ... ok
+test verified_login_two_exchanges_and_clean_close ... verified V7_4 / TLSv1_2; SQL Server 17.0.5015; packet size 4096; database tds_test
+verified V8_0 / TLSv1_3; SQL Server 17.0.5015; packet size 4096; database tds_test
+ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.49s
+
+     Running tests/live_login.rs (clients/rust/target/debug/deps/live_login-55a3401818599aab)
+
+running 1 test
+test restricted_sql_login_has_only_its_actual_permissions_in_each_transport_mode ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running tests/live_recovery.rs (clients/rust/target/debug/deps/live_recovery-c35f5894d8a27a89)
+
+running 5 tests
+test direct_password_change_promotes_credential_only_after_successful_login ... ok
+test interrupted_exchange_is_not_replayed_and_old_guards_cannot_close_replacement ... ok
+test original_channels_and_close_controls_survive_repeated_recovery ... ok
+test pool_rotation_and_borrowed_recovery_read_current_credentials ... ok
+test server_state_refusals_and_feature_opt_out_prevent_reconnection ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.95s
+
+     Running tests/live_replay.rs (clients/rust/target/debug/deps/live_replay-22460d0d558c90ba)
+
+running 1 test
+test real_owned_and_produced_tables_replay_with_exact_inputs_outputs_and_channel_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+
+     Running tests/live_rpc.rs (clients/rust/target/debug/deps/live_rpc-a80a345a6be1c6ea)
+
+running 2 tests
+test defaults_outputs_grouped_returns_saved_metadata_and_errors_preserve_reuse ... ok
+test typed_scalar_inputs_round_trip_exactly_and_rpc_applies_pool_reset ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+     Running tests/live_scalars.rs (clients/rust/target/debug/deps/live_scalars-f328da09298ba819)
+
+running 1 test
+test heterogeneous_scalars_keep_exact_values_nulls_and_retention ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/live_special.rs (clients/rust/target/debug/deps/live_special-af5f678fa66d6e41)
+
+running 7 tests
+test browse_metadata_preserves_base_tables_aliases_keys_and_hidden_columns ... ok
+test clr_named_serializations_round_trip_as_owned_bytes_and_sources ... ok
+test explicit_collation_views_match_the_server_across_all_supported_pages ... ok
+test native_json_rows_outputs_and_sources_follow_negotiated_result_encoding ... ok
+test native_vectors_use_negotiated_versions_and_preserve_exact_float_bits ... ok
+test sensitivity_classification_retains_named_labels_and_negotiated_ranks ... ok
+test sql_variants_round_trip_with_declared_base_types_and_nulls ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.95s
+
+     Running tests/live_streaming.rs (clients/rust/target/debug/deps/live_streaming-aefcd67cbbe489de)
+
+running 7 tests
+test batched_sources_preserve_offsets_returns_and_cleanup_after_late_production_error ... ok
+test fetch_after_partial_row_does_not_reconstruct_it_and_replays_later_rows ... ok
+test large_borrowed_readers_discard_tails_fetch_and_materialize_in_all_modes ... ok
+test outgoing_sources_and_large_outputs_cross_packets_and_cleanup_failures ... ok
+test owned_large_inputs_include_legacy_xml_and_raw_collated_text ... ok
+test slow_source_lends_executor_to_mars_sibling_and_channel_close ... ok
+test stalled_large_reader_preserves_mars_sibling_progress_and_cancel_reuse ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.38s
+
+     Running tests/live_tables.rs (clients/rust/target/debug/deps/live_tables-e2b63b470fe5c115)
+
+running 1 test
+test owned_and_produced_table_parameters_defaults_outputs_and_hints_reach_real_procedures ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+
+     Running tests/live_transactions.rs (clients/rust/target/debug/deps/live_transactions-39fc6c025d212f2a)
+
+running 2 tests
+test deferred_pool_reset_applies_to_a_transaction_manager_request ... ok
+test transaction_operations_follow_announcements_savepoints_errors_and_shared_state ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests/mars.rs (clients/rust/target/debug/deps/mars-b5a0d8a64cbd255c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/metadata.rs (clients/rust/target/debug/deps/metadata-2ae0c3f99b8e52ef)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/observation.rs (clients/rust/target/debug/deps/observation-ccb4426ae4c0641b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/pool.rs (clients/rust/target/debug/deps/pool-86959922d7f182e7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/recovery.rs (clients/rust/target/debug/deps/recovery-6f5130928e9d1b97)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/replay.rs (clients/rust/target/debug/deps/replay-e4b4636c080f57b7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/responses.rs (clients/rust/target/debug/deps/responses-b7c197b0a3ae79b3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/routing.rs (clients/rust/target/debug/deps/routing-e8333b9f21d51bf9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/rpc.rs (clients/rust/target/debug/deps/rpc-c1684c913868c1bd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/rpc_shell.rs (clients/rust/target/debug/deps/rpc_shell-1997e5b7b48aa966)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/scalars.rs (clients/rust/target/debug/deps/scalars-c7ff86fc7f843e66)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/streaming_shell.rs (clients/rust/target/debug/deps/streaming_shell-05eaad056493d6c8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/tables.rs (clients/rust/target/debug/deps/tables-34c4c42b371514f7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/tables_shell.rs (clients/rust/target/debug/deps/tables_shell-200c0e05ece799e4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/timing.rs (clients/rust/target/debug/deps/timing-c6da58a2726d9c33)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/transactions.rs (clients/rust/target/debug/deps/transactions-0b784de9e66a4dd8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/transparent_encryption.rs (clients/rust/target/debug/deps/transparent_encryption-57a00a20316d593c)
+
+running 2 tests
+test rust_and_sqlclient_mutually_read_write_lookup_and_bulk_every_encrypted_sql_type ... AE_INTEROP types=28 insert_rows=84 bulk_rows=84 net_write_types=27 statistics=Statistics { master_load_attempts: 165, master_loads: 165, unwrap_attempts: 165, unwraps: 165, hits: 221, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+ok
+test transparent_encryption_policies_outputs_cancellation_pool_reset_and_large_values ... AE_COUNTS V7_4 mars=false time_reacquisitions=2 statistics=Statistics { master_load_attempts: 6, master_loads: 6, unwrap_attempts: 6, unwraps: 6, hits: 5, coalesced: 0, evictions: 0, expirations: 2, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+AE_LIFECYCLE V7_4 mars=false transaction/output/cancel/age/large/pool-reset passed
+AE_COUNTS V7_4 mars=true time_reacquisitions=2 statistics=Statistics { master_load_attempts: 6, master_loads: 6, unwrap_attempts: 6, unwraps: 6, hits: 5, coalesced: 0, evictions: 0, expirations: 2, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+AE_LIFECYCLE V7_4 mars=true transaction/output/cancel/age/large/pool-reset passed
+AE_COUNTS V8_0 mars=false time_reacquisitions=2 statistics=Statistics { master_load_attempts: 6, master_loads: 6, unwrap_attempts: 6, unwraps: 6, hits: 5, coalesced: 0, evictions: 0, expirations: 2, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+AE_LIFECYCLE V8_0 mars=false transaction/output/cancel/age/large/pool-reset passed
+AE_COUNTS V8_0 mars=true time_reacquisitions=2 statistics=Statistics { master_load_attempts: 6, master_loads: 6, unwrap_attempts: 6, unwraps: 6, hits: 5, coalesced: 0, evictions: 0, expirations: 2, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+AE_LIFECYCLE V8_0 mars=true transaction/output/cancel/age/large/pool-reset passed
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 8.41s
+
+     Running tests/variant.rs (clients/rust/target/debug/deps/variant-8884190c1a6a694c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/vector.rs (clients/rust/target/debug/deps/vector-a6cf3e6147b8b94f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+   Doc-tests tds_client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+all doctests ran in 1.25s; merged doctests compilation took 1.11s

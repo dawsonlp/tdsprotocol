@@ -1,0 +1,181 @@
+{
+  "scope": "Candidate Rust aws-lc-rs 1.18.2, optimized, RSA-2048, wall time only; DER not PEM; no SQL or driver orchestration; value handles prepared once per key",
+  "working_keys_match_python": true,
+  "deterministic_ciphertext_and_decryption_match_python": true,
+  "tampered_tags_rejected": true,
+  "results": [
+    {
+      "operation": "parse_validate_drop_rsa_2048_from_der",
+      "median_wall_us": 75.716,
+      "batch_mean_wall_range_us": [
+        75.603,
+        91.421
+      ],
+      "operations_per_batch": 382,
+      "batches": 5
+    },
+    {
+      "operation": "verify_unwrap_derive_erase_with_parsed_master",
+      "median_wall_us": 266.898,
+      "batch_mean_wall_range_us": [
+        266.269,
+        267.448
+      ],
+      "operations_per_batch": 146,
+      "batches": 5
+    },
+    {
+      "operation": "warm_der_file_load_parse_verify_unwrap_derive_erase",
+      "median_wall_us": 470.778,
+      "batch_mean_wall_range_us": [
+        466.387,
+        473.617
+      ],
+      "operations_per_batch": 83,
+      "batches": 5
+    },
+    {
+      "operation": "twenty_exchanges_strict_key_work",
+      "median_wall_us": 9430.417,
+      "batch_mean_wall_range_us": [
+        9404.459,
+        10486.823
+      ],
+      "operations_per_batch": 4,
+      "batches": 5
+    },
+    {
+      "operation": "twenty_exchanges_master_transaction_column_exchange_key_work",
+      "median_wall_us": 5487.405,
+      "batch_mean_wall_range_us": [
+        5475.524,
+        5535.899
+      ],
+      "operations_per_batch": 7,
+      "batches": 5
+    },
+    {
+      "operation": "twenty_exchanges_both_transaction_key_work",
+      "median_wall_us": 465.475,
+      "batch_mean_wall_range_us": [
+        464.127,
+        466.765
+      ],
+      "operations_per_batch": 84,
+      "batches": 5
+    },
+    {
+      "operation": "derive_three_working_keys_only",
+      "median_wall_us": 0.609,
+      "batch_mean_wall_range_us": [
+        0.605,
+        0.61
+      ],
+      "operations_per_batch": 53333,
+      "batches": 5
+    },
+    {
+      "operation": "prepare_aes_hmac_value_handles",
+      "median_wall_us": 0.666,
+      "batch_mean_wall_range_us": [
+        0.666,
+        0.669
+      ],
+      "operations_per_batch": 43620,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_deterministic_64_bytes",
+      "median_wall_us": 0.365,
+      "batch_mean_wall_range_us": [
+        0.364,
+        0.365
+      ],
+      "operations_per_batch": 80000,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_randomized_64_bytes",
+      "median_wall_us": 1.764,
+      "batch_mean_wall_range_us": [
+        1.758,
+        1.771
+      ],
+      "operations_per_batch": 22333,
+      "batches": 5
+    },
+    {
+      "operation": "authenticate_decrypt_64_bytes",
+      "median_wall_us": 0.202,
+      "batch_mean_wall_range_us": [
+        0.199,
+        0.204
+      ],
+      "operations_per_batch": 100000,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_deterministic_1024_bytes",
+      "median_wall_us": 1.626,
+      "batch_mean_wall_range_us": [
+        1.605,
+        1.665
+      ],
+      "operations_per_batch": 22857,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_randomized_1024_bytes",
+      "median_wall_us": 2.717,
+      "batch_mean_wall_range_us": [
+        2.703,
+        2.719
+      ],
+      "operations_per_batch": 13913,
+      "batches": 5
+    },
+    {
+      "operation": "authenticate_decrypt_1024_bytes",
+      "median_wall_us": 0.765,
+      "batch_mean_wall_range_us": [
+        0.765,
+        0.767
+      ],
+      "operations_per_batch": 38387,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_deterministic_65536_bytes",
+      "median_wall_us": 84.869,
+      "batch_mean_wall_range_us": [
+        84.571,
+        86.563
+      ],
+      "operations_per_batch": 471,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_randomized_65536_bytes",
+      "median_wall_us": 66.734,
+      "batch_mean_wall_range_us": [
+        66.4,
+        68.336
+      ],
+      "operations_per_batch": 573,
+      "batches": 5
+    },
+    {
+      "operation": "authenticate_decrypt_65536_bytes",
+      "median_wall_us": 39.712,
+      "batch_mean_wall_range_us": [
+        39.667,
+        39.815
+      ],
+      "operations_per_batch": 1006,
+      "batches": 5
+    }
+  ],
+  "date": "2026-10-18T15:03:44.083078-05:00",
+  "machine": "arm64",
+  "fixture_source": "Synthetic Python key; three working keys checked for exact equality"
+}

@@ -2,6 +2,37 @@
 
 **Use this page to** know when each slice and milestone is finished. Checks come in four kinds: what a reader can do, what the client does, what the runtime shows, and how the code reads. The milestones are planned in [Building the Client §4](B-building-the-client.md#4--milestones--agreed-d-46).
 
+## Rust scoped completion · agreed 2026-10-18 (D-65)
+
+**Status: required, not complete.** The [roadmap](C-roadmap.md#rust-completion-sequence--agreed-2026-10-18-d-65)
+defines the local work → transient GCP Windows lab → Windows authentication →
+verified teardown sequence. The [Rust support matrix](../../clients/rust/SUPPORT.md)
+records implementation; the [acceptance record](../../clients/rust/ACCEPTANCE.md)
+records evidence. Earlier Python milestones below keep their language-specific scope.
+
+1. **Local implementation is solid for its declared scope:** agreed observation/replay
+   gaps, exact values, failure/cleanup behavior, readable source/examples, package/API
+   review, supported Rust/platform floor and repeatable meaningful checks. Remaining
+   exclusions are explicit; unavailable-environment skips do not establish acceptance.
+2. **Local-key Always Encrypted works:** wire metadata, normalization, authenticated
+   cryptography and parameter orchestration, with exact local round trips plus
+   independent .NET mutual read/write and deterministic lookup checks.
+3. **The GCP Windows environment is reproducible:** Terraform and configuration/test
+   tooling, domain/DNS/time/SPNs, verified SQL TLS, runners and a working Python/
+   independent-client baseline before Rust acceptance. Cloud creation waits for the
+   local stage; project, region, cost estimate and finite test window are explicit.
+4. **Windows authentication works live:** NTLM local/domain, Kerberos and negotiated
+   authentication, with actual scheme assertions, positive/negative cases, redaction,
+   cancellation/failures and relevant pool/recovery checks. Both TDS versions and
+   plain/MARS run where supported. Native Windows and actual Browser checks pass.
+5. **Evidence survives full teardown:** retain redacted results/captures and prove
+   the Terraform-owned VMs, disks, addresses and other lab resources are removed.
+   A fixed expiry/delete fallback complements normal and failure-path teardown.
+6. **The supported scope is stated accurately:** Entra, Azure-specific features/providers,
+   Windows certificate-store key-provider support and enclaves/attestation are deferred.
+   This completion is not full Python parity, Azure-service acceptance or genuine
+   failover acceptance. Python M16 follows. Publishing Rust remains a separate action.
+
 ## Slice 1 · Connect & log in
 
 **Status: partly built, checked 2026-10-16; updated by M12 and M13.**

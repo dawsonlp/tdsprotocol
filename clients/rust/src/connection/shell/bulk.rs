@@ -32,7 +32,10 @@ impl SerialChannel {
         sql: impl Into<String>,
         columns: Vec<Column>,
     ) -> Result<BulkWriter<'_>> {
-        rows::bulk_header(&columns)?; // Refuse unencodable metadata before preparation.
+        rows::bulk_header(
+            &columns,
+            columns.iter().any(|c| c.type_info.encryption.is_some()),
+        )?; // Refuse unencodable metadata before preparation.
         let mut guard = Abandon::for_epoch(self.endpoint.clone(), self.endpoint.epoch());
         let result = match self.exchange(bulk::Begin(sql.into())).await {
             Ok(mut response) => response.finish().await,

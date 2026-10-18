@@ -11,7 +11,7 @@
 };
   page.body = () => [
     "<blockquote>",
-    "<p><strong>Status: first connection slice implemented, broader development proposal, 2026-10-17.</strong> Rust before Python M16, explicit ownership/permissions and the learning intent are agreed. The user approved movable channel authority, Tokio/rustls, one persistent connection task, borrowed responses and conservative connection discard on abandonment. The <a href=\"../clients/rust/README.md\">Rust crate</a> now runs verified-TLS exchanges against Docker under TDS 7.4 and 8.0; its <a href=\"../clients/rust/ACCEPTANCE.md\">acceptance record</a> identifies actual evidence and gaps. Awaited cancellation cleanup and Python-compatible response retention/checked completion are implemented for the current subset. Full response interfaces, exact value types beyond that subset and other unresolved choices below remain open. The <a href=\"#/python-baseline\">Python baseline</a> remains the precursor evidence.</p>",
+    "<p><strong>Status: substantial local implementation; completion scope agreed 2026-10-18 (D-65).</strong> The <a href=\"../clients/rust/SUPPORT.md\">support matrix</a> and <a href=\"../clients/rust/ACCEPTANCE.md\">acceptance record</a> identify current behavior and evidence. Earlier slice notes below are historical. The <a href=\"#/roadmap\">roadmap</a> now requires local completion including local-key Always Encrypted, followed by a transient Terraform GCP Windows lab, Windows-authentication implementation/acceptance and verified teardown. Entra, Azure-specific providers and Windows certificate-store key-provider support are deferred. The Rust crate remains unpublished; detailed new API/provider choices still need agreement.</p>",
     "</blockquote>",
     "<h2 id=\"0-vision-and-requirements\">0 · Vision and requirements</h2>",
     "<p>Build a Rust client for TDS 7.4 and 8.0 whose source teaches the protocol and whose running behavior makes its conversations visible. A reader should be able to follow a reference page into a definition, through a procedure, and into an observed exchange. Code should be clear, succinct, correct, and literate. Brevity serves comprehension; it does not justify hiding state, errors, or consequences.</p>",
@@ -312,7 +312,7 @@
     "must be reviewed for both languages. Backpressure tests measure behavior, not a",
     "throughput claim.</p>",
     "<h2 id=\"5-proposed-milestones-and-completion-evidence\">5 · Proposed milestones and completion evidence</h2>",
-    "<p>R numbers are Rust proposals. They do not mark Python milestones complete or change existing acceptance records. Final scope and each unresolved choice are agreed before the affected code begins. Each implementation milestone includes its teaching documentation and relevant offline and live checks; skipped checks remain incomplete evidence.</p>",
+    "<p>R numbers retain the original milestone proposals. D-65 supersedes R8's full-authentication/provider scope and its ordering: local-key Always Encrypted precedes the GCP campaign; Windows authentication follows; Entra and the excluded providers are deferred. R numbers do not mark Python milestones complete or change existing acceptance records. Each unresolved choice is agreed before the affected code begins. Each implementation milestone includes its teaching documentation and relevant offline and live checks; skipped checks remain incomplete evidence.</p>",
     "<div class=\"tbl-wrap\"><table class=\"tbl\">",
     "<thead>",
     "<tr>",

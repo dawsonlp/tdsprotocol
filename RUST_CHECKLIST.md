@@ -24,7 +24,7 @@ References: [Rust development proposal](docs/design/D-rust-development.md), [Pyt
 - [x] Implement one plain serial channel, `exchange(Batch(...))`, and enough incremental response reading to return `SELECT 1` and its final completion.
 - [x] Run a Rust live integration test against `127.0.0.1:14325`, database `tds_test`, using the existing test CA and ignored credential configuration. No password is embedded or printed.
 - [x] Prove a second sequential exchange works after the first response ends, then close the channel and connection cleanly. Also prove channel reopening, multiple results and transaction announcements across batches.
-- [x] Show the live connection procedure in readable steps, with reference links in source and default credential redaction. Initial observation now includes steps/messages/packets and decoded tokens; per-field trees remain open.
+- [x] Show the live connection procedure in readable steps, with reference links in source and default credential redaction. Observation includes steps/messages/packets, decoded tokens and the [connection/scalar-query field inspection slice](docs/design/L-rust-field-inspection.md); broader trees and detailed timing remain open.
 
 **First-slice acceptance:** an actual Rust live test passes against Docker with certificate verification enabled. A skipped or unavailable-server run does not complete this item. Record the server/version, options, command and result.
 
@@ -625,5 +625,52 @@ Recorded checks: Rust **175 default**, **73 core-only**, **56 Docker**; affected
 credential masking; live Rust additionally verifies four owned/produced TVP
 recordings in memory. Strict lint, fmt/docs/build and page syntax checks pass.
 [Design K](docs/design/K-offline-replay.md) and the final acceptance section
-supersede earlier native-replay/TVP-inspection gap lists. Field trees/timings,
+supersede earlier native-replay/TVP-inspection gap lists. Broader field trees/timings,
 unsupported wire extensions and provider/platform evidence remain separate work.
+
+## Connection/scalar-query field inspection: implemented 2026-10-18
+
+- [x] Named fields/groups, explicit packet/message/token byte ranges, bounded raw
+  bytes and displays, sensitive markers, located issues and reference paths.
+- [x] Reuse checked definition readers for live and offline packet headers,
+  PRELOGIN, LOGIN7, SQL batches and selected scalar response tokens.
+- [x] Full-level trees alongside existing live event lines and native replay;
+  no trees at Outline/Off, unchanged capture format and credential masking.
+- [x] Independent Python field-range fixtures, one-byte token fragments,
+  malformed-prefix retention, NBCROW NULL spans, and four-mode live/replay parity.
+- [x] Fix the Rust offline LOGIN7 version byte order exposed by Python parity;
+  retain LOGINACK's distinct big-endian representation.
+
+[Design L](docs/design/L-rust-field-inspection.md) defines this finite slice.
+Broader RPC/TVP/bulk/streamed-value trees and detailed exchange timing remain open.
+
+## Key-policy/local-crypto foundation — 2026-10-18 (D-66)
+
+- [x] Write named policy scenarios before implementation and a concrete ownership/loading/timer design.
+- [x] Implement independent master/column transaction defaults, exchange and fixed-age time options, bounded entries, full wrapped-key identity, idle expiry and guarded owned buffers.
+- [x] Implement local PKCS#8 RSA loading and authenticated AES/HMAC byte crypto; compare independent Python fixtures, malformed/tampered data and provider failures.
+- [x] Bind to decoded transaction/context events and pool/reset/recovery/close; verify real SQL boundary matrices and controlled TLS recovery under both protocols with/without MARS.
+- [x] Correct the shared Python cache-identity collision and test provider/backend replacement.
+- [x] Retain scenario logs/counters, regression summaries, source hashes, native cleanup review and actual release service costs in the evidence report.
+- [x] Complete encrypted SQL wire metadata, exact normalization and parameter/result orchestration.
+- [x] Establish independent Rust/.NET encrypted SQL interoperability before declaring local Always Encrypted complete.
+
+See [design N](docs/design/N-encryption-policy-implementation.md) and
+[policy evidence](docs/design/experiments/encryption-policy-evidence.md). This
+foundation does not close the full Always Encrypted or Rust completion scope.
+
+
+## Transparent local-key SQL acceptance — 2026-10-18
+
+- [x] Match normalization and metadata with Python fixtures; preserve explicit ciphertext in core-only reading/replay.
+- [x] Prepare named SQL parameters freshly; never replay application SQL; label failed discovery as application NotSent.
+- [x] Authenticate rows, outputs and bulk returned rows; retain explicit failed cells without exposing plaintext.
+- [x] Verify independent .NET reads/lookups for 28 types, Rust/.NET mutual writes for 27 plus the known SqlClient time(0) write limit, and owned encrypted bulk.
+- [x] Exercise policy counts, idle reacquisition in a long transaction, outputs, actual Attention cleanup, >1 MiB values and pool reset under 7.4/8.0 × plain/MARS.
+- [x] Set the tested Rust floor (1.99.1/macOS ARM64), compile examples, include the MIT notice, verify a local package and make the check matrix repeatable.
+- [ ] Resolve the optional authentication-provider approach and explicit GCP project/location/budget/window; build/validate the transient lab, accept Windows auth/platform/Browser and verify teardown.
+
+See [design O](docs/design/O-rust-transparent-encryption.md),
+[SQL evidence](docs/design/experiments/rust-transparent-encryption.md) and the
+[Windows/provider proposal](docs/design/P-windows-authentication-campaign.md).
+No claim of full Python parity, Windows acceptance or cloud deployment follows.

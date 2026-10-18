@@ -35,9 +35,29 @@ fn done(status: u16) -> Vec<u8> {
     b.extend([0; 10]);
     b
 }
+#[test]
+fn omitted_metadata_is_missing_evidence_instead_of_malformed_wire() {
+    let mut body = vec![0x81, 0xff, 0xff];
+    body.extend(done(0));
+    let (_, items) = read(&packets("receive", Some(3), packet::REPLY, &body, 4096));
+    assert!(items.iter().any(|item| matches!(&item.content, Content::Diagnostic { issue: Issue::Incomplete, description, .. } if description.contains("NO_METADATA"))));
+    assert!(!items.iter().any(|item| matches!(
+        &item.content,
+        Content::Diagnostic {
+            issue: Issue::Malformed,
+            ..
+        }
+    )));
+    assert!(
+        !items
+            .iter()
+            .any(|item| matches!(&item.content, Content::Record(_)))
+    );
+}
 fn call(parameter: &[u8]) -> Vec<u8> {
     let mut b = tds_client::Batch::new("")
         .encode_request(&Context {
+            column_encryption: false,
             transaction: 0,
             outstanding: 1,
         })
@@ -85,6 +105,7 @@ fn python_rpc_and_transaction_bodies_decode_with_exact_flags_and_values() {
         };
         let encoded = operation
             .encode_request(&Context {
+                column_encryption: false,
                 transaction: case["transaction"].as_u64().unwrap(),
                 outstanding: case["outstanding"].as_u64().unwrap() as u32,
             })
@@ -166,6 +187,7 @@ fn python_large_input_layouts_and_table_rows_are_read_without_result_framing() {
 fn interleaved_logical_channels_wait_for_real_attention_ack_and_keep_recorded_events() {
     let batch = tds_client::Batch::new("SELECT 1")
         .encode_request(&Context {
+            column_encryption: false,
             transaction: 0,
             outstanding: 1,
         })
@@ -366,6 +388,7 @@ fn sql_bytes_are_decoded_without_using_recorded_human_text() {
     let mut lines = vec![json!({"t":0,"event":"send","text":"unrelated label"})];
     let body = tds_client::Batch::new("SELECT N'é🦀'")
         .encode_request(&Context {
+            column_encryption: false,
             transaction: 0,
             outstanding: 1,
         })

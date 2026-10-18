@@ -59,7 +59,14 @@ impl Capture {
     pub fn event(&mut self, event: &Event) -> io::Result<()> {
         self.start()?;
         let origin = *self.origin.get_or_insert(event.elapsed);
-        self.line(json!({"t":event.elapsed.saturating_sub(origin).as_secs_f64(), "event":event.kind, "text":event.text}))
+        let mut line = json!({"t":event.elapsed.saturating_sub(origin).as_secs_f64(), "event":event.kind, "text":event.text});
+        if let Some(timing) = event.timing {
+            let took = timing.summary();
+            if !took.is_empty() {
+                line["took"] = Value::String(took);
+            }
+        }
+        self.line(line)
     }
     pub fn packet(
         &mut self,

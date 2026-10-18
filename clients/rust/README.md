@@ -10,14 +10,89 @@ user and plan corrections for both languages. Rust ownership changes expression,
 not correct behavior; previously agreed differences remain explicit.
 
 The unpublished `tds-client` crate uses edition 2024. It is tested with Rust
-1.99.1 on Apple Silicon. There is no promised minimum supported Rust version yet.
+1.99.1 on Apple Silicon; that exact tested version is the initial minimum.
+Older Rust releases are not claimed. Native Windows acceptance remains part of
+the GCP campaign.
 `Cargo.lock` records the tested dependency resolution. Tokio is the default,
 optional shell; `--no-default-features` builds the protocol core without Tokio.
 rustls uses its aws-lc provider explicitly, without installing a global provider.
 Trust roots come from the caller; the client has no insecure verification mode.
 
+## Optional encryption key service
+
+`--features encryption` enables a local PKCS#8 RSA provider, authenticated byte
+encryption/decryption and the D-66 key policies. Transaction scope is the default;
+`Policy::Exchange` and fixed-age `Policy::Time(Duration)` are explicit options.
+Master and column lifetimes are independent. Time scope can span transactions
+on one connection/lease; hits do not renew its deadline. Idle expiry erases keys.
+
+`connection.key_session(providers, policies).await` attaches the service to the
+driver's decoded transaction/context and pool/recovery/close lifecycle. A
+non-cloneable `keys.exchange()` guard owns the application's manual crypto
+exchange; drop it after send/read/decrypt processing. Its methods take complete
+`ColumnKey` metadata and already-normalized bytes. `encrypt(..., randomized)`
+selects deterministic (`false`) or random-IV (`true`) encryption. `decrypt`
+returns a redacted, non-cloneable `Plaintext` whose allocation is erased on Drop.
+
+The [transparent SQL adapter](../../docs/design/O-rust-transparent-encryption.md)
+now negotiates version-one encrypted metadata, normalizes exact scalar values,
+discovers parameter encryption, encrypts inputs and authenticates/decrypts results
+and output parameters. Enable `options.column_encryption = true`, then attach:
+
+```rust,ignore
+let encrypted = connection.encrypted(providers, Policies::default()).await?;
+let mut channel = encrypted.serial_channel().await?;
+let fetched = channel.execute(sql, declarations, params).await?.fetch().await?;
+channel.close().await?;
+encrypted.close().await;
+```
+
+`execute` accepts explicit SQL, declarations and named scalar `Param`s; use SQL
+`EXEC` for stored procedures. It discovers parameters on each call and sends
+application SQL once. `exchange` decrypts results for other prepared requests;
+`bulk` encrypts owned rows using server column metadata. Encrypted cells are read
+whole before releasing authenticated plaintext, up to 16 MiB per value. Encrypted
+source producers and borrowed plaintext chunk readers are not provided. Large
+plain columns retain the raw client's existing streaming APIs.
+
+`execute_with` and `exchange_with` accept a per-exchange policy override. The raw
+connection's server announcements govern transaction retention; no transaction is
+created implicitly. `finish` discards unread rows without decrypting them, while
+output parameters remain available. `fetch` retains independent application values.
+`TypeInfo.sql_type` is the wire type; `value_type()` returns the plaintext SQL type.
+Raw reading returns `Value::Encrypted`. Like Python, key/authentication/value
+failures return `Value::NotDecrypted` with ciphertext and a category reason;
+revoked authority fails the exchange. Capture, replay and core observation stay
+on the ciphertext side of the adapter.
+
+Drop the adapter before pool release. Its bootstrap exchange flushes deferred
+reset before parameter discovery. After physical recovery, close/drop the old
+adapter and attach a new one; old guards cannot authenticate in the new epoch.
+Unannounced security-context/provider changes require `encrypted.invalidate_keys()`.
+Key and crypto work buffers are erased; ordinary returned `Value` allocations
+remain application-owned. Awaited close drains tracked provider work; an OS read
+already running cannot be interrupted instantly.
+
+See the runnable [`always_encrypted` example](examples/always_encrypted.rs) and
+[acceptance evidence](ACCEPTANCE.md#transparent-always-encrypted).
+
+Reproduce acceptance and actual service costs:
+
+```sh
+python3 ../../tools/check_rust.py --live
+cargo test --offline --features encryption --lib encryption:: -- --nocapture
+cargo test --offline --features encryption --test encryption_live -- --ignored --test-threads=1
+cargo run --offline --release --features encryption --example key_policy_cost
+```
+
+The final command uses intentionally public disposable test keys. Its timings
+include the implemented service and value round trips, with no SQL/network work.
+
 The [interrupted I/O acceptance matrix](INTERRUPTIONS.md) records deterministic
 partial-write, task-abort, cleanup, pool/recovery and runtime-shutdown evidence.
+At `--observe full`, live and replay output includes field trees with byte ranges,
+bounded raw bytes and protocol references for the connection/scalar-query slice.
+See the [inspection contract](../../docs/design/L-rust-field-inspection.md).
 
 ## Run the command line client
 
@@ -268,7 +343,9 @@ contract and evidence are in [Pool Configuration Snapshots](../../docs/design/H-
 the short synchronous callback returns `std::io::Result<()>`. Off builds no
 descriptions. Outline and Full have the same step/message/packet/token lines;
 Full additionally exposes exact redacted packet header/body and native decoded
-Records in `event.inspection`. The core queues owned descriptions; the driver
+Records in `event.inspection`, plus selected field trees in `event.fields`.
+Trees identify packet/message/token-relative byte ranges, bounded raw prefixes,
+decoded displays and protocol reference pages. The core queues owned descriptions; the driver
 invokes callbacks after each core step, before publishing writes/results. A
 returned callback error disables the observer and remains separately inspectable
 through `connection.observation_error()`. Installing an observer clears it.
@@ -292,9 +369,21 @@ callback inspection. Query text/result data stay in the recording.
 
 Four fresh Docker recordings (7.4/8.0 × plain/MARS) replay through Python's
 replay implementation, with correct rows and redacted credentials.
-Native offline replay is implemented for supported SQL conversations. Per-field
-inspection trees/reference links, detailed response timings and pool-level event
-lines remain open; this is not complete D-12 parity.
+Native replay, connection/request trees and streamed response fragments are
+implemented, with bounded raw evidence and reference links. Detailed
+metadata-extension fields and pool-level event lines remain open; this is not
+complete D-12 parity.
+
+`Response::timing()` and the owned `FetchedResponse::timing` expose `Timing` at
+every observation level. Its optional `sent`, `first_packet` and `ended` values
+are monotonic `Duration`s relative to the physical connection. Derived
+`until_first_packet()` and `until_end()` are unknown unless both milestones are
+known. The first packet is timed when the reader consumes it, as in Python;
+slow application reading affects these measurements. Completion waits for the
+terminal token and message boundary; cancellation times acknowledged cleanup.
+These are observed latencies, not isolated server execution time. Live response
+events carry typed timing separately from text; capture retains the existing
+optional `took` description, which replay preserves rather than measuring again.
 
 ## Offline replay
 
@@ -305,11 +394,13 @@ clients/rust/target/debug/tds --replay conversation.jsonl --observe full
 
 Replay opens no connection and reads no password or CA configuration. It accepts
 only `--observe` alongside `--replay`. Outline distinguishes recorded events from
-decoded messages/records. Full includes packet bodies and exact decoded values;
+decoded messages/records. Full adds field trees, bounded packet previews and decoded values;
 credential-bearing packet bodies stay withheld. Off prints diagnostics and counts.
 Recorded timestamps and durations remain recorded evidence, not replay timings.
 
 The public `replay::replay(BufRead, callback)` emits owned `replay::Item` values.
+`replay::replay_with_inspection(input, true, callback)` additionally emits
+`Content::Inspection(Node)`; the default API builds no trees.
 It reuses the live packet/token/value decoders and input-specific request readers.
 `Content::Event.text` is exact `SqlText`, including Python's lone UTF-16
 surrogates. Requests materialize whole inputs; responses use the incremental
@@ -323,7 +414,9 @@ library protocol issues are counted, while reader/callback I/O failures return
 `io::Error`. Zero issues does not prove physical closure or that every obligation
 created by arbitrary SQL can be inferred. Missing saved NO_METADATA columns,
 providers/encrypted content, binary XML and alternate compute tokens remain
-explicit limits. Full field trees and reference links are separate work.
+explicit limits. Missing caller-supplied NO_METADATA columns are reported as
+incomplete recording evidence, not malformed wire. New capture context/schema
+support remains a separate choice.
 
 Python replay now reads TVP declarations, default columns, hints, column placement
 and exact rows, including following parameters and batched calls. It represents
@@ -527,7 +620,7 @@ Encrypting an entire multi-packet message at once failed live; draining TLS afte
 each packet fixed it. The smoke test sends over 64 KiB to retain this regression.
 
 Pending: other authentication, binary XML, alternate compute tokens,
-remaining field inspection and timing work,
+remaining metadata-extension inspection,
 platform coverage and a supported Rust version floor.
 The broader [Rust plan](../../docs/design/D-rust-development.md) remains a proposal
 for those portions. This first slice does not complete R1/R2 in their full scope.

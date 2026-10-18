@@ -157,8 +157,20 @@ pub struct TypeInfo {
     /// Native JSON result encoding follows accepted UTF-8 negotiation. Inputs
     /// are always UTF-8; this is wire metadata, not a different SQL type.
     pub json_utf8: bool,
+    /// Ciphertext framing remains in `sql_type`; this describes its plaintext.
+    pub encryption: Option<Box<crypto::CryptoMetadata>>,
 }
 impl TypeInfo {
+    /// Application value type; `sql_type` itself preserves ciphertext wire framing.
+    pub fn value_type(&self) -> &SqlType {
+        self.encryption
+            .as_ref()
+            .map_or(&self.sql_type, |crypto| &crypto.base.sql_type)
+    }
+
+    pub(crate) fn is_streaming(&self) -> bool {
+        self.encryption.is_none() && self.sql_type.is_large()
+    }
     pub(crate) fn read_parameter(r: &mut Reader<'_>) -> Result<Self> {
         codec::read_info_for(r, true)
     }
@@ -173,3 +185,5 @@ mod codec;
 pub(crate) mod encode;
 mod variant;
 mod vector;
+
+pub mod crypto;

@@ -43,18 +43,19 @@ impl Decoder {
         let sql_type = &info.sql_type;
         let plp = !matches!(sql_type, SqlType::LegacyText { .. } | SqlType::LegacyImage);
         let total_length = if plp {
-            match r.u64()? {
+            match r.field("total length", |r| r.u64())? {
                 u64::MAX => return Ok(None),
                 n if n == u64::MAX - 1 => None,
                 n => Some(n),
             }
         } else {
-            let pointer = usize::from(r.u8()?);
+            let pointer = usize::from(r.field("text pointer length", |r| r.u8())?);
             if pointer == 0 {
                 return Ok(None);
             }
-            r.take(pointer + 8)?; // Text pointer and timestamp precede the byte count.
-            Some(u64::from(r.u32()?))
+            r.field("text pointer", |r| r.take(pointer))?;
+            r.field("timestamp", |r| r.take(8))?;
+            Some(u64::from(r.field("length", |r| r.u32())?))
         };
         Ok(Some(Self {
             total_length,
@@ -72,7 +73,7 @@ impl Decoder {
         loop {
             if !self.ended && self.remaining == 0 {
                 if self.plp {
-                    self.remaining = u64::from(r.u32()?);
+                    self.remaining = u64::from(r.field("chunk length", |r| r.u32())?);
                     self.ended = self.remaining == 0;
                     if let Some(total) = self.total_length
                         && self.remaining > total.saturating_sub(self.received)
@@ -99,7 +100,7 @@ impl Decoder {
                 r.take(1)?;
                 unreachable!();
             }
-            let bytes = r.take(count)?;
+            let bytes = r.field("data", |r| r.take(count))?;
             self.remaining -= count as u64;
             self.received = self
                 .received

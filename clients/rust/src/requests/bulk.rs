@@ -36,8 +36,8 @@ impl Request for Rows {
     fn label(&self) -> &'static str {
         "bulk data"
     }
-    fn encode_request(&self, _: &Context) -> Result<Encoded> {
-        let mut body = rows::bulk_header(&self.columns)?;
+    fn encode_request(&self, context: &Context) -> Result<Encoded> {
+        let mut body = rows::bulk_header(&self.columns, context.column_encryption)?;
         for row in &self.rows {
             body.extend(rows::bulk_row(&self.columns, row)?);
         }
@@ -63,8 +63,8 @@ impl Request for Stream {
             "bulk row source must be consumed",
         )))
     }
-    fn prepare(self: Box<Self>, _: &Context) -> Result<Prepared> {
-        let body = rows::bulk_header(&self.columns)?;
+    fn prepare(self: Box<Self>, context: &Context) -> Result<Prepared> {
+        let body = rows::bulk_header(&self.columns, context.column_encryption)?;
         let source = rows::stream(body.len(), rows::RowLayout::Bulk(self.columns), self.source);
         Ok(Prepared {
             encoded: Encoded {

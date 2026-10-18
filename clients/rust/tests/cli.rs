@@ -46,7 +46,11 @@ fn offline_replay_uses_no_live_configuration_and_reports_truncated_evidence() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("0 issues"));
+    let full = String::from_utf8_lossy(&output.stdout);
+    assert!(full.contains("0 issues"));
+    assert!(full.contains("TDS packet header [Packet 0..8]"));
+    assert!(full.contains("status [Token 1..3]"));
+    assert!(full.contains("docs/design/3-reference/response.md"));
     let output = tds()
         .args([
             "--replay",

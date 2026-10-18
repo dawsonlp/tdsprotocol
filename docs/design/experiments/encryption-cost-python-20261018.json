@@ -1,0 +1,110 @@
+{
+  "scope": "Python implementation; warm local files; synthetic RSA-2048; no SQL Server or network",
+  "date": "2026-10-18",
+  "python": "3.14.8",
+  "machine": "arm64",
+  "cryptography": "50.0.2",
+  "method": "Median of five batch means; wall and process CPU; calibration targets 40 ms per batch",
+  "caveat": "No secure-erasure guarantee for Python bytes; temporary file deletion is not disk sanitization",
+  "results": [
+    {
+      "operation": "parse_rsa_2048_private_key",
+      "median_wall_us": 18776.069,
+      "median_cpu_us": 18758.667,
+      "batch_mean_wall_range_us": [
+        18347.5,
+        19303.708
+      ],
+      "operations_per_batch": 3,
+      "batches": 5
+    },
+    {
+      "operation": "unwrap_verify_derive_with_parsed_master",
+      "median_wall_us": 340.805,
+      "median_cpu_us": 340.379,
+      "batch_mean_wall_range_us": [
+        336.571,
+        344.409
+      ],
+      "operations_per_batch": 116,
+      "batches": 5
+    },
+    {
+      "operation": "full_local_provider_unwrap_verify_derive",
+      "median_wall_us": 19955.639,
+      "median_cpu_us": 19945.333,
+      "batch_mean_wall_range_us": [
+        19783.639,
+        20510.542
+      ],
+      "operations_per_batch": 3,
+      "batches": 5
+    },
+    {
+      "operation": "authenticate_decrypt_64_byte_value",
+      "median_wall_us": 2.799,
+      "median_cpu_us": 2.797,
+      "batch_mean_wall_range_us": [
+        2.744,
+        2.846
+      ],
+      "operations_per_batch": 7869,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_64_byte_value",
+      "median_wall_us": 3.619,
+      "median_cpu_us": 3.612,
+      "batch_mean_wall_range_us": [
+        3.571,
+        3.66
+      ],
+      "operations_per_batch": 6357,
+      "batches": 5
+    },
+    {
+      "operation": "authenticate_decrypt_1024_byte_value",
+      "median_wall_us": 3.32,
+      "median_cpu_us": 3.312,
+      "batch_mean_wall_range_us": [
+        3.305,
+        3.354
+      ],
+      "operations_per_batch": 10322,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_1024_byte_value",
+      "median_wall_us": 4.97,
+      "median_cpu_us": 4.864,
+      "batch_mean_wall_range_us": [
+        4.819,
+        5.346
+      ],
+      "operations_per_batch": 7111,
+      "batches": 5
+    },
+    {
+      "operation": "authenticate_decrypt_65536_byte_value",
+      "median_wall_us": 38.353,
+      "median_cpu_us": 38.294,
+      "batch_mean_wall_range_us": [
+        38.17,
+        38.783
+      ],
+      "operations_per_batch": 1044,
+      "batches": 5
+    },
+    {
+      "operation": "encrypt_authenticate_65536_byte_value",
+      "median_wall_us": 93.434,
+      "median_cpu_us": 85.71,
+      "batch_mean_wall_range_us": [
+        80.983,
+        142.89
+      ],
+      "operations_per_batch": 238,
+      "batches": 5
+    }
+  ]
+}

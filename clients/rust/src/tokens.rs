@@ -140,7 +140,7 @@ pub struct OutputValue {
     pub function_result: bool,
     pub user_type: u32,
     pub flags: u16,
-    pub type_info: crate::TypeInfo,
+    pub type_info: Box<crate::TypeInfo>,
     pub value: Option<crate::Value>,
 }
 
@@ -194,19 +194,32 @@ fn short_bytes(r: &mut Reader<'_>) -> Result<Vec<u8>> {
     Ok(r.take(n)?.to_vec())
 }
 
-fn output_header(r: &mut Reader<'_>, utf8: bool) -> Result<OutputValue> {
-    let ordinal = r.u16()?;
-    let name = short_text(r)?;
-    let status = r.u8()?;
+fn output_header(r: &mut Reader<'_>, utf8: bool, encrypted: bool) -> Result<OutputValue> {
+    let ordinal = r.field("ordinal", |r| r.u16())?;
+    let name = r.text("name", short_text)?;
+    let status = r.field("status", |r| r.u8())?;
     if ![1, 2].contains(&status) {
         return Err(Error::malformed(r.offset, "RETURNVALUE status"));
     }
-    let user_type = r.u32()?;
-    let flags = r.u16()?;
+    let user_type = r.field("user type", |r| r.u32())?;
+    let flags = r.field("flags", |r| r.u16())?;
+    let mut type_info = r.field("type", |r| read_info(r, utf8))?;
     if flags & 0x800 != 0 {
-        return Err(Error::new(ErrorKind::Unsupported(
-            "encrypted output parameter",
-        )));
+        if !encrypted {
+            return Err(Error::malformed(
+                r.offset,
+                "encrypted output without negotiation",
+            ));
+        }
+        if !matches!(
+            type_info.sql_type,
+            crate::SqlType::Binary { .. } | crate::SqlType::BinaryMax
+        ) {
+            return Err(Error::malformed(r.offset, "ciphertext TYPE_INFO"));
+        }
+        type_info.encryption = Some(Box::new(crate::types::crypto::CryptoMetadata::read(
+            r, None,
+        )?));
     }
     Ok(OutputValue {
         ordinal,
@@ -214,17 +227,55 @@ fn output_header(r: &mut Reader<'_>, utf8: bool) -> Result<OutputValue> {
         function_result: status == 2,
         user_type,
         flags,
-        type_info: read_info(r, utf8)?,
+        type_info: Box::new(type_info),
         value: None,
     })
 }
 
+/// Stream fragments retain only the current decode step, with ranges relative
+/// to the enclosing row/RETURNVALUE token. A consumed chunk header remains
+/// evidence even when the next payload byte has not arrived yet.
+fn append_fragment(
+    target: &mut Option<crate::inspection::Node>,
+    r: &mut Reader<'_>,
+    name: &str,
+    offset: usize,
+    error: Option<&Error>,
+) -> Result<()> {
+    offset
+        .checked_add(r.offset)
+        .ok_or_else(|| Error::new(ErrorKind::Limit("inspection token offset")))?;
+    let Some(mut node) = r.node(
+        name,
+        crate::inspection::Basis::Token,
+        "docs/design/3-reference/types.md",
+    ) else {
+        return Ok(());
+    };
+    if matches!(error.map(|e| &e.kind), Some(ErrorKind::Incomplete { .. })) && node.range.is_empty()
+    {
+        return Ok(());
+    }
+    node.shift(offset);
+    if let Some(error) = error.filter(|e| !matches!(e.kind, ErrorKind::Incomplete { .. })) {
+        node.issue = Some(error.to_string());
+    }
+    if let Some(parent) = target {
+        parent.range.end = parent.range.end.max(node.range.end);
+        parent.children.push(node);
+    } else {
+        *target = Some(node);
+    }
+    Ok(())
+}
 struct RowState {
+    offset: usize,
     index: usize,
     nulls: Vec<u8>,
     value: Option<crate::large::Decoder>,
 }
 struct OutputState {
+    offset: usize,
     output: OutputValue,
     value: crate::large::Decoder,
 }
@@ -237,8 +288,23 @@ pub struct Decoder {
     metadata: std::collections::VecDeque<Vec<Column>>,
     classification_version: u8,
     utf8_support: bool,
+    column_encryption: bool,
+    inspect: bool,
+    inspection: Option<crate::inspection::Node>,
 }
 impl Decoder {
+    pub fn set_inspection(&mut self, enabled: bool) {
+        self.inspect = enabled;
+        if !enabled {
+            self.inspection = None;
+        }
+    }
+    pub fn take_inspection(&mut self) -> Option<crate::inspection::Node> {
+        self.inspection.take()
+    }
+    pub fn set_column_encryption(&mut self, enabled: bool) {
+        self.column_encryption = enabled;
+    }
     pub fn set_utf8_support(&mut self, enabled: bool) {
         self.utf8_support = enabled;
     }
@@ -253,7 +319,17 @@ impl Decoder {
         self.metadata = columns.into();
     }
     pub fn feed(&mut self, bytes: &[u8]) -> Result<()> {
-        wire::append(&mut self.pending, bytes)
+        if self.column_encryption {
+            // Ciphertext must be authenticated whole. Keep a finite operation
+            // bound while allowing encrypted max cells above the scalar limit.
+            if bytes.len() > (17 * 1024 * 1024usize).saturating_sub(self.pending.len()) {
+                return Err(Error::new(ErrorKind::Limit("encrypted token buffer")));
+            }
+            self.pending.extend_from_slice(bytes);
+            Ok(())
+        } else {
+            wire::append(&mut self.pending, bytes)
+        }
     }
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty() && self.row.is_none() && self.output.is_none()
@@ -262,6 +338,7 @@ impl Decoder {
         self.pending.len()
     }
     pub fn next_record(&mut self) -> Result<Option<Record>> {
+        self.inspection = None;
         if self.row.is_some() {
             return self.row_record();
         }
@@ -269,6 +346,7 @@ impl Decoder {
             return self.output_record();
         }
         let mut r = Reader::new(&self.pending);
+        r.inspect(self.inspect);
         // Commit only the row header; cells and large payloads then advance
         // independently, rather than retaining an unbounded transactional row.
         if self
@@ -280,10 +358,10 @@ impl Decoder {
                 .as_ref()
                 .is_some_and(|cs| cs.iter().any(|c| c.type_info.sql_type.is_large()))
         {
-            let tag = r.u8()?;
+            let tag = r.field("token", |r| r.u8())?;
             let count = self.columns.as_ref().unwrap().len();
             let nulls = if tag == 0xd2 {
-                match r.take(count.div_ceil(8)) {
+                match r.field("null bitmap", |r| r.take(count.div_ceil(8))) {
                     Ok(bytes) => bytes.to_vec(),
                     Err(_) => return Ok(None),
                 }
@@ -291,16 +369,26 @@ impl Decoder {
                 Vec::new()
             };
             self.row = Some(RowState {
+                offset: r.offset,
                 index: 0,
                 nulls,
                 value: None,
             });
+            self.inspection = r.node(
+                if tag == 0xd2 {
+                    "NBCROW header"
+                } else {
+                    "ROW header"
+                },
+                crate::inspection::Basis::Token,
+                "docs/design/3-reference/response.md",
+            );
             self.pending.drain(..r.offset);
             return Ok(Some(Record::RowStart));
         }
         if self.pending.first() == Some(&0xac) {
-            r.u8()?; // RETURNVALUE
-            let output = match output_header(&mut r, self.utf8_support) {
+            r.field("token", |r| r.u8())?; // RETURNVALUE
+            let output = match output_header(&mut r, self.utf8_support, self.column_encryption) {
                 Ok(output) => output,
                 Err(Error {
                     kind: ErrorKind::Incomplete { .. },
@@ -308,7 +396,7 @@ impl Decoder {
                 }) => return Ok(None),
                 Err(e) => return Err(e),
             };
-            if output.type_info.sql_type.is_large() {
+            if output.type_info.is_streaming() {
                 let value = match crate::large::Decoder::start(&output.type_info, &mut r) {
                     Ok(value) => value,
                     Err(Error {
@@ -317,17 +405,27 @@ impl Decoder {
                     }) => return Ok(None),
                     Err(e) => return Err(e),
                 };
-                self.pending.drain(..r.offset);
+                let offset = r.offset;
+                self.inspection = r.node(
+                    "RETURNVALUE",
+                    crate::inspection::Basis::Token,
+                    "docs/design/3-reference/response.md",
+                );
+                self.pending.drain(..offset);
                 let mut output = output;
                 if let Some(value) = value {
                     output.value = Some(crate::large::empty(&output.type_info.sql_type));
-                    self.output = Some(OutputState { output, value });
+                    self.output = Some(OutputState {
+                        offset,
+                        output,
+                        value,
+                    });
                     return self.output_record();
                 }
                 return Ok(Some(Record::OutputValue(output)));
             }
             let mut output = output;
-            output.value = match output.type_info.read_value(&mut r) {
+            output.value = match r.field("value", |r| output.type_info.read_value(r)) {
                 Ok(value) => value,
                 Err(Error {
                     kind: ErrorKind::Incomplete { .. },
@@ -335,11 +433,57 @@ impl Decoder {
                 }) => return Ok(None),
                 Err(e) => return Err(e),
             };
+            self.inspection = r.node(
+                "RETURNVALUE",
+                crate::inspection::Basis::Token,
+                "docs/design/3-reference/response.md",
+            );
             self.pending.drain(..r.offset);
             return Ok(Some(Record::OutputValue(output)));
         }
         let mut r = Reader::new(&self.pending);
+        r.inspect(self.inspect);
         let parsed = self.decode(&mut r);
+        if !matches!(
+            &parsed,
+            Err(Error {
+                kind: ErrorKind::Incomplete { .. },
+                ..
+            })
+        ) {
+            let name = match self.pending.first().copied() {
+                Some(0xad) => "LOGINACK",
+                Some(0xaa) => "ERROR",
+                Some(0xab) => "INFO",
+                Some(0x81) => "COLMETADATA",
+                Some(0xd1) => "ROW",
+                Some(0xd2) => "NBCROW",
+                Some(0xfd) => "DONE",
+                Some(0xfe) => "DONEPROC",
+                Some(0xff) => "DONEINPROC",
+                Some(0x79) => "RETURNSTATUS",
+                Some(0xa3) => "DATACLASSIFICATION",
+                Some(0xa4) => "TABNAME",
+                Some(0xa5) => "COLINFO",
+                Some(0xa9) => "ORDER",
+                Some(0xe3) => "ENVCHANGE",
+                Some(0xe4) => "SESSIONSTATE",
+                Some(0xae) => "FEATUREEXTACK",
+                _ => "token",
+            };
+            self.inspection = r.node(
+                name,
+                crate::inspection::Basis::Token,
+                if name == "LOGINACK" {
+                    "docs/design/3-reference/login-response.md"
+                } else {
+                    "docs/design/3-reference/response.md"
+                },
+            );
+            if let (Some(node), Err(error)) = (&mut self.inspection, &parsed) {
+                node.issue = Some(error.to_string());
+            }
+        }
         let record = match parsed {
             Ok(record) => record,
             Err(Error {
@@ -369,10 +513,20 @@ impl Decoder {
             return Ok(Some(Record::RowEnd));
         }
         let mut r = Reader::new(&self.pending);
+        r.inspect(self.inspect);
+        let offset = row.offset;
         let parsed = if let Some(value) = &mut row.value {
             // A chunk reader commits consumed framing even if the next piece
             // needs another packet. Its own state carries the exact boundary.
             let part = value.next(&mut r);
+            append_fragment(
+                &mut self.inspection,
+                &mut r,
+                "value fragment",
+                offset,
+                part.as_ref().err(),
+            )?;
+            row.offset += r.offset;
             self.pending.drain(..r.offset);
             match part {
                 Ok(crate::large::Piece::Chunk(chunk)) => Ok(Record::ValueChunk(chunk)),
@@ -393,7 +547,7 @@ impl Decoder {
                 && row.nulls[row.index / 8] & (1 << (row.index % 8)) != 0
             {
                 Ok(Record::Cell(None))
-            } else if sql_type.is_large() {
+            } else if columns[row.index].type_info.is_streaming() {
                 crate::large::Decoder::start(&columns[row.index].type_info, &mut r).map(|value| {
                     if let Some(value) = value {
                         let total_length = value.total_length;
@@ -414,6 +568,14 @@ impl Decoder {
             };
             match value {
                 Ok(record) => {
+                    append_fragment(
+                        &mut self.inspection,
+                        &mut r,
+                        &format!("cell {}", row.index),
+                        offset,
+                        None,
+                    )?;
+                    row.offset += r.offset;
                     self.pending.drain(..r.offset);
                     if matches!(record, Record::Cell(_)) {
                         row.index += 1;
@@ -424,7 +586,10 @@ impl Decoder {
                     kind: ErrorKind::Incomplete { .. },
                     ..
                 }) => return Ok(None),
-                Err(e) => return Err(e),
+                Err(e) => {
+                    append_fragment(&mut self.inspection, &mut r, "cell", offset, Some(&e))?;
+                    return Err(e);
+                }
             }
         };
         parsed.map(Some)
@@ -433,7 +598,16 @@ impl Decoder {
         loop {
             let state = self.output.as_mut().unwrap();
             let mut r = Reader::new(&self.pending);
+            r.inspect(self.inspect);
             let part = state.value.next(&mut r);
+            append_fragment(
+                &mut self.inspection,
+                &mut r,
+                "RETURNVALUE fragment",
+                state.offset,
+                part.as_ref().err(),
+            )?;
+            state.offset += r.offset;
             self.pending.drain(..r.offset);
             match part {
                 Ok(crate::large::Piece::Chunk(chunk)) => {
@@ -453,12 +627,14 @@ impl Decoder {
         }
     }
     fn decode(&self, r: &mut Reader<'_>) -> Result<Record> {
-        let tag = r.u8()?;
+        let tag = r.field("token", |r| r.u8())?;
         match tag {
             0xa3 => {
                 classification::read(r, self.classification_version).map(Record::Classification)
             }
-            0x79 => Ok(Record::ReturnStatus(r.u32()? as i32)), // RETURNSTATUS, MS-TDS §2.2.7.18
+            0x79 => Ok(Record::ReturnStatus(
+                r.field("status", |r| Ok(r.u32()? as i32))?,
+            )), // RETURNSTATUS, MS-TDS §2.2.7.18
             0xae => {
                 let mut features = Vec::new();
                 loop {
@@ -497,9 +673,9 @@ impl Decoder {
                 })
             }
             0xfd..=0xff => {
-                let status = r.u16()?;
-                let command = r.u16()?;
-                let count = r.u64()?;
+                let status = r.field("status", |r| r.u16())?;
+                let command = r.field("command", |r| r.u16())?;
+                let count = r.field("row count", |r| r.u64())?;
                 Ok(Record::Done(Done {
                     kind: match tag {
                         0xfd => DoneKind::Statement,
@@ -516,7 +692,12 @@ impl Decoder {
                 }))
             }
             0x81 => {
-                let count = r.u16()?;
+                let count = r.field("column count", |r| r.u16())?;
+                let keys = if self.column_encryption {
+                    crate::types::crypto::key_table(r)?
+                } else {
+                    Vec::new()
+                };
                 if count == 0xffff {
                     return self
                         .metadata
@@ -541,19 +722,42 @@ impl Decoder {
                     return Err(Error::new(ErrorKind::Limit("column count (4096)")));
                 }
                 let mut columns = Vec::with_capacity(usize::from(count));
-                for _ in 0..count {
-                    let user_type = r.u32()?;
-                    let flags = r.u16()?;
-                    if flags & 0x800 != 0 {
-                        return Err(Error::new(ErrorKind::Unsupported("encrypted column")));
-                    }
-                    let type_info = read_info(r, self.utf8_support)?;
-                    columns.push(Column {
-                        user_type,
-                        flags,
-                        type_info,
-                        name: short_text(r)?,
-                    });
+                for index in 0..count {
+                    columns.push(r.indexed("column", usize::from(index) + 1, |r| {
+                        let user_type = r.field("user type", |r| r.u32())?;
+                        let flags = r.field("flags", |r| r.u16())?;
+                        let mut type_info =
+                            r.field("type information", |r| read_info(r, self.utf8_support))?;
+                        if flags & 0x800 != 0 {
+                            if !self.column_encryption {
+                                return Err(Error::malformed(
+                                    r.offset,
+                                    "encrypted column without negotiation",
+                                ));
+                            }
+                            if !matches!(
+                                type_info.sql_type,
+                                crate::SqlType::Binary { .. } | crate::SqlType::BinaryMax
+                            ) {
+                                return Err(Error::malformed(r.offset, "ciphertext TYPE_INFO"));
+                            }
+                            let ordinal = usize::from(r.u16()?);
+                            let key = keys
+                                .get(ordinal)
+                                .ok_or_else(|| Error::malformed(r.offset, "column key ordinal"))?
+                                .clone();
+                            type_info.encryption = Some(Box::new(
+                                crate::types::crypto::CryptoMetadata::read(r, Some(key))?,
+                            ));
+                        }
+                        r.reference("docs/design/3-reference/types.md");
+                        Ok(Column {
+                            user_type,
+                            flags,
+                            type_info,
+                            name: r.text("name", short_text)?,
+                        })
+                    })?);
                 }
                 Ok(Record::Columns(columns))
             }
@@ -563,32 +767,44 @@ impl Decoder {
                     .as_ref()
                     .ok_or_else(|| Error::malformed(r.offset, "row without metadata"))?;
                 let nulls = if tag == 0xd2 {
-                    r.take(columns.len().div_ceil(8))?
+                    r.field("null bitmap", |r| r.take(columns.len().div_ceil(8)))?
                 } else {
                     &[]
                 };
                 let mut values = Vec::with_capacity(columns.len());
                 for (i, column) in columns.iter().enumerate() {
                     if tag == 0xd2 && nulls[i / 8] & (1 << (i % 8)) != 0 {
-                        values.push(None);
+                        values.push(r.indexed("cell", i + 1, |_| Ok(None::<crate::Value>))?);
                         continue;
                     }
-                    values.push(column.type_info.read_value(r)?);
+                    let value = r.indexed("cell", i + 1, |r| column.type_info.read_value(r))?;
+                    if let Some(crate::Value::Unicode(text)) = &value {
+                        r.show_text(text);
+                    }
+                    values.push(value);
+                    r.reference("docs/design/3-reference/types.md");
                 }
                 Ok(Record::Row(values))
             }
             0xaa | 0xab | 0xad | 0xe3 | 0xa9 | 0xa4 | 0xa5 => {
-                let n = usize::from(r.u16()?);
+                let n = usize::from(r.field("length", |r| r.u16())?);
                 let start = r.offset;
+                let inspect = r.inspecting();
                 let mut body = Reader::new(r.take(n)?);
-                let record = Self::bounded(tag, &mut body).map_err(|e| match e.kind {
-                    ErrorKind::Incomplete { offset, .. } => {
-                        Error::malformed(start + offset, "truncated token field")
-                    }
-                    _ => e,
-                })?;
-                body.end()?;
-                Ok(record)
+                body.inspect(inspect);
+                let record = Self::bounded(tag, &mut body)
+                    .and_then(|record| {
+                        body.end()?;
+                        Ok(record)
+                    })
+                    .map_err(|e| match e.kind {
+                        ErrorKind::Incomplete { offset, .. } => {
+                            Error::malformed(start + offset, "truncated token field")
+                        }
+                        _ => e,
+                    });
+                r.adopt(body, start);
+                record
             }
             _ => Err(Error::new(ErrorKind::Unsupported("token tag"))),
         }
@@ -629,13 +845,13 @@ impl Decoder {
             }
             0xaa | 0xab => {
                 let message = ServerMessage {
-                    number: r.u32()? as i32,
-                    state: r.u8()?,
-                    severity: r.u8()?,
-                    text: long_text(r)?,
-                    server: short_text(r)?,
-                    procedure: short_text(r)?,
-                    line: r.u32()?,
+                    number: r.field("number", |r| Ok(r.u32()? as i32))?,
+                    state: r.field("state", |r| r.u8())?,
+                    severity: r.field("severity", |r| r.u8())?,
+                    text: r.text("message", long_text)?,
+                    server: r.text("server", short_text)?,
+                    procedure: r.text("procedure", short_text)?,
+                    line: r.field("line", |r| r.u32())?,
                 };
                 Ok(if tag == 0xaa {
                     Record::Error(message)
@@ -644,14 +860,17 @@ impl Decoder {
                 })
             }
             0xad => {
-                if r.u8()? != 1 {
+                if r.field("interface", |r| r.u8())? != 1 {
                     return Err(Error::malformed(0, "LOGINACK interface"));
                 }
-                let version = r.be32()?;
-                let program = short_text(r)?;
-                let bytes = r.take(4)?;
-                let mut server_version = [0; 4];
-                server_version.copy_from_slice(bytes);
+                let version = r.field("tds version", |r| r.be32())?;
+                let program = r.text("program", short_text)?;
+                let server_version = r.field("server version", |r| {
+                    let major = r.field("major", |r| r.u8())?;
+                    let minor = r.field("minor", |r| r.u8())?;
+                    let build = r.field("build", |r| r.be16())?.to_be_bytes();
+                    Ok([major, minor, build[0], build[1]])
+                })?;
                 Ok(Record::LoginAck {
                     version,
                     program,
@@ -729,6 +948,7 @@ mod tests {
                     legacy: None,
                     clr_assembly: None,
                     json_utf8: !utf8,
+                    encryption: None,
                 },
             }]]);
             let text = "{\"note\":\"é🦀\"}";

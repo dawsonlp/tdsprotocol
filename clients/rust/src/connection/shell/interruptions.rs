@@ -318,6 +318,10 @@ async fn zero_and_failed_partial_writes_discard_and_report_uncertain_execution()
                     connection.endpoint.writes.arm(steps);
                     let error = exchange_error(&mut channel, Batch::new("must never replay")).await;
                     assert_eq!(
+                        error.response.as_ref().unwrap().timing,
+                        crate::Timing::default()
+                    );
+                    assert_eq!(
                         (error.step, error.execution),
                         (Step::Exchange, Execution::PossiblyExecuted)
                     );
@@ -549,6 +553,7 @@ fn bulk_columns() -> Vec<crate::tokens::Column> {
             legacy: None,
             clr_assembly: None,
             json_utf8: false,
+            encryption: None,
         },
     }]
 }
@@ -676,12 +681,14 @@ async fn mars_reads_a_peer_failure_while_writes_are_blocked_and_fails_both_chann
             options.version = version;
             options.mars = true;
             let (inject, injecting) = oneshot::channel();
+            let (first_seen, saw_first) = oneshot::channel();
             let server = tokio::spawn(async move {
                 let mut peer = login(&listener, version, true).await;
                 opened(&mut peer, true).await;
                 let second = peer.frame().await;
                 assert_eq!((second.channel, second.flags), (1, mars::SYN));
                 assert_eq!(message(&mut peer, true).await.0, packet::BATCH);
+                first_seen.send(()).unwrap();
                 injecting.await.unwrap();
                 peer.send_raw_plain(&[0; 16]).await; // Invalid SMP signature on a verified transport.
                 raw_tail(peer).await
@@ -693,6 +700,7 @@ async fn mars_reads_a_peer_failure_while_writes_are_blocked_and_fails_both_chann
                 .exchange(Batch::new("sibling awaiting response"))
                 .await
                 .unwrap();
+            saw_first.await.unwrap(); // Keep the later raw prefix out of the peer's first TLS read.
             let waiting = pause_after(&connection.endpoint.writes, 5);
             let sending = tokio::spawn(async move {
                 exchange_error(&mut second, Batch::new("blocked sender")).await
@@ -809,6 +817,8 @@ async fn exchange_abandonment_distinguishes_unpolled_reserved_and_submitted_work
     for stage in 0..3 {
         let (commands, mut receive) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
+            #[cfg(feature = "encryption")]
+            keys: Mutex::new(None),
             writes: Default::default(),
             observation_error: Arc::new(Mutex::new(None)),
             commands,

@@ -1,0 +1,405 @@
+[
+  {
+    "family": "packet",
+    "body": "0101000800000100",
+    "fields": [
+      {
+        "path": [
+          "type"
+        ],
+        "start": 0,
+        "end": 1,
+        "raw": "01"
+      },
+      {
+        "path": [
+          "status"
+        ],
+        "start": 1,
+        "end": 2,
+        "raw": "01"
+      },
+      {
+        "path": [
+          "length"
+        ],
+        "start": 2,
+        "end": 4,
+        "raw": "0008"
+      },
+      {
+        "path": [
+          "session id"
+        ],
+        "start": 4,
+        "end": 6,
+        "raw": "0000"
+      },
+      {
+        "path": [
+          "packet number"
+        ],
+        "start": 6,
+        "end": 7,
+        "raw": "01"
+      }
+    ]
+  },
+  {
+    "family": "login",
+    "body": "18010000040000740010000000000100d204000000000000e003000000000000090400005e000c0076000c008e001300b4000a00c8000e00e4000000e4000a00f8000000f80010000000000000001801000018010000180100000000000066006900780074007500720065002d0068006f007300740066006900780074007500720065002d00750073006500720043a553a5e2a577a5b3a577a582a5f3a5b3a563a577a5a2a5b3a592a592a5d2a553a582a5e3a5740064007300200028007200750073007400290066006900780074007500720065002d00730065007200760065007200740064007300200028007200750073007400290066006900780074007500720065002d0064006100740061006200610073006500",
+    "fields": [
+      {
+        "path": [
+          "length"
+        ],
+        "start": 0,
+        "end": 4,
+        "raw": "18010000"
+      },
+      {
+        "path": [
+          "tds version"
+        ],
+        "start": 4,
+        "end": 8,
+        "raw": "04000074"
+      },
+      {
+        "path": [
+          "packet size"
+        ],
+        "start": 8,
+        "end": 12,
+        "raw": "00100000"
+      }
+    ],
+    "version": 1946157060
+  },
+  {
+    "family": "prelogin",
+    "body": "00001a00060100200001020021000103002200040400260001ff11001397000001000000000001",
+    "fields": [
+      {
+        "path": [
+          "version"
+        ],
+        "start": 26,
+        "end": 32,
+        "raw": "110013970000"
+      },
+      {
+        "path": [
+          "encryption"
+        ],
+        "start": 32,
+        "end": 33,
+        "raw": "01"
+      },
+      {
+        "path": [
+          "instance"
+        ],
+        "start": 33,
+        "end": 34,
+        "raw": "00"
+      },
+      {
+        "path": [
+          "mars"
+        ],
+        "start": 38,
+        "end": 39,
+        "raw": "01"
+      },
+      {
+        "path": [
+          "version",
+          "major"
+        ],
+        "start": 26,
+        "end": 27,
+        "raw": "11"
+      },
+      {
+        "path": [
+          "version",
+          "minor"
+        ],
+        "start": 27,
+        "end": 28,
+        "raw": "00"
+      },
+      {
+        "path": [
+          "version",
+          "build"
+        ],
+        "start": 28,
+        "end": 30,
+        "raw": "1397"
+      },
+      {
+        "path": [
+          "version",
+          "sub build"
+        ],
+        "start": 30,
+        "end": 32,
+        "raw": "0000"
+      }
+    ]
+  },
+  {
+    "family": "token",
+    "body": "fd1000c1002a00000000000000",
+    "fields": [
+      {
+        "path": [
+          "status"
+        ],
+        "start": 1,
+        "end": 3,
+        "raw": "1000"
+      },
+      {
+        "path": [
+          "command"
+        ],
+        "start": 3,
+        "end": 5,
+        "raw": "c100"
+      },
+      {
+        "path": [
+          "row count"
+        ],
+        "start": 5,
+        "end": 13,
+        "raw": "2a00000000000000"
+      }
+    ]
+  },
+  {
+    "family": "token",
+    "body": "ad1000017400000403530051004c0011001397",
+    "fields": [
+      {
+        "path": [
+          "interface"
+        ],
+        "start": 3,
+        "end": 4,
+        "raw": "01"
+      },
+      {
+        "path": [
+          "tds version"
+        ],
+        "start": 4,
+        "end": 8,
+        "raw": "74000004"
+      },
+      {
+        "path": [
+          "program"
+        ],
+        "start": 8,
+        "end": 15,
+        "raw": "03530051004c00"
+      },
+      {
+        "path": [
+          "server version"
+        ],
+        "start": 15,
+        "end": 19,
+        "raw": "11001397"
+      }
+    ]
+  },
+  {
+    "family": "token",
+    "body": "aa1a0051c300000110040074006500730074000173000170002a000000",
+    "fields": [
+      {
+        "path": [
+          "number"
+        ],
+        "start": 3,
+        "end": 7,
+        "raw": "51c30000"
+      },
+      {
+        "path": [
+          "state"
+        ],
+        "start": 7,
+        "end": 8,
+        "raw": "01"
+      },
+      {
+        "path": [
+          "severity"
+        ],
+        "start": 8,
+        "end": 9,
+        "raw": "10"
+      },
+      {
+        "path": [
+          "server"
+        ],
+        "start": 19,
+        "end": 22,
+        "raw": "017300"
+      },
+      {
+        "path": [
+          "procedure"
+        ],
+        "start": 22,
+        "end": 25,
+        "raw": "017000"
+      },
+      {
+        "path": [
+          "line"
+        ],
+        "start": 25,
+        "end": 29,
+        "raw": "2a000000"
+      }
+    ]
+  },
+  {
+    "family": "token",
+    "body": "ab1a0051c300000100040074006500730074000173000170002a000000",
+    "fields": [
+      {
+        "path": [
+          "number"
+        ],
+        "start": 3,
+        "end": 7,
+        "raw": "51c30000"
+      },
+      {
+        "path": [
+          "state"
+        ],
+        "start": 7,
+        "end": 8,
+        "raw": "01"
+      },
+      {
+        "path": [
+          "severity"
+        ],
+        "start": 8,
+        "end": 9,
+        "raw": "00"
+      },
+      {
+        "path": [
+          "server"
+        ],
+        "start": 19,
+        "end": 22,
+        "raw": "017300"
+      },
+      {
+        "path": [
+          "procedure"
+        ],
+        "start": 22,
+        "end": 25,
+        "raw": "017000"
+      },
+      {
+        "path": [
+          "line"
+        ],
+        "start": 25,
+        "end": 29,
+        "raw": "2a000000"
+      }
+    ]
+  },
+  {
+    "family": "token",
+    "body": "8101000000000001002604016100",
+    "fields": [
+      {
+        "path": [
+          "column count"
+        ],
+        "start": 1,
+        "end": 3,
+        "raw": "0100"
+      },
+      {
+        "path": [
+          "column 1",
+          "user type"
+        ],
+        "start": 3,
+        "end": 7,
+        "raw": "00000000"
+      },
+      {
+        "path": [
+          "column 1",
+          "flags"
+        ],
+        "start": 7,
+        "end": 9,
+        "raw": "0100"
+      },
+      {
+        "path": [
+          "column 1",
+          "type information",
+          "type code"
+        ],
+        "start": 9,
+        "end": 10,
+        "raw": "26"
+      },
+      {
+        "path": [
+          "column 1",
+          "type information",
+          "maximum length"
+        ],
+        "start": 10,
+        "end": 11,
+        "raw": "04"
+      },
+      {
+        "path": [
+          "column 1",
+          "name"
+        ],
+        "start": 11,
+        "end": 14,
+        "raw": "016100"
+      }
+    ]
+  },
+  {
+    "family": "row",
+    "body": "d1042a000000",
+    "fields": [
+      {
+        "path": [
+          "cell 1"
+        ],
+        "start": 1,
+        "end": 6,
+        "raw": "042a000000"
+      }
+    ],
+    "metadata": "8101000000000001002604016100"
+  }
+]

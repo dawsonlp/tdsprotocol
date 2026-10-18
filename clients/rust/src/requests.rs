@@ -7,6 +7,7 @@ use crate::{Error, ErrorKind, Result, wire};
 pub struct Context {
     pub transaction: u64,
     pub outstanding: u32,
+    pub column_encryption: bool,
 }
 /// Bulk is the one approved multi-exchange sequencing exception (D-50).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -80,7 +81,7 @@ pub(crate) mod rows;
 pub use rows::{RowRead, RowSource, Sort, TableColumn, TableType};
 pub mod decode;
 mod rpc;
-pub use rpc::{Builtin, Call, CallOptions, Calls, Param, ParamValue, Procedure};
+pub use rpc::{Builtin, Call, CallOptions, Calls, CipherInfo, Param, ParamValue, Procedure};
 
 #[cfg(test)]
 mod tests {

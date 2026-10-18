@@ -8,7 +8,7 @@ fn malformed(r: &Reader<'_>, field: &'static str) -> Error {
     Error::malformed(r.offset, field)
 }
 fn width(r: &mut Reader<'_>, allowed: &[u8]) -> Result<u8> {
-    let n = r.u8()?;
+    let n = r.field("maximum length", |r| r.u8())?;
     if !allowed.contains(&n) {
         return Err(malformed(r, "TYPE_INFO width"));
     }
@@ -27,7 +27,7 @@ pub(super) fn read_info(r: &mut Reader<'_>) -> Result<TypeInfo> {
     read_info_for(r, false)
 }
 pub(super) fn read_info_for(r: &mut Reader<'_>, parameter: bool) -> Result<TypeInfo> {
-    let code = r.u8()?;
+    let code = r.field("type code", |r| r.u8())?;
     let mut max_length = None;
     let mut legacy = None;
     let mut clr_assembly = None;
@@ -83,7 +83,10 @@ pub(super) fn read_info_for(r: &mut Reader<'_>, parameter: bool) -> Result<TypeI
         }
         0x6a | 0x6c => {
             sized(r, &[5, 9, 13, 17])?;
-            let (precision, scale) = (r.u8()?, r.u8()?);
+            let (precision, scale) = (
+                r.field("precision", |r| r.u8())?,
+                r.field("scale", |r| r.u8())?,
+            );
             if !(1..=38).contains(&precision) || scale > precision {
                 return Err(malformed(r, "decimal precision/scale"));
             }
@@ -95,7 +98,7 @@ pub(super) fn read_info_for(r: &mut Reader<'_>, parameter: bool) -> Result<TypeI
         }
         0x28 => SqlType::Date,
         0x29..=0x2b => {
-            let scale = r.u8()?;
+            let scale = r.field("scale", |r| r.u8())?;
             if scale > 7 {
                 return Err(malformed(r, "time scale"));
             }
@@ -110,7 +113,7 @@ pub(super) fn read_info_for(r: &mut Reader<'_>, parameter: bool) -> Result<TypeI
             SqlType::Guid
         }
         0xa5 | 0xad | 0xa7 | 0xaf | 0xe7 | 0xef => {
-            let length = r.u16()?;
+            let length = r.field("maximum length", |r| r.u16())?;
             if length > 8000 && (length != 0xffff || ![0xa5, 0xa7, 0xe7].contains(&code)) {
                 return Err(malformed(r, "character/binary maximum length"));
             }
@@ -129,7 +132,11 @@ pub(super) fn read_info_for(r: &mut Reader<'_>, parameter: bool) -> Result<TypeI
                 if unicode && length != 0xffff && !length.is_multiple_of(2) {
                     return Err(malformed(r, "Unicode maximum byte length"));
                 }
-                let collation = Collation(r.take(5)?.try_into().expect("five bytes"));
+                let collation = Collation(
+                    r.field("collation", |r| r.take(5))?
+                        .try_into()
+                        .expect("five bytes"),
+                );
                 if length == 0xffff {
                     SqlType::CharacterMax { unicode, collation }
                 } else {
@@ -215,6 +222,7 @@ pub(super) fn read_info_for(r: &mut Reader<'_>, parameter: bool) -> Result<TypeI
         legacy,
         clr_assembly,
         json_utf8: parameter && code == 0xf4,
+        encryption: None,
     })
 }
 fn sql_text(r: &mut Reader<'_>, long: bool) -> Result<SqlText> {
@@ -259,6 +267,41 @@ fn clock(r: &mut Reader<'_>, scale: u8) -> Result<SqlTime> {
 }
 pub(super) fn read_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<Value>> {
     use SqlType::*;
+    if info.encryption.is_some() {
+        let data = if matches!(info.sql_type, BinaryMax) {
+            let total = r.u64()?;
+            if total == u64::MAX {
+                return Ok(None);
+            }
+            if total != u64::MAX - 1 && total > 16 * 1024 * 1024 + 65 {
+                return Err(Error::new(ErrorKind::Limit("encrypted value")));
+            }
+            let mut bytes = Vec::new();
+            loop {
+                let n = r.u32()? as usize;
+                if n == 0 {
+                    break;
+                }
+                if n > 16 * 1024 * 1024 + 65 - bytes.len() {
+                    return Err(Error::new(ErrorKind::Limit("encrypted value")));
+                }
+                bytes.extend_from_slice(r.take(n)?);
+            }
+            if total != u64::MAX - 1 && total != bytes.len() as u64 {
+                return Err(malformed(r, "encrypted PLP total"));
+            }
+            bytes
+        } else {
+            let mut cipher = info.clone();
+            cipher.encryption = None;
+            match read_value(&cipher, r)? {
+                None => return Ok(None),
+                Some(Value::Binary(bytes)) => bytes,
+                _ => return Err(malformed(r, "ciphertext must be binary")),
+            }
+        };
+        return Ok(Some(Value::Encrypted(crate::values::Ciphertext(data))));
+    }
     let expected = match &info.sql_type {
         Table(_) => {
             return Err(Error::new(ErrorKind::Unsupported(
@@ -289,14 +332,14 @@ pub(super) fn read_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<V
             )));
         }
         Character { .. } | Binary { .. } => {
-            let n = r.u16()?;
+            let n = r.field("length", |r| r.u16())?;
             if n == 0xffff {
                 return Ok(None);
             }
             if Some(n) > info.max_length {
                 return Err(malformed(r, "value exceeds TYPE_INFO length"));
             }
-            let data = r.take(usize::from(n))?;
+            let data = r.field("data", |r| r.take(usize::from(n)))?;
             return Ok(Some(match &info.sql_type {
                 Character { unicode: true, .. } => {
                     if !data.len().is_multiple_of(2) {
@@ -325,7 +368,7 @@ pub(super) fn read_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<V
     let n = if fixed {
         expected
     } else {
-        usize::from(r.u8()?)
+        usize::from(r.field("length", |r| r.u8())?)
     };
     if n == 0 && !fixed {
         return Ok(None);
@@ -337,12 +380,12 @@ pub(super) fn read_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<V
         if ![5, 9, 13, 17].contains(&n) || n > usize::from(info.max_length.unwrap_or(0)) {
             return Err(malformed(r, "decimal value length"));
         }
-        let sign = r.u8()?;
+        let sign = r.field("sign", |r| r.u8())?;
         if sign > 1 {
             return Err(malformed(r, "decimal sign"));
         }
         let mut bytes = [0; 16];
-        bytes[..n - 1].copy_from_slice(r.take(n - 1)?);
+        bytes[..n - 1].copy_from_slice(r.field("magnitude", |r| r.take(n - 1))?);
         let magnitude = u128::from_le_bytes(bytes);
         if magnitude >= 10_u128.pow(u32::from(precision)) {
             return Err(malformed(r, "decimal value exceeds precision"));
@@ -357,7 +400,7 @@ pub(super) fn read_value(info: &TypeInfo, r: &mut Reader<'_>) -> Result<Option<V
     }
     let value = match info.sql_type {
         Integer { size } => {
-            let bytes = r.take(n)?;
+            let bytes = r.field("integer bytes", |r| r.take(n))?;
             let value = if size == IntegerSize::Tiny {
                 i64::from(bytes[0])
             } else {

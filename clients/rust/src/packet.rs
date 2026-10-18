@@ -12,6 +12,7 @@ pub const BATCH: u8 = 0x01;
 pub const RPC: u8 = 0x03;
 pub const REPLY: u8 = 0x04;
 pub const ATTENTION: u8 = 0x06;
+pub const BULK: u8 = 0x07;
 pub const TRANSACTION: u8 = 0x0e;
 pub const LOGIN: u8 = 0x10;
 pub const HELLO: u8 = 0x12;
@@ -24,6 +25,45 @@ pub struct Packet {
     pub last: bool,
     pub session_id: u16,
     pub body: Vec<u8>,
+}
+struct Header {
+    kind: u8,
+    status: u8,
+    length: usize,
+    session_id: u16,
+}
+fn header(r: &mut wire::Reader<'_>) -> Result<Header> {
+    let kind = r.field("type", |r| r.u8())?;
+    let status = r.field("status", |r| r.u8())?;
+    let length = usize::from(r.field("length", |r| r.be16())?);
+    let session_id = r.field("session id", |r| r.be16())?;
+    r.field("packet number", |r| r.u8())?;
+    let window = r.field("window", |r| r.u8())?;
+    if !(HEADER..=MAX_SIZE).contains(&length) {
+        return Err(Error::malformed(2, "packet length"));
+    }
+    if status & !0x1b != 0 || window != 0 {
+        return Err(Error::malformed(1, "packet flags/reserved byte"));
+    }
+    Ok(Header {
+        kind,
+        status,
+        length,
+        session_id,
+    })
+}
+/// Explain exactly the eight header bytes; credential bodies are never retained.
+pub fn inspect_header(bytes: &[u8]) -> Result<crate::inspection::Node> {
+    let mut r = wire::Reader::new(bytes);
+    r.inspect(true);
+    header(&mut r)?;
+    r.end()?;
+    Ok(r.node(
+        "TDS packet header",
+        crate::inspection::Basis::Packet,
+        "docs/design/3-reference/packet.md",
+    )
+    .unwrap())
 }
 
 #[derive(Default)]
@@ -40,15 +80,10 @@ impl Unpacker {
             return Ok(None);
         }
         let h = &self.pending[..HEADER];
-        let n = usize::from(u16::from_be_bytes([h[2], h[3]]));
-        if !(HEADER..=MAX_SIZE).contains(&n) {
-            return Err(Error::malformed(2, "packet length"));
-        }
-        if h[1] & !0x1b != 0 || h[7] != 0 {
-            return Err(Error::malformed(1, "packet flags/reserved byte"));
-        }
+        let parsed = header(&mut wire::Reader::new(h))?;
+        let n = parsed.length;
         if let Some(kind) = self.kind
-            && h[0] != kind
+            && parsed.kind != kind
         {
             return Err(Error::malformed(0, "packet type changed inside message"));
         }
@@ -57,10 +92,10 @@ impl Unpacker {
         }
         let packet = Packet {
             header: h.try_into().unwrap(),
-            kind: h[0],
-            status: h[1],
-            last: h[1] & 1 != 0,
-            session_id: u16::from_be_bytes([h[4], h[5]]),
+            kind: parsed.kind,
+            status: parsed.status,
+            last: parsed.status & 1 != 0,
+            session_id: parsed.session_id,
             body: self.pending[HEADER..n].to_vec(),
         };
         self.kind = if packet.last { None } else { Some(packet.kind) };

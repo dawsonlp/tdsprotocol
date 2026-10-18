@@ -1,0 +1,25 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running tests/encryption_live.rs (target/debug/deps/encryption_live-fc506cfeae14f3e7)
+
+running 2 tests
+test kp26_live_pool_return_and_next_borrower_reset ... 
+thread 'kp26_live_pool_return_and_next_borrower_reset' (57469656) panicked at tests/encryption_live.rs:83:51:
+called `Result::unwrap()` on an `Err` value: Closed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test kp26_live_transaction_boundaries_and_manual_encrypted_echo ... KP_LIVE V7_4 mars=false transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V7_4 mars=false timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+
+thread 'kp26_live_transaction_boundaries_and_manual_encrypted_echo' (57469658) panicked at tests/encryption_live.rs:65:10:
+called `Result::unwrap()` on an `Err` value: Error { step: Exchange, execution: PossiblyExecuted, password_change_uncertain: false, kind: ServerErrors([ServerMessage { number: 3997, state: 1, severity: 16, text: SqlText([65, 32, 116, 114, 97, 110, 115, 97, 99, 116, 105, 111, 110, 32, 116, 104, 97, 116, 32, 119, 97, 115, 32, 115, 116, 97, 114, 116, 101, 100, 32, 105, 110, 32, 97, 32, 77, 65, 82, 83, 32, 98, 97, 116, 99, 104, 32, 105, 115, 32, 115, 116, 105, 108, 108, 32, 97, 99, 116, 105, 118, 101, 32, 97, 116, 32, 116, 104, 101, 32, 101, 110, 100, 32, 111, 102, 32, 116, 104, 101, 32, 98, 97, 116, 99, 104, 46, 32, 84, 104, 101, 32, 116, 114, 97, 110, 115, 97, 99, 116, 105, 111, 110, 32, 105, 115, 32, 114, 111, 108, 108, 101, 100, 32, 98, 97, 99, 107, 46]), server: SqlText([101, 51, 101, 101, 51, 101, 102, 102, 55, 98, 51, 48]), procedure: SqlText([]), line: 1 }]), response: Some(FetchedResponse { sequence: [Completion(Done { kind: Statement, status: 1, command: 212, row_count: None }), Error(ServerMessage { number: 3997, state: 1, severity: 16, text: SqlText([65, 32, 116, 114, 97, 110, 115, 97, 99, 116, 105, 111, 110, 32, 116, 104, 97, 116, 32, 119, 97, 115, 32, 115, 116, 97, 114, 116, 101, 100, 32, 105, 110, 32, 97, 32, 77, 65, 82, 83, 32, 98, 97, 116, 99, 104, 32, 105, 115, 32, 115, 116, 105, 108, 108, 32, 97, 99, 116, 105, 118, 101, 32, 97, 116, 32, 116, 104, 101, 32, 101, 110, 100, 32, 111, 102, 32, 116, 104, 101, 32, 98, 97, 116, 99, 104, 46, 32, 84, 104, 101, 32, 116, 114, 97, 110, 115, 97, 99, 116, 105, 111, 110, 32, 105, 115, 32, 114, 111, 108, 108, 101, 100, 32, 98, 97, 99, 107, 46]), server: SqlText([101, 51, 101, 101, 51, 101, 102, 102, 55, 98, 51, 48]), procedure: SqlText([]), line: 1 }), Completion(Done { kind: Statement, status: 2, command: 253, row_count: None })], result_sets: [], returns: [], ended: true, canceled: false, timing: Timing { sent: Some(70.129416ms), first_packet: Some(70.57825ms), ended: Some(70.701333ms) } }) }
+FAILED
+
+failures:
+
+failures:
+    kp26_live_pool_return_and_next_borrower_reset
+    kp26_live_transaction_boundaries_and_manual_encrypted_echo
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `--test encryption_live`

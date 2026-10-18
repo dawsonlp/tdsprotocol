@@ -61,8 +61,14 @@ async fn captures_keep_the_same_record_with_one_byte_or_whole_packet_bodies() {
                 }
             };
             assert!(fetched.ended);
+            assert!(fetched.timing.until_first_packet().is_some());
+            assert!(fetched.timing.until_end() >= fetched.timing.until_first_packet());
+            // Independent exchanges have different measured times. Only that
+            // nondeterministic evidence is excluded from semantic parity.
+            let mut comparable = fetched.clone();
+            comparable.timing = tds_client::Timing::default();
             if let Some(previous) = previous {
-                assert_eq!(fetched, previous);
+                assert_eq!(comparable, previous);
             }
             if body == COUNTS {
                 assert_eq!(
@@ -150,7 +156,7 @@ async fn captures_keep_the_same_record_with_one_byte_or_whole_packet_bodies() {
                     .sum::<usize>()
             );
             assert_eq!(response.snapshot(), fetched);
-            previous = Some(fetched);
+            previous = Some(comparable);
         }
     }
     channel.close().await.unwrap();

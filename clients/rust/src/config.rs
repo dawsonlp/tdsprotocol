@@ -81,6 +81,8 @@ pub struct ConnectionConfig {
     pub data_classification: u8,
     /// Advertise exact UTF-8 transport rather than server substitution.
     pub utf8_support: bool,
+    /// Request Always Encrypted version one (without enclaves).
+    pub column_encryption: bool,
 }
 impl ConnectionConfig {
     pub fn new(
@@ -108,6 +110,7 @@ impl ConnectionConfig {
             vector_support: 2,
             data_classification: 2,
             utf8_support: true,
+            column_encryption: false,
         }
     }
     pub fn validate(&self) -> ConfigResult<()> {

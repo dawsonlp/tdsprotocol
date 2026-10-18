@@ -67,6 +67,7 @@ pub(super) fn protocol_core(
         vector_support: options.vector_support,
         data_classification: options.data_classification,
         utf8_support: options.utf8_support,
+        column_encryption: options.column_encryption,
         recovery_data: data,
     };
     ConnectionCore::new_with_mars(
@@ -205,6 +206,8 @@ impl Driver {
         // dropped at any scheduling point without revoking a later transport.
         self.socket.take(); // close the failed transport before any replacement login
         self.endpoint.disconnected.store(true, Ordering::Release);
+        #[cfg(feature = "encryption")]
+        self.endpoint.revoke_keys();
         *self
             .endpoint
             .failure

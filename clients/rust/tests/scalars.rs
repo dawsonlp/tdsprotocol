@@ -17,7 +17,9 @@ fn unhex(text: &str) -> Vec<u8> {
 }
 fn view(value: Option<&Value>) -> Json {
     match value {
-        Some(Value::Variant(_) | Value::Vector(_)) => panic!("variant has a separate corpus"),
+        Some(
+            Value::NotDecrypted { .. } | Value::Encrypted(_) | Value::Variant(_) | Value::Vector(_),
+        ) => panic!("variant has a separate corpus"),
         None => Json::Null,
         Some(Value::Integer(v)) => json!({"integer":v.to_string()}),
         Some(Value::Bit(v)) => json!({"bit":v}),

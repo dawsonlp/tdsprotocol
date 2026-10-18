@@ -307,6 +307,13 @@ pub struct SqlVariant {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
+    /// Ciphertext from an encrypted SQL cell, before an adapter authenticates it.
+    Encrypted(Ciphertext),
+    /// Authentication/key/normalization failure; ciphertext remains explicit.
+    NotDecrypted {
+        ciphertext: Ciphertext,
+        reason: String,
+    },
     Variant(Box<SqlVariant>),
     Vector(SqlVector),
     Integer(i64),
@@ -427,5 +434,14 @@ impl SqlHalf {
             sign | ((exponent as u16) << 10) | (fraction >> 13) as u16
         };
         Ok(Self(bits))
+    }
+}
+
+/// Ciphertext is deliberately distinguishable from an ordinary binary value.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Ciphertext(pub Vec<u8>);
+impl std::fmt::Debug for Ciphertext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Ciphertext({} bytes)", self.0.len())
     }
 }

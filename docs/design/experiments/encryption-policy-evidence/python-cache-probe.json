@@ -1,0 +1,5 @@
+{
+  "different_key_table_returned_same_cached_object": false,
+  "provider_lookups_for_two_tables": 2,
+  "second_result_matches_independent_second_key": true
+}

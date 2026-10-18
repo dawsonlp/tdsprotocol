@@ -27,6 +27,7 @@ fn hex(bytes: &[u8]) -> String {
 #[test]
 fn rpc_bodies_match_python_names_numbers_flags_default_null_and_batch_separator() {
     let context = Context {
+        column_encryption: false,
         transaction: 17,
         outstanding: 2,
     };
@@ -68,6 +69,7 @@ fn rpc_bodies_match_python_names_numbers_flags_default_null_and_batch_separator(
             legacy: None,
             clr_assembly: None,
             json_utf8: false,
+            encryption: None,
         },
         name: "v".into(),
     }]];
@@ -114,6 +116,7 @@ fn invalid_declarations_values_and_rounding_are_refused_without_exposing_values(
     assert!(
         Calls(vec![])
             .encode_request(&Context {
+                column_encryption: false,
                 transaction: 0,
                 outstanding: 1
             })
@@ -124,6 +127,7 @@ fn invalid_declarations_values_and_rounding_are_refused_without_exposing_values(
     assert!(
         missing
             .encode_request(&Context {
+                column_encryption: false,
                 transaction: 0,
                 outstanding: 1
             })

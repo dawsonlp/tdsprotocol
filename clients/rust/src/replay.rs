@@ -43,6 +43,7 @@ pub enum Content {
     },
     Message(Message),
     Record(Box<Record>),
+    Inspection(crate::inspection::Node),
     Diagnostic {
         issue: Issue,
         offset: Option<usize>,
@@ -57,19 +58,7 @@ pub enum Message {
     Request(decode::Request),
     RequestBulk(Vec<Record>),
 }
-/// Identity fields and fixed options only; no credential payloads.
-#[derive(Clone, Debug)]
-pub struct Login {
-    pub version: u32,
-    pub packet_size: u32,
-    pub options: [u8; 4],
-    pub host: SqlText,
-    pub user: SqlText,
-    pub application: SqlText,
-    pub server: SqlText,
-    pub language: SqlText,
-    pub database: SqlText,
-}
+pub use crate::login7::Identity as Login;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Summary {
     pub packets: usize,
@@ -93,6 +82,7 @@ struct Replay<F> {
     summary: Summary,
     streams: BTreeMap<(Direction, Option<u64>), Stream>,
     utf8: bool,
+    column_encryption: bool,
     classification: u8,
     features: BTreeSet<u8>,
     context_known: bool,
@@ -100,6 +90,7 @@ struct Replay<F> {
     start_seen: bool,
     line: usize,
     time: f64,
+    inspect: bool,
 }
 impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
     fn item(&mut self, key: Option<(Direction, Option<u64>)>, content: Content) -> io::Result<()> {
@@ -257,6 +248,14 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             }
         };
         self.summary.packets += 1;
+        if self.inspect {
+            self.item(
+                Some(key),
+                Content::Inspection(
+                    packet::inspect_header(&packet.header).expect("validated header"),
+                ),
+            )?;
+        }
         let credential =
             key.0 == Direction::Send && matches!(packet.kind, packet::LOGIN | 0x08 | 0x11);
         self.item(
@@ -273,6 +272,19 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                 stream.body.extend_from_slice(&packet.body);
                 if packet.last {
                     let body = std::mem::take(&mut stream.body);
+                    if self.inspect
+                        && let Some(node) = crate::inspection::message_with_encryption(
+                            if key.0 == Direction::Receive && self.hello_reply {
+                                packet::HELLO
+                            } else {
+                                packet.kind
+                            },
+                            &body,
+                            self.column_encryption,
+                        )
+                    {
+                        self.item(Some(key), Content::Inspection(node))?;
+                    }
                     match self.message(key, packet.kind, &body) {
                         Ok(Some(message)) => self.item(Some(key), Content::Message(message))?,
                         Ok(None) => {}
@@ -308,6 +320,8 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             return Ok(());
         }
         stream.decoder.set_utf8_support(self.utf8);
+        stream.decoder.set_column_encryption(self.column_encryption);
+        stream.decoder.set_inspection(self.inspect);
         if let Err(error) = stream
             .decoder
             .set_classification_version(self.classification)
@@ -324,9 +338,31 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
         stream.fed += packet.body.len();
         loop {
             let offset = stream.fed - stream.decoder.buffered_bytes();
-            match stream.decoder.next_record() {
+            let decoded = stream.decoder.next_record();
+            let missing_columns = matches!(
+                &decoded,
+                Err(Error {
+                    kind: ErrorKind::Malformed {
+                        field: "omitted column metadata without saved columns",
+                        ..
+                    },
+                    ..
+                })
+            );
+            if let Some(mut node) = stream.decoder.take_inspection() {
+                if missing_columns {
+                    node.issue = Some("saved column metadata is absent from this recording".into());
+                }
+                self.item(Some(key), Content::Inspection(node))?;
+            }
+            match decoded {
                 Ok(None) => break,
                 Err(mut error) => {
+                    if missing_columns {
+                        self.issue(Some(key), Issue::Incomplete, Some(offset), "column metadata was omitted by NO_METADATA and is absent from this recording")?;
+                        stream.failed = true;
+                        break;
+                    }
                     if matches!(error.kind, ErrorKind::Unsupported(_)) {
                         self.issue(
                             Some(key),
@@ -388,20 +424,21 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                                     stream.failed = true;
                                     self.context_known = false;
                                 }
+                                4 if data == &[1] => self.column_encryption = true,
                                 4 => {
                                     self.issue(
                                         Some(key),
-                                        Issue::Unsupported,
-                                        None,
-                                        "encrypted conversation metadata",
+                                        Issue::Malformed,
+                                        Some(offset),
+                                        "invalid column encryption acknowledgement",
                                     )?;
                                     stream.failed = true;
-                                    self.context_known = false;
                                 }
                                 _ => {}
                             }
                         }
                         stream.decoder.set_utf8_support(self.utf8);
+                        stream.decoder.set_column_encryption(self.column_encryption);
                         if let Err(error) = stream
                             .decoder
                             .set_classification_version(self.classification)
@@ -481,7 +518,8 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             response.final_seen = false;
         }
         if kind == 7 {
-            return decode::bulk(body).map(|v| Some(Message::RequestBulk(v)));
+            return decode::bulk_with_encryption(body, self.column_encryption)
+                .map(|v| Some(Message::RequestBulk(v)));
         }
         decode::request(kind, body).map(|v| Some(Message::Request(v)))
     }
@@ -534,7 +572,16 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
 /// # Ok::<(), std::io::Error>(())
 /// ```
 pub fn replay(
+    input: impl BufRead,
+    emit: impl FnMut(Item) -> io::Result<()>,
+) -> io::Result<Summary> {
+    replay_with_inspection(input, false, emit)
+}
+/// Replay with optional field trees. Base evidence/diagnostics are identical to
+/// `replay`; false builds no trees. True additionally emits `Content::Inspection`.
+pub fn replay_with_inspection(
     mut input: impl BufRead,
+    inspect: bool,
     emit: impl FnMut(Item) -> io::Result<()>,
 ) -> io::Result<Summary> {
     let mut reader = Replay {
@@ -542,6 +589,7 @@ pub fn replay(
         summary: Summary::default(),
         streams: BTreeMap::new(),
         utf8: false,
+        column_encryption: false,
         classification: 0,
         features: BTreeSet::new(),
         context_known: true,
@@ -549,6 +597,7 @@ pub fn replay(
         start_seen: false,
         line: 0,
         time: 0.0,
+        inspect,
     };
     let mut bytes = vec![];
     loop {
@@ -592,67 +641,8 @@ pub fn replay(
     Ok(reader.summary)
 }
 fn login(body: &[u8]) -> crate::Result<Login> {
-    let mut r = Reader::new(body);
-    if r.u32()? as usize != body.len() {
-        return Err(Error::malformed(0, "LOGIN7 length"));
-    }
-    let version = r.be32()?;
-    let packet_size = r.u32()?;
-    r.take(12)?;
-    let options = r.take(4)?.try_into().unwrap();
-    if body.len() < 94 {
-        return Err(Error::malformed(body.len(), "LOGIN7 fixed portion"));
-    }
-    let name = |at: usize| -> crate::Result<SqlText> {
-        let mut entry = Reader::new(&body[at..]);
-        let offset = usize::from(entry.u16()?);
-        let n = usize::from(entry.u16()?);
-        if offset < 94 && n != 0 {
-            return Err(Error::malformed(at, "LOGIN7 identity offset"));
-        }
-        let bytes = body
-            .get(offset..offset + n * 2)
-            .ok_or_else(|| Error::malformed(at, "LOGIN7 identity bounds"))?;
-        decode::text(&mut Reader::new(bytes), n)
-    };
-    Ok(Login {
-        version,
-        packet_size,
-        options,
-        host: name(36)?,
-        user: name(40)?,
-        application: name(48)?,
-        server: name(52)?,
-        language: name(64)?,
-        database: name(68)?,
-    })
+    crate::login7::read(&mut Reader::new(body))
 }
 fn prelogin(body: &[u8]) -> crate::Result<Vec<(u8, Vec<u8>)>> {
-    let mut r = Reader::new(body);
-    let mut entries = vec![];
-    while r.peek() != Some(0xff) {
-        entries.push((r.u8()?, usize::from(r.be16()?), usize::from(r.be16()?)));
-    }
-    r.u8()?;
-    let mut ranges = entries
-        .iter()
-        .map(|(_, at, n)| (*at, at + n))
-        .collect::<Vec<_>>();
-    ranges.sort_unstable();
-    if ranges.windows(2).any(|p| p[0].1 > p[1].0) {
-        return Err(Error::malformed(r.offset, "PRELOGIN overlapping options"));
-    }
-    let mut result = vec![];
-    for (tag, at, n) in entries {
-        if at < r.offset || result.iter().any(|(t, _)| *t == tag) {
-            return Err(Error::malformed(at, "PRELOGIN option offset/duplicate"));
-        }
-        result.push((
-            tag,
-            body.get(at..at + n)
-                .ok_or_else(|| Error::malformed(at, "PRELOGIN option bounds"))?
-                .to_vec(),
-        ));
-    }
-    Ok(result)
+    crate::prelogin::read(&mut Reader::new(body))
 }

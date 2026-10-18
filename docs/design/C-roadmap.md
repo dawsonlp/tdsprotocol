@@ -3,7 +3,7 @@
 **Where this sits:** after [Building the Client](B-building-the-client.md), whose milestones M1–M15, M17 and M18 are built. It sets out what comes next.
 **After reading this you can** say what each phase delivers, what it builds on, and which decisions it needs before it starts.
 
-> **Status:** order revised by the user, 2026-10-17 (D-63): Rust first, then Python conveniences, then application drivers. The [Rust development plan](D-rust-development.md) is a proposal; its [Python baseline](E-python-baseline.md) records the precursor evidence and server setup. Each phase's design is agreed before its code is written. Accepted milestones are then added to [Done When](5-done-when.md).
+> **Status:** Rust first, then Python conveniences, then application drivers (D-63). On 2026-10-18 the user agreed the Rust completion sequence and scope (D-65): finish local work including local-key Always Encrypted, create a transient GCP Windows lab, implement and validate Windows authentication, then destroy the lab. Entra and Azure-specific providers are deferred. These are completion requirements, not claims of implementation or deployment. Each affected API/provider design is agreed before its code is written.
 
 ---
 
@@ -30,31 +30,61 @@ Phase 3 depends on phase 2. Rust does not depend on completing Python M16.
 - **The Python client is a reference to compare against.** For fixed deterministic inputs and options, both clients must encode the same protocol bodies and read the same semantic response record. Variable session fields, timestamps, nonces and TLS ciphertext require explicitly scoped comparisons.
 - **The live tests run against the same SQL Server container**, with the same scenarios.
 
-**Current first slice:** `clients/rust/` contains a runtime-independent core and the approved Tokio shell/in-memory rustls pairing. One persistent connection task, movable channel authority, borrowed responses and conservative abandonment are agreed. Both TDS versions now support verified TLS, independent MARS channels and explicit-return pooling for the current integer/token subset; see the [Rust reading path and evidence](../../clients/rust/README.md).
+**Implemented baseline:** verified TDS 7.4/8.0 TLS, SQL authentication, movable
+channels, cancellation/cleanup, MARS, whole-connection pooling/configuration,
+routing and eligible recovery; exact scalar/large/special values, typed calls,
+streaming, TVPs, bulk and transaction requests; native offline replay and shared
+connection/scalar-query field inspection. The [support matrix](../../clients/rust/SUPPORT.md)
+and [acceptance record](../../clients/rust/ACCEPTANCE.md) distinguish implementation,
+local evidence and remaining gaps. The Rust crate is unpublished.
 
-**Cancellation slice:** explicit awaited Attention/drain, exchange-scoped cancel handles and a separate configurable 5-second cleanup budget are agreed and implemented. Cleanup failure preserves the original cause and discards the connection. Delegated channel close and stale-lifetime isolation are now corrected in both clients; Python additionally has MARS/partial-send evidence.
+### Rust completion sequence · agreed 2026-10-18 (D-65)
 
-**Observation slice:** the approved failure policy and one recording per physical
-connection are implemented in both clients. Rust provides initial step/message/
-packet/token observation and credential-redacted JSON-lines recording; four fresh
-Rust recordings replay through Python. Field inspection trees, detailed timings
-and Rust-native replay remain open. Python pools/routing/recovery use recording
-factories; reusing one transport across loans keeps its recording.
+**Outcome:** a dependable, literate Rust client with an explicit supported scope,
+local-key Always Encrypted, tested Windows authentication and reproducible test
+evidence. Completing this scope does not mean complete Python feature parity.
 
-**Routing slice:** one-hop routing, a single deadline, destination certificate
-identity and separate recordings are implemented/tested through a local router
-to Docker under both TDS versions × plain/MARS.
+| Stage | Work | Exit evidence |
+|---|---|---|
+| 1 · Finish locally | Complete agreed observation/replay gaps, supported-scope correctness, readability/API/package review and repeatable checks. Implement local-key Always Encrypted, including wire metadata, normalization, authenticated encryption and parameter orchestration. Settle the supported Rust/platform floor. | Local regressions, targeted malformed/fragmented-input testing, live Docker matrices and independent .NET mutual encrypted read/write and deterministic-lookup checks. Record intentional exclusions. No cloud VMs are needed for development in this stage. |
+| 2 · Create the transient Windows lab | Add Terraform and configuration/test/teardown tooling under `infra/gcp/`, alongside the historical Azure setup. Provision only when the Windows test campaign is ready. | Domain, DNS/time, SPNs, verified TLS, SQL Server and runners are ready. Existing Python Windows tests and an independent Windows client establish that the environment works before diagnosing Rust failures. |
+| 3 · Implement and validate Windows authentication | Agree and implement the Rust token-provider contract and selected adapters. Test NTLM local/domain logins, Kerberos and negotiated authentication. Run native Windows client checks and actual SQL Server Browser acceptance. | Positive and negative cases, actual authentication scheme assertions (no silent Kerberos-to-NTLM success), credential redaction, cancellation/failure handling and relevant pool/recovery behavior. Exercise both TDS versions and plain/MARS where supported. |
+| 4 · Retain evidence and destroy | Export redacted results/captures, destroy the Terraform-owned lab and check for residual resources. Reconcile support, acceptance and release documentation. | Required tests passed without unavailable-environment skips; Terraform state and cloud inventory confirm owned resources are gone. Mark this scoped Rust phase complete; M16 follows. Publication remains a separate action. |
 
-**Recovery slice:** the [identity experiment](experiments/recovery-channel-identity.md)
-and shared correction now underpin both clients. Eligible recovery preserves
-logical channels and close permissions, allocates fresh wire ids and retires old
-exchange authority. Rust epoch guards protect replacements from old read/Drop
-controls. Both versions × plain/MARS run against Docker; interrupted requests are
-never replayed. Sixteen Rust physical recordings replay through Python with
-logical row attribution and redaction checked. Broader types/platforms and real
-failover infrastructure remain separate acceptance work.
+**Infrastructure proposal:** two small Windows Compute Engine VMs (a disposable
+AD domain controller and a domain-joined SQL Server), plus a small Linux runner
+for Kerberos. Native Windows tests can run on the SQL VM. Install SQL Server
+Developer on a Windows base image to avoid choosing a paid SQL Server edition
+unnecessarily. Keep the lab in its own VPC, restrict administration and database
+access, and keep DNS/Kerberos/Browser tests inside the lab where appropriate.
+Retain the Azure implementation; adapt its test scenarios and configuration
+intent rather than copying Azure-specific DNS, image or remote-command settings.
 
-**Still to decide before affected implementation:** response interfaces beyond the implemented Python-compatible retention subset, exact value representations beyond the first integer/text subset, neutral shared-fixture format, supported Rust/platform floor and later milestone details. The broader connection features remain tracked in the Rust plan.
+**Cost/lifecycle requirements:** explicit target project, region, resource sizes,
+current cost estimate and maximum test window before apply; no reliance on the
+developer's default project. Use a fixed expiry that survives guest reboots, with
+automatic VM deletion and auto-deleted test disks as a fallback. Normal completion
+and failure paths must run full teardown and inventory checks for VMs, disks,
+addresses and any other lab-owned billable resources. VM deletion alone is not a
+claim that the whole lab is destroyed. Preserve state until cleanup is verified;
+do not print or commit secrets. Do not keep the lab running between development
+sessions. Detailed networking, secret delivery and provider designs remain to be
+reviewed before implementation.
+
+**Explicitly deferred from this Rust completion:** Entra/federated authentication,
+Azure Key Vault and Azure-specific login features/providers; Windows certificate-store
+key-provider support and enclave/attestation work. The local-key choice does not
+require the Windows certificate store. These capabilities remain visible in the
+support matrix rather than being described as implemented. A GCP Windows lab does
+not validate Azure SQL service behavior or genuine remote failover.
+
+**Feasibility checked 2026-10-18:** Google documents [Windows/SQL Server Compute Engine VMs](https://docs.cloud.google.com/compute/docs/instances/sql-server/creating-sql-server-instances),
+[Active Directory on Compute Engine](https://docs.cloud.google.com/compute/docs/instances/windows/best-practices)
+and [automatic VM termination with Terraform](https://docs.cloud.google.com/compute/docs/instances/limit-vm-runtime).
+Microsoft documents [Entra configuration without Azure Arc](https://learn.microsoft.com/en-us/sql/relational-databases/security/authentication-access/microsoft-entra-authentication-sql-server-enable-without-arc?view=sql-server-ver17),
+but it still requires a tenant and application permissions, which are unavailable
+for this campaign. No GCP deployment, quota or IAM acceptance is established by
+this documentation review.
 
 ## 2 · Conveniences
 
@@ -89,4 +119,4 @@ It uses only the driver's public surface. If it needs something more, the driver
 
 ---
 
-**Next:** [Decisions](4-decisions.md) · **Decisions:** D-24, D-27, D-35, D-37–D-39, D-45, D-50, D-63
+**Next:** [Decisions](4-decisions.md) · **Decisions:** D-24, D-27, D-35, D-37–D-39, D-45, D-50, D-63, D-65

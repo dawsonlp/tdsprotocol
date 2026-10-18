@@ -413,17 +413,18 @@ Every line is generated from the definitions; nothing is labeled separately for 
 - **Every byte is reachable:** `event.node.find("login reply", "LOGINACK", "tds version")`. Each structure in the full view names the reference page that explains it. Large values are summarized (D-47).
 - **Timing:**
   - Each connect step shows its time since connecting began: `● hello · at 24 ms`.
-  - Each response shows the time from sending to its first packet (roughly, how long the server took before answering) and to its end: `← response · … · first packet 12 ms · done 40 ms`.
-  - The durations are shown at the end of the line, separate from its text. A capture records them.
+  - Each response shows the time from complete request handoff to consumption of its first complete packet and to its terminal message boundary: `← response · … · first packet 12 ms · done 40 ms`. This is observed exchange latency, including transport, scheduling and application delay; it does not isolate server execution time.
+  - Durations are displayed separately from descriptive event text. A capture records them.
   - A capture's first line records the wall-clock start.
   - `response.timing` gives applications the same: `sent`, `first_packet`, `ended`, `until_first_packet`, `until_end`. It's collected at every level.
+  - Rust exposes `Response::timing()` and `FetchedResponse::timing`, using monotonic `Duration` milestones relative to a physical connection. Missing milestones remain unknown. Cancellation completion means its acknowledgement message ended, not SQL success or rollback. Recovery begins a fresh physical clock; snapshots of old exchanges keep their own evidence. Recorded `took` descriptions use measured durations, never replay runtime.
 - **Captures and replay:**
   - `capture=Capture("session.jsonl")`, or `connection.capture` between exchanges, records every event's line and every plaintext packet, with times;
   - `replay("session.jsonl", Printer(Level.FULL))` decodes the packets with the same definitions and shows the identical view;
   - the login's password is zeroed unless `keep_password=True`;
   - query text and data stay;
   - saved table inputs retain their declaration, default columns, ordering hints, placement and exact rows. They are input evidence, not result cells;
-  - Rust's offline reader and CLI inspect the same recordings. [Design K](K-offline-replay.md) defines its evidence boundaries and remaining inspection/timing work.
+  - Rust's offline reader and CLI inspect the same recordings. [Design K](K-offline-replay.md) defines its evidence boundaries. [Design L](L-rust-field-inspection.md) records connection/request trees, incremental response fragments and remaining extension coverage.
 - **The password stays hidden at full** unless an observer reveals it for the sessions it watches: `Printer(…, reveal_password=True)`.
 - **Diagnostic output failure:** an optional observer that raises is disabled;
   database work and any recording continue. Its exception is available separately
