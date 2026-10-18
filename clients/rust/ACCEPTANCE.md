@@ -4,7 +4,7 @@ Observed locally through 2026-10-18, branch `rust-client`. This is a development
 not a release or a claim of Python connection-package parity.
 
 The check table is current. The sections below retain earlier checkpoints;
-[native offline replay](#native-offline-replay)
+[interrupted I/O acceptance](#interrupted-io-acceptance)
 records the latest scope and shared corrections.
 
 ## Environment
@@ -30,7 +30,7 @@ Run from `clients/rust/`:
 
 | Command | Evidence |
 |---|---|
-| `cargo test --offline` | 175 checks pass, including 11 rustdoc checks; 56 Docker tests are explicitly ignored in the ordinary run |
+| `cargo test --offline` | 190 checks pass, including 15 deterministic interruption tests and 11 rustdoc checks; 56 Docker tests are explicitly ignored in the ordinary run |
 | `cargo test --offline --tests -- --ignored --test-threads=1` | All 56 live test functions pass, each exercising its documented protocol/framing or feature matrix |
 | `cargo test --no-default-features --offline` | 73 checks pass, including 4 rustdoc checks; the shell/executable are excluded |
 | `cargo fmt --all -- --check` | Pass |
@@ -125,10 +125,12 @@ record and discard the connection. This is not full Python response API parity.
 The transport bounds and backpressure path are explicit in the README and code;
 semantic history/fetch are deliberately retained without cumulative budgets, as in Python;
 maximum retained memory and performance have not been measured. MARS fairness
-has functional tests, not a latency or throughput benchmark. Runtime shutdown revocation is implemented with a Driver destructor tracking the current endpoint
-but has not received a separate live runtime-teardown test. Partial socket-write
-offsets are retained explicitly; exhaustive forced-backpressure send-abort
-coverage remains open. The shared channel-close correction changes Python core,
+has functional tests, not a latency or throughput benchmark. At this historical
+checkpoint, runtime shutdown and forced partial socket-write boundaries did not
+have separate deterministic acceptance. The [interrupted I/O matrix](INTERRUPTIONS.md)
+below now covers selected boundaries, including current-endpoint revocation after
+pool rotation; exhaustive scheduling coverage remains outside that evidence.
+The shared channel-close correction changes Python core,
 shell and terminal-message handling; its final regression evidence is recorded
 below. Earlier response-only evidence was 63 focused Python tests, not a complete
 Python/live revalidation.
@@ -988,3 +990,55 @@ Final full Python regression: **782 passed, 13 skipped**, 120.60 seconds
 remain 10 Azure, 2 Kerberos and 1 Windows certificate-store tests. No Rust Docker
 suite or live probe ran concurrently with that Python run. Generated planning
 pages regenerate, all site page JavaScript parses and `git diff --check` passes.
+
+## Interrupted I/O acceptance
+
+Approved iteration, completed 2026-10-18 on `rust-client`. The
+[boundary matrix](INTERRUPTIONS.md) defines the finite acceptance scope and exact
+test names. Fifteen new test functions cover submission, selected partial TCP
+write offsets, short-write resumption, WouldBlock, zero/error writes, owner/driver
+abortion, streamed IGNORE/drain, delegated close, partial Attention timeout and
+abandonment, bulk continuation discard, MARS shared errors during a blocked write,
+pool capacity/replacement, explicit recovery without SQL replay, and runtime
+shutdown after borrower-endpoint rotation.
+
+The private `cfg(test)` write control runs inside the ordinary driver loop and
+retains real TCP/TLS. Peer checkpoints precede request-write fault scripts. These
+checkpoints also prevent the peer's buffered login/SYN reads from invalidating a
+later raw socket-tail measurement. One short-write conversation per protocol/MARS
+mode is replayed natively with exactly two batches and zero diagnostics; peer
+bytes independently establish delivery without duplication. No new public API,
+transport abstraction, cleanup policy or production defect was established.
+Python's send/undo, close/drain and canceled-close discard paths were inspected;
+no shared behavioral correction was indicated and Python is unchanged.
+
+Fresh validation, from the repository root:
+
+```sh
+cargo test --offline --manifest-path clients/rust/Cargo.toml
+cargo test --offline --manifest-path clients/rust/Cargo.toml --no-default-features
+cargo test --offline --manifest-path clients/rust/Cargo.toml --tests -- --ignored --test-threads=1
+cargo clippy --offline --manifest-path clients/rust/Cargo.toml --all-targets -- -D warnings
+cargo clippy --offline --manifest-path clients/rust/Cargo.toml --no-default-features --all-targets -- -D warnings
+cargo fmt --all --manifest-path clients/rust/Cargo.toml -- --check
+cargo doc --offline --manifest-path clients/rust/Cargo.toml --no-deps
+cargo build --offline --manifest-path clients/rust/Cargo.toml --bin tds
+```
+
+Results: **190 default checks** (including the fifteen new tests and eleven
+rustdoc checks), **73 core-only checks**, and **56 serial Docker test functions**
+pass with zero failures. The default run explicitly ignores the live cases; the
+separate Docker run executes all 56. Both strict Clippy modes, formatting,
+documentation and executable build pass. Local command logs are under
+`/private/tmp/tds-io-{default,core,live,clippy,clippy-core,doc,build}.log`.
+
+The existing `mssql-2025` container was healthy before live validation. The suite
+used `127.0.0.1:14325`, `tds_test`, ignored credentials and the existing test CA.
+No Python mutation suite ran concurrently. Python's prior **782 passed, 13
+skipped** result above remains prior evidence, not a fresh Python run here.
+
+This completes the approved selected interruption matrix. Other offsets, kernel
+saturation, every successful credit-update schedule, every handshake/recovery
+write boundary, all type/TVP combinations, other native platforms and remote
+failover remain outside this evidence. Memory, latency and throughput were not
+measured. Field inspection trees and timing detail remain separate work.

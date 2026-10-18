@@ -1,8 +1,9 @@
 # Rust client handover
 
-Prepared 2026-10-18. Branch: `rust-client`. This development checkpoint commits the
-Rust implementation, tests, fixtures, design records, probes and offline site.
-Inspect `git status` before editing to distinguish subsequent working changes.
+Prepared 2026-10-18. Branch: `rust-client`. Committed baseline `a562803` contains
+the Rust implementation, tests, fixtures, design records, probes and offline site.
+The interrupted-I/O iteration below adds its tests and acceptance records.
+Inspect `git status` before editing to distinguish any further changes.
 Python corrections are committed and released as **v0.2.0** on `main`; the Rust
 implementation remains unpublished. The active checkout stays on `rust-client`.
 
@@ -37,8 +38,10 @@ sequential. Rust release/publication is a separate future task.
 - [Support matrix](clients/rust/SUPPORT.md): current implemented features and
   remaining gaps. It supersedes older historical gap lists.
 - [Acceptance evidence](clients/rust/ACCEPTANCE.md): the top check table and final
-  **Native offline replay** section are the latest checkpoint. Earlier sections
+  **Interrupted I/O acceptance** section are the latest checkpoint. Earlier sections
   retain historical results, including the preceding table/bulk slice.
+- [Interruption matrix](clients/rust/INTERRUPTIONS.md): named submission, partial
+  socket write, cleanup, pool/recovery and runtime-shutdown boundaries and limits.
 - [Rust README](clients/rust/README.md): public API, lifetime rules and CLI.
 - [Offline replay design](docs/design/K-offline-replay.md): approved representation,
   capture compatibility, failure boundaries and evidence limits.
@@ -47,7 +50,31 @@ sequential. Rust release/publication is a separate future task.
 - [Design index](docs/design/README.md) and [checklist](RUST_CHECKLIST.md).
   Markdown is authoritative; `site/` is its offline presentation.
 
-## Latest completed slice
+## Latest slice: interrupted I/O acceptance
+
+The approved next iteration adds fifteen deterministic private driver tests in
+`clients/rust/src/connection/shell/interruptions.rs`. A `cfg(test)`-only endpoint
+field gates the real driver write boundary and forces short writes, WouldBlock,
+zero writes and I/O failures. Real controlled TCP/TLS peers observe delivery.
+The field and harness are absent from ordinary builds; public APIs and protocol
+policies are unchanged. No production defect was established by this matrix.
+
+Named cases cover pre-submission versus submitted abandonment; selected encrypted
+TCP offsets (0, 1, 5, 17); ordinary and streamed input; partial IGNORE and Attention
+writes; delegated close; owner/driver abort; MARS shared failure while writes are
+blocked; prepared bulk discard; pool capacity/replacement; explicit recovery
+without SQL replay; and current-endpoint revocation on runtime destruction after
+pool rotation. Most cases exercise 7.4/8.0 × plain/MARS. Runtime destruction checks
+plain connections under both versions. The exact matrix and exclusions are in
+`INTERRUPTIONS.md`, rather than a claim of every offset or schedule.
+
+Peer checkpoints make gates apply to request bytes after login/MARS SYN. One
+test captures the successful short-write conversation and replays exactly two
+batches with zero diagnostics; exact byte delivery is established independently
+by its peer. Python send/undo and close/discard paths were inspected and remain
+unchanged. This iteration is local branch work, separate from publication.
+
+## Preceding completed slice: native offline replay
 
 Native offline replay is implemented in `clients/rust/src/replay.rs` and
 `replay/json.rs`, with input-reading definitions in `requests/decode.rs` and the
@@ -84,12 +111,14 @@ fix. No implicit commit/rollback or request execution/retry is introduced.
 
 ## Fresh evidence and limits
 
-Rust: **175 default**, **73 core-only**, **56 serial Docker tests**. After the
-final diagnostic-only refinements, **11 affected default** and **9 core-only**
-tests pass again. Strict Clippy in both modes, formatting, rustdoc and executable
-build pass. Python: **782 passed, 13 skipped**, 120.60 seconds. Python's full run
-followed all Rust/live probe mutation work. Generated pages and all page JavaScript
-syntax checks pass; `git diff --check` is clean.
+The preceding replay checkpoint had **175 default**, **73 core-only**, **56 serial
+Docker tests**, with final affected replay tests rerun. The interrupted-I/O
+checkpoint passes **190 default**, **73 core-only**, and **56 serial Docker**
+checks. Both strict Clippy modes, formatting, documentation and executable build
+pass. Python's preceding full run was **782 passed,
+13 skipped**, 120.60 seconds; it was not rerun for these Rust-only tests. Generated
+design pages are unchanged because this iteration changes acceptance records,
+not the shared design.
 
 Both offline readers accept **48 fresh saved physical recordings** (32 two-client
 scenario captures plus 16 Rust recovery epochs) with credential masking. Native
@@ -107,8 +136,11 @@ policy or claiming every placement combination succeeds.
 
 Use the support matrix: field inspection/timings, binary XML, alternate compute
 tokens, authentication/encryption providers, broader platform/failover evidence,
-forced partial-write/abort coverage and readability/release review remain open.
+additional interruption offsets/schedules and readability/release review remain open.
 Native replay and Python TVP replay are completed; older pending notes are stale.
+The approved finite interrupted-I/O matrix is implemented; it does not promise
+exhaustive scheduling coverage. Field inspection trees and timing detail are the
+recommended next feature iteration, subject to user approval.
 
 The existing server is `mssql-2025`, `127.0.0.1:14325`, database `tds_test`.
 Recheck availability. Use existing Compose and ignored credentials/test CA; do not

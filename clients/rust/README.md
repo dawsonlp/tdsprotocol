@@ -16,6 +16,9 @@ optional shell; `--no-default-features` builds the protocol core without Tokio.
 rustls uses its aws-lc provider explicitly, without installing a global provider.
 Trust roots come from the caller; the client has no insecure verification mode.
 
+The [interrupted I/O acceptance matrix](INTERRUPTIONS.md) records deterministic
+partial-write, task-abort, cleanup, pool/recovery and runtime-shutdown evidence.
+
 ## Run the command line client
 
 The executable is **`clients/rust/target/debug/tds`** after building. From the

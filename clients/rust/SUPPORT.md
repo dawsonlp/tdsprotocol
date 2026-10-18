@@ -7,7 +7,7 @@ code, agreement or independent runtime evidence.
 
 | Area | Implemented in Rust | Remaining |
 |---|---|---|
-| Ownership and cleanup | Unique movable channels, borrowed responses, delegated close/cancel, epoch/lease retirement, discard on current work abandonment, awaited Attention/drain | Exhaustive forced partial-write/task-abort boundaries; broader response vocabulary |
+| Ownership and cleanup | Unique movable channels, borrowed responses, delegated close/cancel, epoch/lease retirement, discard on current work abandonment, awaited Attention/drain; deterministic partial-write/task-abort acceptance matrix | Additional offsets/scheduling and platform combinations; broader response vocabulary |
 | Connection | Verified TLS, TDS 7.4/8.0, SQL login, app/host/process identity, language, ODBC, read-only intent, one-hop routing | Additional login vocabulary/features and provider contracts |
 | Recovery | Server-reported snapshots/refusals/reset, stable logical handles, fresh wire ids, old exchange retirement, explicit/idle recovery | Real remote failover/platform coverage; extend tests as types/requests arrive |
 | MARS/pool | Per-frame credit, independent readers, shared state/errors, whole-connection explicit leases, reset/discard, unresolved bulk discard | Extend to encryption; measured performance |
@@ -31,6 +31,8 @@ the implemented read/snapshot contract and lifecycle rules in both clients.
 No built-in file reader or watcher is selected.
 
 See [ACCEPTANCE.md](ACCEPTANCE.md) for exact commands, counts and evidence limits.
+The [interrupted I/O matrix](INTERRUPTIONS.md) records the tested send/read/cleanup,
+pool/recovery and runtime-shutdown boundaries; it does not claim every schedule.
 The [completion work and decision list](../../docs/design/J-rust-completion.md)
 records implemented A1 (input-only table-valued parameters) and A2 (borrowed bulk
 continuation authority). Its linked experiment demonstrates explicit gap abort

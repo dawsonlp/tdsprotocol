@@ -180,6 +180,8 @@ impl Command {
     }
 }
 struct Endpoint {
+    #[cfg(test)]
+    writes: interruptions::Writes,
     observation_error: Arc<Mutex<Option<Arc<std::io::Error>>>>,
     commands: mpsc::Sender<Command>,
     revoked: AtomicBool,
@@ -444,6 +446,8 @@ impl Connection {
         socket.set_nodelay(true)?;
         let (send, receive) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
+            #[cfg(test)]
+            writes: Default::default(),
             observation_error: Arc::new(Mutex::new(None)),
             commands: send,
             revoked: AtomicBool::new(false),
@@ -503,6 +507,8 @@ impl Connection {
         self.endpoint.returning.store(true, Ordering::Release);
         let (send, commands) = mpsc::channel(1);
         let next = Arc::new(Endpoint {
+            #[cfg(test)]
+            writes: Default::default(),
             observation_error: self.endpoint.observation_error.clone(),
             commands: send,
             revoked: AtomicBool::new(false),
@@ -1593,9 +1599,17 @@ impl Driver {
                 biased;
                 _ = cleanup_timer(deadline) => return Err(Error::new(ErrorKind::Timeout)),
                 _ = self.endpoint.changed.notified() => self.release_abandoned_channel()?,
-                ready = self.socket.as_ref().unwrap().writable() => {
+                ready = async {
+                    #[cfg(test)]
+                    self.endpoint.writes.ready().await;
+                    self.socket.as_ref().unwrap().writable().await
+                } => {
                     ready?;
-                    match self.socket.as_ref().unwrap().try_write(&bytes[offset..]) {
+                    #[cfg(test)]
+                    let written = self.endpoint.writes.try_write(self.socket.as_ref().unwrap(), &bytes[offset..]);
+                    #[cfg(not(test))]
+                    let written = self.socket.as_ref().unwrap().try_write(&bytes[offset..]);
+                    match written {
                         Ok(0) => return Err(std::io::Error::from(std::io::ErrorKind::WriteZero).into()),
                         Ok(n) => offset += n,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {},
@@ -2128,12 +2142,16 @@ async fn drive(
 }
 
 #[cfg(test)]
+mod interruptions;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn old_epoch_abandonment_is_harmless_but_current_and_root_guards_revoke() {
         let (commands, _) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
+            writes: Default::default(),
             observation_error: Arc::new(Mutex::new(None)),
             commands,
             revoked: AtomicBool::new(false),
@@ -2162,6 +2180,7 @@ mod tests {
     async fn channel_close_bypasses_a_full_mailbox_and_shares_the_first_deadline() {
         let (commands, _receive) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
+            writes: Default::default(),
             observation_error: Arc::new(Mutex::new(None)),
             commands,
             revoked: AtomicBool::new(false),
@@ -2211,6 +2230,7 @@ mod tests {
     async fn cancel_bypasses_a_full_mailbox_and_repeats_do_not_extend_its_budget() {
         let (commands, mut receive) = mpsc::channel(1);
         let endpoint = Arc::new(Endpoint {
+            writes: Default::default(),
             observation_error: Arc::new(Mutex::new(None)),
             commands,
             revoked: AtomicBool::new(false),

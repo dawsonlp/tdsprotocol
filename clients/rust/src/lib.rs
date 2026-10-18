@@ -5,6 +5,10 @@
 //! protocol decisions remain in the core. See the crate README for scope.
 #![forbid(unsafe_code)]
 
+// Controlled peers are shared by integration tests and private driver tests.
+#[cfg(test)]
+extern crate self as tds_client;
+
 pub mod browser;
 pub mod capture;
 pub mod config;
