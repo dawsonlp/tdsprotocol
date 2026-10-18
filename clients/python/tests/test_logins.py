@@ -56,7 +56,7 @@ class FakeServer:
     client asks. Each received message is kept and is answered by the next item of `answers`.
     """
 
-    def __init__(self, answers: list[bytes], nonce: bool = False):
+    def __init__(self, answers: list[bytes | None], nonce: bool = False):
         self.answers, self.nonce, self.received = answers, nonce, []
 
     async def start(self):
@@ -92,6 +92,9 @@ class FakeServer:
             writer.write(packet(4, reply))
             for answer in self.answers:
                 self.received.append(await self.message(reader))
+                if answer is None:  # lose completion after accepting LOGIN7
+                    writer.transport.abort()
+                    return
                 writer.write(packet(4, answer))
                 await writer.drain()
             await reader.read()  # until the client closes
@@ -121,6 +124,27 @@ def login7(body: bytes):
     if record.features:
         features = FeatureList().read(Reader(record.features, False))
     return record, features
+
+
+def test_lost_password_change_completion_reports_uncertainty_and_never_retries():
+    async def go():
+        server = FakeServer([None])
+        port = await server.start()
+        try:
+            with pytest.raises(tds.ConnectError) as caught:
+                await tds.connect("localhost", port, user="artificial-user", password="artificial-A",
+                                  new_password="artificial-B", tds_version="8.0",
+                                  ssl_context=trust_test_authority())
+            assert caught.value.password_change_uncertain
+            assert any("may already have changed" in note for note in caught.value.__notes__)
+            assert len(server.received) == 1
+            record, _ = login7(server.received[0][1])
+            assert record.variable_part.password == "artificial-A"
+            assert record.variable_part.new_password == "artificial-B"
+        finally:
+            server.server.close()
+            await server.server.wait_closed()
+    asyncio.run(go())
 
 
 class Exchange:

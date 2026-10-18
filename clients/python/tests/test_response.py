@@ -238,6 +238,23 @@ def test_bytes_after_the_final_done_are_malformed():
         reader(samples.COUNTS + samples.COUNTS[-13:])
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+def test_terminal_done_waits_for_its_message_boundary(cancel):
+    r = ResponseReader(record=False, announce=lambda _: None)
+    r.cancelling = cancel
+    r.feed(ACK if cancel else samples.COUNTS, last=False)
+    assert not r.ended and not r.cancelled
+    r.feed(b"", last=True)
+    assert r.ended and r.cancelled == cancel
+
+
+def test_cancel_drain_rejects_a_token_truncated_at_a_message_boundary():
+    r = ResponseReader(record=False, announce=lambda _: None)
+    r.cancelling = True
+    with pytest.raises(MalformedMessage):
+        r.feed(ACK[:5], last=True)
+
+
 # --------------------------------------------------------------------------- reading a response (The Client §4)
 
 

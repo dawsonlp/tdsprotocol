@@ -37,6 +37,22 @@ def round_trip(sql_type, value, collation=LATIN1):
     return got
 
 
+@pytest.mark.parametrize("value", [
+    SqlDateTimeOffset(dt.date(1, 1, 1), 0, -840),
+    SqlDateTimeOffset(dt.date(9999, 12, 31), 86_400 * 10**7 - 1, 840),
+    SqlDateTimeOffset(dt.date(2026, 1, 1), -1, 0),
+    SqlDateTimeOffset(dt.date(2026, 1, 1), 86_400 * 10**7, 0),
+    SqlDateTimeOffset(dt.date(2026, 1, 1), 0, 841),
+    SqlDateTimeOffset(dt.date(2026, 1, 1), 0, -841),
+    SqlDateTimeOffset(dt.date(2026, 1, 1), 0, 0.5),
+    dt.datetime(1, 1, 1, tzinfo=dt.timezone(dt.timedelta(hours=14))),
+    dt.datetime(9999, 12, 31, 23, 59, tzinfo=dt.timezone(dt.timedelta(hours=-14))),
+])
+def test_direct_datetimeoffset_parameters_refuse_invalid_utc_local_ticks_and_offsets(value):
+    with pytest.raises(ValueRefused):
+        types.datetimeoffset(7).check(value)
+
+
 EXACT = [
     (types.tinyint, [0, 255]),
     (types.smallint, [-32768, 32767]),
@@ -56,7 +72,7 @@ EXACT = [
     (types.time(0), [SqlTime(86_399 * 10**7)]),
     (types.datetime2(7), [SqlDateTime2(dt.date(1, 1, 1), 0), SqlDateTime2(dt.date(9999, 12, 31), 86_400 * 10**7 - 1)]),
     (types.datetime2(3), [SqlDateTime2(dt.date(2026, 10, 16), 123_4560_000)]),
-    (types.datetimeoffset(7), [SqlDateTimeOffset(dt.date(2026, 10, 16), 1, 840), SqlDateTimeOffset(dt.date(1, 1, 1), 0, -840)]),
+    (types.datetimeoffset(7), [SqlDateTimeOffset(dt.date(2026, 10, 16), 1, 840), SqlDateTimeOffset(dt.date(1, 1, 1), 840 * 60 * 10**7, -840)]),
     (types.datetime, [SqlDateTime(-53_690, 0), SqlDateTime(2_958_463, 300 * 86_400 - 1), SqlDateTime(0, 1)]),
     (types.smalldatetime, [dt.datetime(1900, 1, 1), dt.datetime(2079, 6, 6, 23, 59)]),
     (types.char(4), ["ab  "]),

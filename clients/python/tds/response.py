@@ -18,10 +18,10 @@ import time
 import warnings
 import weakref
 from collections import Counter, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, AsyncIterator, Callable, Protocol
 
-from .types import SqlType
+from .types import Json, SqlType
 from .wire import kept
 from .tokens import TOKENS, Aggregate, ColumnFlags, ColumnInfoStatus, DoneStatus, EnvKind, ReturnValueStatus, SessionStateStatus
 from .wire import Incomplete, MalformedMessage, Node, Reader, Record
@@ -702,6 +702,8 @@ class ResponseReader:
         self._announce = announce
         self._metadata = list(metadata)  # columns the request supplied, for result sets sent without metadata
         self._buffer = bytearray()  # bytes not yet decoded: the start of a token split by a packet boundary
+        self._terminal_pending = False  # final DONE is not complete until its message boundary
+        self._cancel_ack = False
         self._context: dict[str, Any] = {}  # what later tokens depend on: the current columns
         self._context.update(negotiated or {})  # what the login agreed, such as the data classification version
         self.owner: weakref.ref[Response] | None = None  # weakly: the connection holds the reader, not the response
@@ -767,7 +769,7 @@ class ResponseReader:
         view = memoryview(data)
         r = Reader(data, self.record, complete=last)
         r.context = self._context
-        while r.pos < len(data) and not self.ended:
+        while r.pos < len(data) and not self._terminal_pending:
             if self._row is not None:  # a row with large values, value by value
                 r.pos = self._row.read(view, r.pos, last)
                 if not self._row.done:
@@ -794,7 +796,7 @@ class ResponseReader:
                 self._wait_for = 2 * (len(data) - mark)
                 break
             self._take(record)
-        if self.ended and r.pos < len(data):
+        if self._terminal_pending and r.pos < len(data):
             raise MalformedMessage(f"{len(data) - r.pos} bytes after the response's final DONE", r.pos, r.tree)
         del self._buffer[: r.pos]
         if self.record:
@@ -803,6 +805,10 @@ class ResponseReader:
             return
         if last and self._row is not None:
             raise MalformedMessage("the response's message ended inside a row", r.pos, r.tree)
+        if last and self._buffer:
+            raise MalformedMessage("the response's message ended inside a token", r.pos, r.tree)
+        if last and self._terminal_pending:
+            self.ended, self.cancelled = True, self._cancel_ack
         if last and not self.ended and not self.cancelling:
             raise MalformedMessage("the response's message ended without a final DONE", r.pos, r.tree)
 
@@ -814,7 +820,10 @@ class ResponseReader:
                     if not self._metadata:
                         raise MalformedMessage("a result set arrived without metadata, and the request supplied none", 0,
                                                rec.node)
-                    columns = tuple(self._metadata.pop(0))
+                    # Names/types can be saved from a previous connection; JSON
+                    # byte encoding belongs to this session's accepted features.
+                    columns = tuple(replace(c, type=replace(c.type, utf8=self._context.get("utf8_support", False)))
+                                    if isinstance(c.type, Json) else c for c in self._metadata.pop(0))
                     self._context["columns"] = columns
                 else:
                     columns = tuple(Column(c.name, c.type, ColumnFlags.NULLABLE in c.flags, c.flags, c.user_type)
@@ -856,9 +865,9 @@ class ResponseReader:
                     self._status, self._outputs, self._function_result = None, [], None
                 if self.cancelling:
                     if DoneStatus.ATTENTION in done.status:
-                        self.ended = self.cancelled = True
+                        self._terminal_pending = self._cancel_ack = True
                 elif DoneStatus.MORE not in done.status:
-                    self.ended = True
+                    self._terminal_pending = True
             case "INFO" | "ERROR":
                 report = (Message if rec.token == "INFO" else Error)(
                     rec.number, rec.state, rec.severity, rec.message, rec.server_name, rec.procedure, rec.line)

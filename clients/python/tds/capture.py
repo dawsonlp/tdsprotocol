@@ -11,13 +11,18 @@ A capture is JSON lines, in the order that things happened. Each line has its ti
                                                                               for a received packet and before TLS for
                                                                               a sent packet
 
+Packet channel ids identify application channel lifetimes. A recorded MARS
+header carries the physical SMP wire id; after recovery these numbers can differ.
+Each physical connection has its own recording, including each recovery login.
+
 The password is removed from the login, unless keep_password=True. Its bytes are zeroed and its length is kept.
 LOGIN7's scrambling is reversible, so otherwise a capture would hold the password. Query text and data stay, because
 a capture exists to record them. Protect a capture as carefully as the data that it holds.
 
 Replay decodes every message from its packets with the same definitions that the live client uses, so its fields
-and bytes are what the server and client actually sent. Each event's line is the recorded one. Replay can't decode a
-table-valued parameter's rows, because they have no reading definition yet. That message shows what failed.
+and bytes are what the server and client actually sent. Each event's line is the recorded one.
+Saved table inputs decode their declaration, default columns, hints, placement and exact rows, separately from
+result cells. The Rust development client can inspect the same physical recordings offline with --replay.
 """
 
 import base64
@@ -28,7 +33,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
-from . import prelogin
+from . import login7, prelogin
 from .connection.core import Event, Level, level_of
 from .login7 import LOGIN7
 from .packet import HEADER, HEADER_SIZE, PacketType, Status
@@ -76,7 +81,13 @@ def without_secrets(kind: int, body: bytes) -> bytes:
 
 
 class Capture:
-    """Writes a conversation to a file, as JSON lines (see the module's description)."""
+    """One physical connection's conversation, as JSON lines.
+
+    A capture cannot move to another connection, even after detachment or close:
+    this format has no connection identity. For pools, routing and recovery use
+    capture_factory=… to create a new Capture with a distinct output each time.
+    The application owns its captures and closes them when finished.
+    """
 
     level = Level.OUTLINE  # a capture keeps every event's line. Replay rebuilds the trees from the packets
 
@@ -86,6 +97,12 @@ class Capture:
         self.keep_password = keep_password
         self._held: list[tuple[str, int | None, bytes]] = []  # a credential-bearing message's packets, until its last
         self._start: float | None = None
+        self._owner: object | None = None
+
+    def _claim(self, owner: object) -> None:
+        if self._owner is not None and self._owner is not owner:
+            raise ValueError("a Capture belongs to one physical connection; use capture_factory for new connections")
+        self._owner = owner
 
     def _when(self, at: float) -> float:
         if self._start is None:
@@ -94,7 +111,12 @@ class Capture:
         return round(at - self._start, 6)
 
     def _write(self, line: dict) -> None:
-        self._out.write(json.dumps(line) + "\n")
+        text = json.dumps(line) + "\n"
+        if self._out.write(text) != len(text):
+            raise OSError("short saved-recording write")
+        # Detect a buffered writer's failure while its connection can still be
+        # stopped, rather than deferring it until an unrelated file close.
+        self._out.flush()
 
     def __call__(self, event: Event) -> None:
         line = {"t": self._when(event.time), "event": event.kind, "text": event.text}
@@ -164,11 +186,13 @@ def _decoded(what: str, packets: list[bytes], definition) -> Node:
     return Node(what, 0, len(body), body[:8192], children=[*_headers(packets), node])
 
 
-def _tokens(what: str):
+def _tokens(what: str, negotiated: dict):
     def decode(body: bytes) -> Node:
         records = TOKENS.decode(body, True)
         counts: dict[str, int] = {}
         for r in records:
+            if r.token == "FEATUREEXTACK":
+                negotiated.update(login7.result_context(dict(r.features)))
             counts[r.token] = counts.get(r.token, 0) + 1
         node = Node(what, 0, len(body), body, children=[r.node for r in records if r.node])
         node.shown = " ".join(f"{n}×{k}" if k > 1 else n for n, k in counts.items())
@@ -195,6 +219,7 @@ def replay(file: str | Path | TextIO, observe: Callable[[Event], None]) -> None:
     messages = _messages(lines)
     full = level_of(observe) is Level.FULL
     cancelling: set = set()
+    negotiated: dict = {}
     for line in lines:
         if "event" not in line:
             continue
@@ -213,7 +238,11 @@ def replay(file: str | Path | TextIO, observe: Callable[[Event], None]) -> None:
             elif what.startswith("request abandoned"):
                 queue.popleft()
             elif what in ("response", "cancel acknowledged"):
-                reader = ResponseReader(record=True, announce=lambda change: None)
+                reader = ResponseReader(record=True, announce=lambda change: None, negotiated=negotiated)
+                # Replay has no live caller to claim a row-reading mode. Inspect
+                # every payload without retaining rows: otherwise a large row
+                # pauses decoding and silently hides the remaining returns/DONE.
+                reader.discard_new = True
                 reader.cancelling = channel in cancelling
                 cancelling.discard(channel)
                 while not reader.ended and queue:
@@ -222,7 +251,7 @@ def replay(file: str | Path | TextIO, observe: Callable[[Event], None]) -> None:
                                     HEADER.decode(packet[:HEADER_SIZE], True).node)
                 node = Node(what, 0, reader.size, b"", children=reader.nodes)
             elif what == "login reply":
-                node = _decoded(what, queue.popleft(), _tokens(what))
+                node = _decoded(what, queue.popleft(), _tokens(what, negotiated))
             elif what in REQUESTS:
                 node = _decoded(what, queue.popleft(), REQUESTS[what])
         elif kind == "mars" and "bytes" in line:

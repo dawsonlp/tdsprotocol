@@ -86,3 +86,30 @@ def test_json_arrives_as_utf16_and_is_sent_as_utf8():
     types.json.write_value(w, '{"é":1}')
     assert bytes(w.buf) == len('{"é":1}'.encode()).to_bytes(8, "little") + len('{"é":1}'.encode()).to_bytes(4, "little") \
         + '{"é":1}'.encode() + bytes(4)
+
+@pytest.mark.parametrize("at", [0, 2, 4, 5])
+def test_vector_bounded_layout_count_element_and_reserved_must_match_type(at):
+    from tds.wire import MalformedMessage
+    value = types.SqlVector(VectorElement.FLOAT32, (1.0, 2.0, 3.0))
+    w = Writer(record=False)
+    types.vector(3).write_value(w, value)
+    data = bytearray(w.buf)
+    data[2 + at] ^= 1
+    with pytest.raises(MalformedMessage):
+        types.vector(3).read_value(Reader(bytes(data), False))
+
+
+def test_vector_unknown_element_is_a_protocol_error():
+    from tds.wire import MalformedMessage
+    w = Writer(record=False)
+    types.vector(1).write_value(w, SqlVector(VectorElement.FLOAT32, (1.0,)))
+    data = bytearray(w.buf)
+    data[6] = 255
+    with pytest.raises(MalformedMessage):
+        types.vector(1).read_value(Reader(bytes(data), False))
+
+
+def test_vector_short_bounded_payload_is_malformed_instead_of_index_error():
+    from tds.wire import MalformedMessage
+    with pytest.raises(MalformedMessage, match="width"):
+        types.vector(3).read_value(Reader(b"\x01\x00\x00", False))

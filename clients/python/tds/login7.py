@@ -93,6 +93,21 @@ DEFAULT_FEATURES = (Feature.JSON_SUPPORT, Feature.VECTOR_SUPPORT, Feature.UTF8_S
                     Feature.SESSION_RECOVERY)
 
 
+def result_context(features: dict) -> dict:
+    """Accepted wire settings needed to read later results, live or on replay."""
+    utf8 = features.get(Feature.UTF8_SUPPORT)
+    context = {"utf8_support": bool(utf8 and utf8[0] & 1)}
+    encryption = features.get(Feature.COLUMN_ENCRYPTION)
+    if encryption:
+        context["column_encryption"] = encryption[0]
+        if encryption[0] >= 2 and len(encryption) > 1:
+            context["enclave_type"] = bytes(encryption[2:2 + 2 * encryption[1]]).decode("utf-16-le")
+    classification = features.get(Feature.DATA_CLASSIFICATION)
+    if classification:
+        context["data_classification_version"] = classification[0]
+    return context
+
+
 def feature_list(features, data: dict | None = None) -> dict:
     """The login's feature list for these features. Each feature has the data that the driver sends, unless data is
     given. The caller gives data as (feature, data), or through `data` (a recovery login's session, D-57). A feature

@@ -17,6 +17,29 @@ CONTEXT = Context(transaction=0, outstanding_requests=1, collation=bytes.fromhex
 HEADERS = "16 00 00 00 12 00 00 00 02 00 00 00 00 00 00 00 00 00 01 00 00 00"
 
 
+@pytest.mark.parametrize("sql_type,sample", [
+    (types.json, '{"note":"é🦀"}'), (types.clr("sys.hierarchyid"), b"\x58"),
+    (types.ntext, "é🦀"), (types.text, "café"), (types.image, b"\x00\xff"),
+])
+@pytest.mark.parametrize("which", ["null", "empty", "sample"])
+def test_input_only_layouts_are_recorded_and_replayed_independently_of_result_encoding(sql_type, sample, which):
+    from tds.requests import RPC
+    value = None if which == "null" else sample[:0] if which == "empty" else sample
+    encoded = tds.Call("#input", tds.Param("@p", sql_type, value)).encode(CONTEXT, record=True)
+    for utf8 in [False, True]:
+        call = RPC.decode(encoded.body, True, {"utf8_support": utf8}).calls[0]
+        assert call.parameters[0].value == value
+        if isinstance(sql_type, types.LegacyText):
+            from dataclasses import replace
+            expected = replace(sql_type, collation=types.Collation(CONTEXT.collation))
+        else:
+            expected = sql_type
+        assert call.parameters[0].type == expected
+        if isinstance(sql_type, types.Clr):
+            assert call.parameters[0].type.max_size is None
+            assert call.parameters[0].type.assembly == ""
+
+
 def body(request) -> str:
     return request.encode(CONTEXT, record=False).body.hex(" ").upper()
 
@@ -78,3 +101,31 @@ def test_a_result_set_without_metadata_is_read_with_the_columns_the_call_supplie
     reader.feed(bytes.fromhex("81 FF FF  D1 04 2A 00 00 00  FD 10 00 C1 00 01 00 00 00 00 00 00 00"), last=True)
     [rs] = reader.result_sets
     assert rs.columns == columns and rs.rows == ((42,),)
+
+
+@pytest.mark.parametrize("utf8", [False, True])
+def test_saved_json_columns_follow_the_current_sessions_encoding(utf8):
+    from tds.response import Column
+    from tds.tokens import ColumnFlags
+    columns = (Column("j", types.Json(utf8=not utf8), True, ColumnFlags.NULLABLE, 0),)
+    reader = ResponseReader(False, lambda change: None, metadata=[columns], negotiated={"utf8_support": utf8})
+    reader.keep_new = True
+    text = '{"note":"é🦀"}'
+    raw = text.encode("utf-8" if utf8 else "utf-16-le")
+    body = b"\x81\xff\xff\xd1" + len(raw).to_bytes(8, "little") + len(raw).to_bytes(4, "little") + raw + bytes(4) + b"\xfd" + bytes(12)
+    for i, byte in enumerate(body):
+        reader.feed(bytes([byte]), last=i == len(body) - 1)
+        if reader.paused:
+            reader.resume()
+    assert reader.result_sets[0].rows == ((text,),)
+    assert reader.result_sets[0].columns[0].type.utf8 == utf8
+    assert columns[0].type.utf8 != utf8
+
+
+@pytest.mark.parametrize("transaction,count", [(0, 1), (17, 2)])
+@pytest.mark.parametrize("query", [tds.Batch("SELECT 1"), tds.Call("#header_test")])
+def test_autocommit_header_is_one_and_explicit_transactions_count_active_requests(transaction, count, query):
+    encoded = query.encode(Context(transaction, 2, CONTEXT.collation), record=False).body
+    assert encoded[:10] == bytes.fromhex("16 00 00 00 12 00 00 00 02 00")
+    assert encoded[10:18] == transaction.to_bytes(8, "little")
+    assert encoded[18:22] == count.to_bytes(4, "little")

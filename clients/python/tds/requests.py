@@ -48,8 +48,9 @@ class Context:
 
 
 def headers(context: Context) -> dict:
+    # MS-TDS §2.2.5.3.2: autocommit sends one even with concurrent MARS requests.
     return {"transaction_descriptor": {"type": TRANSACTION_DESCRIPTOR, "transaction": context.transaction,
-                                       "outstanding_requests": context.outstanding_requests}}
+                                       "outstanding_requests": context.outstanding_requests if context.transaction else 1}}
 
 
 class Encoded(NamedTuple):
@@ -226,7 +227,7 @@ def _named(rw) -> bool:
 
 
 PARAM_CIPHER_INFO = Struct("cipher info", [  # ParamCipherInfo (§2.2.6.6)
-    Field("base", TypeInfo()),  # the plaintext's type
+    Field("base", TypeInfo(parameter=True)),  # the plaintext's input declaration
     Field("algorithm", U8),
     Field("algorithm_name", When(_named, Text(U8))),
     Field("encryption_type", U8, enum=EncryptionType),
@@ -245,8 +246,8 @@ def _encrypted_parameter(rw) -> bool:
 PARAMETER = Struct("parameter", [
     Field("name", Text(U8)),  # empty means positional
     Field("status", U8, enum=ParamStatus),
-    Field("type", TypeInfo()),  # for an encrypted parameter, the ciphertext's type (varbinary)
-    Field("value", ValueOf("type")),
+    Field("type", TypeInfo(parameter=True)),  # ciphertext type for an encrypted input
+    Field("value", ValueOf("type", parameter=True)),
     Field("cipher", When(_encrypted_parameter, PARAM_CIPHER_INFO)),
 ], summary=lambda p: f"{p.name or '(positional)'} {p.type} = {p.type.show(p.value)}"
                      f"{' · encrypted ' + PARAM_CIPHER_INFO.show(p.cipher) if p.get('cipher') else ''}"
