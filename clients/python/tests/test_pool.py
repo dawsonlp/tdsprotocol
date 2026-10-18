@@ -109,10 +109,12 @@ def test_a_request_cancelled_on_the_way_out_leaves_the_connection_clean_and_lent
     assert second is first and alive and name == "master"
 
 
-def test_a_connection_given_back_mid_request_is_closed_not_lent(server):
-    """A response abandoned without `async with` leaves its request in progress.
+@pytest.mark.parametrize("close_channel", [False, True], ids=["abandoned", "awaited-close"])
+def test_pool_return_requires_a_resolved_exchange(server, close_channel):
+    """An abandoned channel leaves its request in progress; awaited channel close drains it.
 
-    The connection is closed and never lent again, because its next borrower would read that request's response (D-36).
+    The unresolved case is closed rather than lent again (D-36). Awaited close
+    proves cleanup before pool return, so that case can reuse the reset session.
     """
     async def go():
         async with tds.Pool(**server, size=1) as pool:
@@ -121,9 +123,13 @@ def test_a_connection_given_back_mid_request_is_closed_not_lent(server):
             async def slow():
                 async with pool.connection() as connection:
                     lent.append(connection)
-                    async with connection.serial_channel() as channel:
+                    channel = connection.serial_channel()
+                    try:
                         response = await channel.exchange(tds.Batch("WAITFOR DELAY '00:00:05'"))
                         await response.fetch()  # without `async with`, nothing cancels it
+                    finally:
+                        if close_channel:
+                            await channel.close()
 
             task = asyncio.create_task(slow())
             await asyncio.sleep(0.5)
@@ -135,12 +141,14 @@ def test_a_connection_given_back_mid_request_is_closed_not_lent(server):
                 gc.collect()
             async with pool.connection() as connection:
                 lent.append(connection)
-                return lent, db_name(await run_sql(connection, "SELECT DB_NAME()"))
+                return lent, connection.alive, db_name(await run_sql(connection, "SELECT DB_NAME()"))
 
-    (dirty, fresh), name = run(go())
-    # A new connection, not the one whose request is still in progress. The test compares the connections themselves,
-    # because SQL Server reuses session ids and the new connection can get the old one's id.
-    assert fresh is not dirty and not dirty.alive and name == "master"
+    (dirty, fresh), alive, name = run(go())
+    # Compare connection objects: SQL Server may reuse a session id even after discard.
+    if close_channel:
+        assert fresh is dirty and alive and name == "master"
+    else:
+        assert fresh is not dirty and not dirty.alive and name == "master"
 
 
 def test_each_borrower_starts_with_a_clean_session(server):

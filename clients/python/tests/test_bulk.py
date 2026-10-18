@@ -92,3 +92,26 @@ def test_the_channel_keeps_bulk_insert_and_bulk_rows_together():
     finish(core, channel, "FD 10 00 00 00 01 00 00 00 00 00 00 00")
     with pytest.raises(OutOfTurn):
         next(core.exchange(channel, ALICE, tds.BulkRows([ID], [])))  # one BulkRows per BulkInsert
+
+
+def test_pending_bulk_is_not_released_or_recovered_and_close_drains_attention():
+    core = ConnectionCore(Options("localhost", 1433, "sa", "unused"))
+    channel, _ = core.open_channel(ALICE)
+    sent(core.exchange(channel, ALICE, tds.BulkInsert("INSERT BULK t(id int NOT NULL)")))
+    finish(core, channel, OK)
+    assert not core.release()[0]
+    assert "bulk" in core.recovery_refusal()
+    with pytest.raises(RuntimeError, match="bulk continuation"):
+        core.close_channel(channel)
+    assert core.begin_channel_close(channel)
+    assert core.link.channels[channel].reader.cancelling
+    drain = core.drain_channel(channel)
+    assert next(drain) == Receive(channel)
+    # A normal final DONE cannot release the prepared operation while its
+    # Attention acknowledgement is still outstanding.
+    assert drain.send(Packet(PacketType.SERVER_MESSAGE, Status.LAST, bytes.fromhex(OK), None)) == Receive(channel)
+    assert core.link.channels[channel].busy
+    with pytest.raises(StopIteration):
+        drain.send(Packet(PacketType.SERVER_MESSAGE, Status.LAST, b"\xfd\x22\x00" + bytes(10), None))
+    assert not core.link.channels[channel].busy
+    core.close_channel(channel)

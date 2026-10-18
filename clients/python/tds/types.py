@@ -433,7 +433,10 @@ class SqlDateTimeOffset:
         minutes, rest = divmod(offset, dt.timedelta(minutes=1))
         if rest or not -840 <= minutes <= 840:
             raise ValueRefused(f"offset {offset}: datetimeoffset holds whole minutes, from -14:00 to +14:00")
-        utc = value.replace(tzinfo=None) - offset
+        try:
+            utc = value.replace(tzinfo=None) - offset
+        except OverflowError:
+            raise ValueRefused("datetimeoffset UTC date must fit years 1..9999") from None
         return cls(utc.date(), _ticks_of(utc.time()), minutes)
 
     @property
@@ -513,8 +516,12 @@ class PlpValue:
                     break
                 n, at = builtins.int.from_bytes(data[at : at + 4], "little"), at + 4
                 if n == 0:
+                    if self.total is not None and self.size != self.total:
+                        raise MalformedMessage("PLP total length differs from its payload", at - 4)
                     self.done = True
                     break
+                if self.total is not None and n > self.total - self.size:
+                    raise MalformedMessage("PLP chunk exceeds its total length", at - 4)
                 self.chunks, self.left, self.stage = self.chunks + 1, n, "data"
             else:
                 take = min(self.left, room)
@@ -1006,7 +1013,18 @@ class DateTimeOffset(SqlType):
 
     def check(self, value: Any) -> None:
         if value is not None:
-            _check_scale(self._exact(value).utc_ticks, self.scale, str(self))
+            exact = self._exact(value)
+            if not isinstance(exact.utc_date, dt.date) or isinstance(exact.utc_date, dt.datetime):
+                raise ValueRefused("datetimeoffset requires a UTC date")
+            if type(exact.utc_ticks) is not builtins.int or not 0 <= exact.utc_ticks < DAY:
+                raise ValueRefused("datetimeoffset UTC ticks must be within one day")
+            if type(exact.offset_minutes) is not builtins.int or not -840 <= exact.offset_minutes <= 840:
+                raise ValueRefused("datetimeoffset offset must be whole minutes within -14:00..+14:00")
+            try:
+                exact.local
+            except OverflowError:
+                raise ValueRefused("datetimeoffset local date must fit years 1..9999") from None
+            _check_scale(exact.utc_ticks, self.scale, str(self))
 
     def read_value(self, r: Reader) -> SqlDateTimeOffset | None:
         size = _time_size(self.scale)
@@ -1498,7 +1516,7 @@ class SqlVector:
 class Vector(SqlType):
     """vector(n) and vector(n, float16): n values of one element type, after an 8-byte header (layout A9, version 01,
     the count, the element type, 3 reserved bytes). It arrives as vector only when the login asked for vector support
-    (D-8). Otherwise the server sends nvarchar text."""
+    (D-8). Otherwise the server sends character JSON text; UTF-8 negotiation can select varchar."""
 
     dimensions: builtins.int
     element: VectorElement = VectorElement.FLOAT32
@@ -1534,9 +1552,14 @@ class Vector(SqlType):
         if n == NULL_LENGTH:
             return None
         data = bytes(r.take(n, str(self)))
+        if len(data) != self._size:
+            raise MalformedMessage("vector payload width differs from TYPE_INFO", r.pos)
         if data[0] != VECTOR_LAYOUT or data[1] != VECTOR_LAYOUT_VERSION:
             raise MalformedMessage(f"a vector in layout {data[0]:#04x}, version {data[1]}", r.pos)
-        count, element = builtins.int.from_bytes(data[2:4], "little"), VectorElement(data[4])
+        count = builtins.int.from_bytes(data[2:4], "little")
+        if count != self.dimensions or data[4] != self.element or data[5:8] != bytes(3):
+            raise MalformedMessage("vector count/element/reserved bytes differ from TYPE_INFO", r.pos)
+        element = self.element
         layout, size = ELEMENT[element]
         values = tuple(struct.unpack(layout, data[VECTOR_HEADER + i * size : VECTOR_HEADER + (i + 1) * size])[0]
                        for i in range(count))
@@ -1831,6 +1854,56 @@ class Table(SqlType):
     send_order: tuple = ()  # every column, in the order its values are sent
     code: TypeCode = field(default=TypeCode.TVP, compare=False)
 
+    def read_value(self, r: Reader) -> "TableInput":
+        """Read saved input evidence. The declaration and rows travel together;
+        this does not add table values to the result-cell vocabulary."""
+        count = r.read(Field("column_count", U16))
+        if count == TVP_NULL:
+            if r.read(Field("metadata_end", U8)) or r.read(Field("rows_end", U8)):
+                raise MalformedMessage("NULL table terminators", r.pos, r.tree)
+            return TableInput(self, None)
+        columns = []
+        for i in range(count):
+            r.read(Field(f"column {i + 1} user_type", U32))
+            flags = r.read(Field(f"column {i + 1} flags", U16))
+            sql_type = r.read(Field(f"column {i + 1} type", TypeInfo(parameter=True)))
+            if isinstance(sql_type, Table):
+                raise MalformedMessage("nested table input", r.pos, r.tree)
+            r.read(Field(f"column {i + 1} name", WireText(U8)))
+            columns.append(DefaultColumn(sql_type) if flags & TVP_DEFAULT_COLUMN else sql_type)
+        order, unique, send_order, seen = [], [], [], set()
+        while (tag := r.read(Field("metadata_token", U8))) != 0:
+            if tag not in (TVP_ORDER_UNIQUE, TVP_COLUMN_ORDERING) or tag in seen:
+                raise MalformedMessage("table metadata token", r.pos, r.tree)
+            seen.add(tag)
+            for _ in range(r.read(Field("hint_count", U16))):
+                column = r.read(Field("hint_column", U16))
+                if tag == TVP_COLUMN_ORDERING:
+                    send_order.append(column)
+                else:
+                    flags = r.read(Field("order_flags", U8))
+                    if flags & ~7 or flags & 3 == 3:
+                        raise MalformedMessage("table order flags", r.pos, r.tree)
+                    if flags & 3:
+                        order.append((column, Order(flags & 3)))
+                    if flags & 4:
+                        unique.append(column)
+        if TVP_COLUMN_ORDERING in seen and sorted(send_order) != list(range(1, count + 1)):
+            raise MalformedMessage("table column placement", r.pos, r.tree)
+        declaration = Table(self.schema, self.name, tuple(columns), tuple(order), tuple(unique), tuple(send_order))
+        given = declaration.given
+        rows = []
+        while (tag := r.read(Field("row_token", U8))) != 0:
+            if tag != 1:
+                raise MalformedMessage("table row token", r.pos, r.tree)
+            cells = {}
+            for column in send_order or range(1, count + 1):
+                if column in given:
+                    cells[column] = r.read(Field(f"row {len(rows) + 1} column {column}",
+                                                 Value(columns[column - 1], parameter=True)))
+            rows.append(tuple(cells[column] for column in given))
+        return TableInput(declaration, tuple(rows))
+
     def __post_init__(self):
         """Checks only what the encoding needs. The server checks the rest and says what is wrong: how many columns a
         table may have, whether tables nest, and which columns the hint may name."""
@@ -1920,11 +1993,20 @@ class Table(SqlType):
         return bytes(w.buf)
 
     def show(self, value: Any) -> str:
+        if isinstance(value, TableInput):
+            return "no table" if value.rows is None else f"{len(value.rows)} rows"
         if value is None:
             return "no table"
         if is_source(value):
             return "rows from a source"
         return f"{len(value)} rows" if hasattr(value, "__len__") else "rows"
+
+
+@dataclass(frozen=True)
+class TableInput:
+    """Decoded table request evidence, with its on-wire declaration and rows."""
+    table: Table
+    rows: tuple | None
 
 
 # =========================================================================== Always Encrypted, as TDS carries it (D-60)
@@ -2040,10 +2122,19 @@ class TypeInfo(Type):
 
     composite = True
 
+    def __init__(self, parameter: bool = False):
+        self.parameter = parameter  # input names/framing differ from result metadata
+
     def read(self, r: Reader) -> SqlType:
         code = r.read(Field("type", U8, enum=TypeCode))
         size = lambda: r.read(Field("size", U8))  # noqa: E731
         match code:
+            case TypeCode.TVP if self.parameter:
+                database = r.read(Field("database", WireText(U8)))
+                if database:
+                    raise MalformedMessage("table database must be empty", r.pos, r.tree)
+                return Table(r.read(Field("schema", WireText(U8))),
+                             r.read(Field("type_name", WireText(U8))), ())
             case TypeCode.TINYINT | TypeCode.SMALLINT | TypeCode.INT | TypeCode.BIGINT:
                 return Integer({0x30: 1, 0x34: 2, 0x38: 4, 0x7F: 8}[code], code)
             case TypeCode.INTN:
@@ -2095,11 +2186,11 @@ class TypeInfo(Type):
                 r.read(Field("max_length", U32, fmt=lambda v: f"{v} bytes"))
                 return Variant(code)
             case TypeCode.JSON:  # its encoding follows the login's UTF-8 support (D-8)
-                return Json(code, r.context.get("utf8_support", False))
+                return Json(code, self.parameter or r.context.get("utf8_support", False))
             case TypeCode.UDT:
-                size = r.read(Field("max_size", U16, fmt=lambda v: "max" if v == MAX_LENGTH else f"{v} bytes"))
+                size = None if self.parameter else r.read(Field("max_size", U16, fmt=lambda v: "max" if v == MAX_LENGTH else f"{v} bytes"))
                 names = [r.read(Field(f, WireText(U8))) for f in ("database", "schema", "type_name")]
-                assembly = r.read(Field("assembly", WireText(U16)))
+                assembly = "" if self.parameter else r.read(Field("assembly", WireText(U16)))
                 return Clr(*names, assembly, MAX if size == MAX_LENGTH else size, code)
             case TypeCode.VECTOR:
                 size = r.read(Field("max_length", U16, fmt=lambda v: f"{v} bytes"))
@@ -2118,7 +2209,7 @@ class TypeInfo(Type):
                 collation = None
                 if code != TypeCode.IMAGE:
                     collation = Collation(bytes(r.read(Field("collation", Raw(5), fmt=lambda v: v.hex(" ").upper()))))
-                parts = r.read(Field("table_parts", U8))  # in a result: the table the column comes from
+                parts = 0 if self.parameter else r.read(Field("table_parts", U8))  # result provenance only
                 table = tuple(r.read(Field(f"table part {i + 1}", WireText(U16))) for i in range(parts))
                 if code == TypeCode.IMAGE:
                     return Image(table, code)
@@ -2163,10 +2254,17 @@ def _shift(node, by: int) -> None:
 class Value(Type):
     """One value, laid out as its type says."""
 
-    def __init__(self, sql_type: SqlType | None):
+    def __init__(self, sql_type: SqlType | None, parameter: bool = False):
         self.sql_type = sql_type
+        self.parameter = parameter
 
     def read(self, r: Reader) -> Any:
+        if self.parameter and isinstance(self.sql_type, (LegacyText, Image)):
+            size = r.read(Field("length", U32))
+            if size == 0xFFFFFFFF:
+                return None
+            data = bytes(r.take(size, "legacy parameter"))
+            return self.sql_type.assemble(data) if isinstance(self.sql_type, LegacyText) else data
         return self.sql_type.read_value(r)
 
     def write(self, w: Writer, value: Any) -> None:
@@ -2181,11 +2279,12 @@ class Value(Type):
 class ValueOf(Type):
     """A value laid out by a type given in an earlier field of the same structure (RETURNVALUE's `type`)."""
 
-    def __init__(self, type_field: str):
+    def __init__(self, type_field: str, parameter: bool = False):
         self.type_field = type_field
+        self.parameter = parameter
 
     def resolve(self, rw) -> Type:
-        return Value(rw.values[-1][self.type_field])
+        return Value(rw.values[-1][self.type_field], self.parameter)
 
 
 # =========================================================================== the vocabulary: tds.types

@@ -220,3 +220,13 @@ def test_a_source_that_fails_partway_is_abandoned_with_ignore_and_the_answer_is_
     with pytest.raises(OSError, match="disk failed"):
         exchange.send(answer)  # a DONE marked error, as MS-TDS says. SQL Server sends a message first (live tests).
     assert not core.link.channels[channel].busy
+
+@pytest.mark.parametrize("size", [1, 3, 64])
+@pytest.mark.parametrize("total,payload", [(0, b"x"), (2, b"x"), (1, b"xy")])
+def test_plp_rejects_payload_that_contradicts_known_total(size, total, payload):
+    from tds.wire import MalformedMessage
+
+    encoded = (total.to_bytes(8, "little") + len(payload).to_bytes(4, "little")
+               + payload + bytes(4))
+    with pytest.raises(MalformedMessage, match="PLP"):
+        read_in(PlpValue(), encoded, size)

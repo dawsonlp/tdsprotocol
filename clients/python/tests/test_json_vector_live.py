@@ -28,18 +28,22 @@ def test_the_login_asks_for_json_and_vector_and_the_server_says_which_versions(s
 
     features = run(go())
     assert features[login7.Feature.JSON_SUPPORT] == b"\x01"
-    assert features[login7.Feature.VECTOR_SUPPORT] == b"\x01"  # asked for 2 (float16 too), but this server accepts 1
+    assert features[login7.Feature.VECTOR_SUPPORT] in (b"\x01", b"\x02")  # a supported downgrade, or float16 too
 
 
-def test_observed_this_server_has_no_float16_vectors(server):
+def test_float16_vectors_match_the_negotiated_server_capability(server):
     async def go():
         async with await tds.connect(**server) as connection:
             async with connection.serial_channel() as channel:
-                with pytest.raises(tds.ServerError) as refused:
-                    await fetch(channel, "SELECT CAST(N'[1,2]' AS vector(2, float16))")
-                return refused.value.errors[0].text
+                if connection.features[login7.Feature.VECTOR_SUPPORT][0] < 2:
+                    with pytest.raises(tds.ServerError) as refused:
+                        await fetch(channel, "SELECT CAST(N'[1,2]' AS vector(2, float16))")
+                    assert "float16" in refused.value.errors[0].text
+                else:
+                    result = await fetch(channel, "SELECT CAST(N'[1,2]' AS vector(2, float16))")
+                    assert result.result_sets[0].rows[0][0] == SqlVector(VectorElement.FLOAT16, (1.0, 2.0))
 
-    assert "float16" in run(go())
+    run(go())
 
 
 def test_json_and_vectors_round_trip_exactly(server):

@@ -4,8 +4,9 @@ Read in this order: packet → prelogin → login7 → tokens → requests → r
 The design is in docs/design.
 """
 
-from .connection.core import ConnectError, LoginRejected, OutOfTurn, Routed, SerialChannelMisuse, SessionNotRecovered
-from .connection.shell import Connection, Pool, SerialChannel, connect
+from .connection.core import CaptureError, ChannelClosed, ConnectError, LoginRejected, OutOfTurn, Routed, SerialChannelMisuse, SessionNotRecovered
+from .connection.shell import ChannelCleanupError, Connection, Pool, SerialChannel, connect
+from .config import ConfigService, ConfigurationError, ConnectionConfig, ConnectionServices, StaticConfig
 from . import browser, transactions, types
 from .login7 import DEFAULT_FEATURES, Feature
 from .logins import EntraLogin, EntraToken, WindowsLogin, Workflow
@@ -13,8 +14,9 @@ from .requests import DEFAULT, Batch, BulkInsert, BulkRows, Builtin, Call, CallO
 from .response import (Cancelled, FetchedResponse, NotYetRead, Response, ResultSet, RowsNotAvailable, ServerError,
                        StreamedRow, Unread, ValueStream)
 
-__all__ = ["connect", "Pool", "Connection", "SerialChannel", "Batch", "Call", "Calls", "Param", "Builtin", "CallOptions",
+__all__ = ["ConfigService", "ConfigurationError", "ConnectionConfig", "ConnectionServices", "StaticConfig", "connect", "Pool", "Connection", "SerialChannel", "Batch", "Call", "Calls", "Param", "Builtin", "CallOptions",
            "BulkInsert", "BulkRows", "transactions", "browser", "Feature", "DEFAULT_FEATURES", "WindowsLogin", "EntraToken", "EntraLogin", "Workflow",
            "DEFAULT", "types", "Response", "FetchedResponse", "ResultSet", "StreamedRow", "ValueStream",
            "Unread", "ServerError", "Cancelled", "NotYetRead", "RowsNotAvailable",
-           "ConnectError", "LoginRejected", "Routed", "SessionNotRecovered", "SerialChannelMisuse", "OutOfTurn"]
+           "ConnectError", "LoginRejected", "Routed", "SessionNotRecovered", "SerialChannelMisuse", "OutOfTurn",
+           "ChannelClosed", "ChannelCleanupError", "CaptureError"]

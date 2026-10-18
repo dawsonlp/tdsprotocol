@@ -39,11 +39,20 @@ def test_each_level_builds_what_it_shows(server):
         async with await tds.connect(**server, observe=observer) as connection:
             async with connection.serial_channel() as channel:
                 await fetch(channel, "SELECT 1")
-        return observer.events
+            ready = f"ready · session {connection.session_id} ·"
+        return observer.events, ready
 
-    off, outline, full = (run(go(level)) for level in (Level.OFF, Level.OUTLINE, Level.FULL))
+    (off, _), (outline, outline_ready), (full, full_ready) = (
+        run(go(level)) for level in (Level.OFF, Level.OUTLINE, Level.FULL))
     assert off == []  # no event is built
-    assert [e.text for e in outline] == [e.text for e in full]  # the same lines
+    # These are independent physical logins. Verify each server-assigned id,
+    # then normalize that identity alone; every other line/field must agree.
+    def lines(events, ready):
+        assert sum(e.kind == "step" and e.text.startswith(ready) for e in events) == 1
+        return [(e.kind, e.text.replace(ready, "ready · session <id> ·", 1)
+                 if e.kind == "step" and e.text.startswith(ready) else e.text) for e in events]
+
+    assert lines(outline, outline_ready) == lines(full, full_ready)
     pairs = [(o, f) for o, f in zip(outline, full) if f.node is not None and f.kind in ("send", "receive")]
     assert pairs and all(leaves(f.node) > leaves(o.node) for o, f in pairs)  # full opens every message to its fields
 

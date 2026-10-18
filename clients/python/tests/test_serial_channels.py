@@ -4,7 +4,7 @@ import pytest
 
 from tds import Batch
 from tds.connection.core import (MARS_HEADER, MARS_HEADER_SIZE, AwaitWindow, ConnectionCore, ExchangeInProgress,
-                                 MarsFlags, NotTheOwner, Options, Receive, Send, TooManySerialChannels)
+                                 ChannelClosed, MarsFlags, NotTheOwner, Options, Receive, Send, TooManySerialChannels)
 
 ALICE, BOB = object(), object()  # two tasks
 
@@ -37,7 +37,45 @@ def test_a_closed_channel_can_be_replaced():
     core = ready()
     first, _ = core.open_channel(ALICE)
     core.close_channel(first)
-    core.open_channel(BOB)
+    second, _ = core.open_channel(BOB)
+    assert second != first
+    assert len(core.link.channels) == 1  # closed plain lifetimes do not accumulate
+    assert core.close_channel(first) == []
+    assert not core.link.channels[second].closed
+    with pytest.raises(ChannelClosed):
+        next(core.exchange(first, ALICE, Batch("SELECT 2")))
+    with pytest.raises(ChannelClosed):
+        core.hand_over(first, ALICE, BOB)
+    with pytest.raises(ChannelClosed):
+        core.resume(first)
+
+
+def test_busy_close_revokes_but_cannot_release_or_replace_until_acknowledgement():
+    from tds.packet import Packet, PacketType, Status
+    core = ready()
+    channel, _ = core.open_channel(ALICE)
+    sent(core.exchange(channel, ALICE, Batch("SELECT 1")))
+    with pytest.raises(ExchangeInProgress):
+        core.close_channel(channel)
+    assert len(core.begin_channel_close(channel)) == 1
+    assert core.begin_channel_close(channel) == []
+    with pytest.raises(ChannelClosed):
+        next(core.read(channel, ALICE))
+    with pytest.raises(TooManySerialChannels):
+        core.open_channel(BOB)
+    assert core.release() == (False, [])
+    draining = core.drain_channel(channel)
+    assert next(draining) == Receive(channel)
+    normal = Packet(PacketType.SERVER_MESSAGE, Status.LAST, bytes.fromhex("FD 00 00 00 00 00 00 00 00 00 00 00 00"), None)
+    assert draining.send(normal) == Receive(channel)
+    ack = Packet(PacketType.SERVER_MESSAGE, Status.LAST, bytes.fromhex("FD 20 00 00 00 00 00 00 00 00 00 00 00"), None)
+    with pytest.raises(StopIteration):
+        draining.send(ack)
+    assert not core.link.channels[channel].busy
+    core.close_channel(channel)
+    replacement, _ = core.open_channel(BOB)
+    assert replacement != channel
+    assert core.cancel(channel) == []
 
 
 def test_with_mars_channels_open_as_sessions():
@@ -60,6 +98,34 @@ def test_one_request_at_a_time():  # D-22
     assert next(core.read(channel, ALICE)) == Receive(channel)  # the response is still open
     with pytest.raises(ExchangeInProgress):
         next(core.exchange(channel, ALICE, Batch("SELECT 2")))
+
+
+def test_known_connection_failure_precedes_busy_state_before_any_shell_wait():
+    core = ready()
+    channel, _ = core.open_channel(ALICE)
+    sent(core.exchange(channel, ALICE, Batch("SELECT 1")))
+    core.failure = OSError("connection lost")
+    with pytest.raises(ConnectionError, match="can't continue"):
+        core.exchange_channel(channel, ALICE)
+    with pytest.raises(ConnectionError, match="can't continue"):
+        next(core.exchange(channel, ALICE, Batch("SELECT 2")))
+
+
+@pytest.mark.parametrize("mars", [False, True])
+def test_recovery_never_revives_a_revoked_lifetime_or_reuses_its_identity(mars):
+    from tds.session import Recovery, SessionState
+    old = ready(mars)
+    owner = object()
+    channel, _ = old.open_channel(owner)
+    sent(old.exchange(channel, owner, Batch("SELECT 1")))
+    old.begin_channel_close(channel)  # as if transport failed before cleanup completed
+    old.recovery = Recovery(SessionState(), {})
+    recovered = ready(mars)
+    recovered.adopt(old)
+    assert channel not in recovered.link.channels
+    replacement, _ = recovered.open_channel(owner)
+    assert replacement != channel
+    assert recovered.close_channel(channel) == []
 
 
 def test_anyone_may_close():  # D-23

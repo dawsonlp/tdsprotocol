@@ -10,10 +10,12 @@ serial channel, or AwaitWindow. TLS is in this module, not in the shell, because
 runs entirely in memory (ssl.MemoryBIO): bytes go in, and bytes come out.
 """
 
+from collections import deque
 import enum
 import os
 import ssl
 import time
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generator
 
@@ -125,6 +127,18 @@ class ConnectError(Exception):
         self.step = step
 
 
+class CaptureError(Exception):
+    """The requested recording is incomplete; this connection must not continue.
+
+    The original writer error is available as `cause`, without exposing its text
+    (which can contain application data) in the driver's own message.
+    """
+
+    def __init__(self, cause: Exception):
+        super().__init__("saved conversation recording failed; the connection was discarded")
+        self.cause = cause
+
+
 LOGIN_HINTS = {  # what the driver knows that the server's message doesn't say (D-53)
     4064: "(The login's default database can't be opened: it may have been dropped or taken offline, or the login may "
           "have no user in it. Name a database with database=…, or have an administrator change the login's default: "
@@ -187,6 +201,14 @@ class NotTheOwner(SerialChannelMisuse):  # D-21
 class ExchangeInProgress(SerialChannelMisuse):  # D-22
     def __init__(self, channel: int):
         super().__init__(f"serial channel {channel} already has a request in progress; a channel carries one at a time.")
+
+
+class ChannelClosed(ConnectionError):
+    """Authority for this channel lifetime was revoked, including by another task."""
+
+    def __init__(self, channel: int, response=None):
+        super().__init__(f"serial channel {channel} is closed")
+        self.channel, self.response = channel, response
 
 
 class OutOfTurn(SerialChannelMisuse):  # D-50
@@ -290,6 +312,14 @@ class MarsFlags(enum.IntEnum):
 
 MARS_ID = 0x53
 MARS_HEADER_SIZE = 16
+MARS_MAX_FRAME = 1 << 20  # transport allocation bound, not a protocol maximum
+MARS_MASK = (1 << 32) - 1
+
+
+def _mars_ahead(value: int, previous: int) -> bool:
+    return 0 < ((value - previous) & MARS_MASK) < (1 << 31)
+
+
 MARS_WINDOW = 4  # how many data frames a side may send beyond what the other has acknowledged
 
 MARS_HEADER = Struct("MARS frame", [
@@ -303,15 +333,30 @@ MARS_HEADER = Struct("MARS frame", [
     summary=lambda f: f"{f.flags.name} · channel {f.session_id} · seq {f.sequence} · window {f.window}")
 
 
+@dataclass(frozen=True)
+class MarsData:
+    """One DATA frame, consumed by its owner before returning one unit of credit.
+
+    SMP payload is a byte stream: a frame can contain part of a TDS packet, or
+    several packets. Counting packets instead of frames can deadlock or overgrant.
+    """
+    body: bytes
+
+
 @dataclass
 class Channel:
-    """A serial channel's state. Without MARS there is one, carried directly on the connection."""
+    """A serial channel's state. Its public id identifies application authority;
+    its wire_id identifies an SMP session on this physical connection only.
+    Without MARS there is one channel, carried directly on the connection.
+    """
 
     id: int
     owner: Any  # the task that opened it (D-21)
     unpacker: Unpacker
+    wire_id: int | None = None  # SMP identity on this physical connection, independent of the public lifetime id
     busy: bool = False  # a request is being sent, or its response hasn't been read to its end (D-22)
     closed: bool = False
+    closing: bool = False  # public authority revoked; cleanup still owns the exchange
     closed_by_server: bool = False  # MARS: the server closed it (FIN), as it does to each channel of an ending session
     reader: ResponseReader | None = None  # the response being read
     writer: PacketWriter | None = None  # the request being sent
@@ -320,9 +365,10 @@ class Channel:
     # MARS only
     sent: int = 0  # the sequence number of the last data frame the client sent
     received: int = 0  # the sequence number of the last data frame the client received
-    consumed: int = 0  # data frames whose packet has been read by the channel's owner
+    consumed: int = 0  # DATA frames passed to the packet layer by the channel's owner
     send_window: int = MARS_WINDOW  # the server accepts the client's data frames up to this sequence number
     receive_window: int = MARS_WINDOW  # the client has told the server it may send up to this one
+    packets: deque[Packet] = field(default_factory=deque)  # unpacked from a consumed DATA frame
     waiting: list[bytes] = field(default_factory=list)  # packets for the server, waiting for window credit
 
 
@@ -339,8 +385,30 @@ class Link:
         self.mars = False
         self.packet_size = DEFAULT_SIZE
         self.channels: dict[int, Channel] = {}
+        self._wire_channels: dict[int, Channel] = {}
+        self._next_wire_channel = 0  # never reuse a wire identity within one physical connection
+        self.plain_channel = 0  # local lifetime identity; plain packets have no channel id
         self._plain = Unpacker(record)  # packets before MARS starts, or without MARS
         self._frames = bytearray()  # MARS bytes not yet a whole frame
+
+    def open_channel(self, channel_id: int, owner: Any) -> Channel:
+        """Bind an application lifetime to this link's fresh wire namespace.
+
+        Recovery keeps application ids and owners, but a new TCP connection has
+        no SMP sessions. Allocate its wire ids from zero, independently of how
+        many application channels existed before the break.
+        """
+        if self.mars and self._next_wire_channel > 0xFFFF:
+            raise SerialChannelMisuse("MARS wire identities are exhausted; open a new connection")
+        channel = Channel(channel_id, owner, Unpacker(self.record))
+        if self.mars:
+            channel.wire_id = self._next_wire_channel
+            self._next_wire_channel += 1
+            self._wire_channels[channel.wire_id] = channel
+        else:
+            self.plain_channel = channel_id
+        self.channels[channel_id] = channel
+        return channel
 
     def _wrap(self, data: bytes) -> Send:
         return Send(self.tls.encrypt(data) if self.tls else data)
@@ -359,74 +427,91 @@ class Link:
 
     def can_send(self, channel: Channel) -> bool:
         """MARS flow control: the server accepts data frames up to the window it last announced."""
-        return channel.sent < channel.send_window
+        return _mars_ahead(channel.send_window, channel.sent)
 
     def data(self, channel: Channel, packet: bytes) -> Send:
         """One packet in one MARS data frame. Callers check can_send first."""
         if not self.can_send(channel):  # an invariant, kept even under python -O
             raise RuntimeError(f"channel {channel.id}: data frame {channel.sent + 1} is beyond the server's window")
-        channel.sent += 1
+        channel.sent = (channel.sent + 1) & MARS_MASK
         if self.capture:
             self.capture("send", channel.id, packet)
         return self._wrap(self.frame(channel, MarsFlags.DATA, packet))
 
     def frame(self, channel: Channel, flags: MarsFlags, payload: bytes = b"") -> bytes:
         header, node = MARS_HEADER.encode({
-            "id": MARS_ID, "flags": flags, "session_id": channel.id, "length": MARS_HEADER_SIZE + len(payload),
+            "id": MARS_ID, "flags": flags, "session_id": channel.wire_id, "length": MARS_HEADER_SIZE + len(payload),
             "sequence": channel.sent, "window": channel.receive_window}, self.record)
         if flags != MarsFlags.DATA:
             if self.observing:
-                self.observe(Event("mars", f"→ MARS {node.shown}", node))
+                identity = f" · application channel {channel.id}" if channel.wire_id != channel.id else ""
+                self.observe(Event("mars", f"→ MARS {node.shown}{identity}", node))
         return header + payload
 
     def channel_frame(self, channel: Channel, flags: MarsFlags) -> Send:
         return self._wrap(self.frame(channel, flags))
 
-    def feed(self, raw: bytes) -> list[Send | tuple[int, Packet | None]]:
-        """Bytes from the socket → packets for each channel (None: the server closed that channel), plus any packets
-        that were waiting for the server to raise a channel's window.
+    def feed(self, raw: bytes) -> list[Send | tuple[int, Packet | MarsData | None]]:
+        """Route plain packets or MARS DATA frames (None: the peer closed that channel),
+        and send packets that were waiting for a raised window.
 
-        Under MARS, credit returns to the server as the channel's owner reads (ConnectionCore.read), not as packets
-        arrive. The server's own flow control then keeps each channel at most one window ahead of its reader."""
+        MARS credit returns as the owner consumes DATA frames in _receive_packet,
+        not as frames arrive. The server stays at most one window ahead. Decode
+        TDS only after that boundary: its packets need not align with SMP frames.
+        """
         data = self.tls.decrypt(raw) if self.tls else raw
         if not self.mars:
             packets = self._plain.feed(data)
             if self.capture:
                 for p in packets:
                     self.capture("receive", None, p.raw)
-            return [(0, p) for p in packets]
+            return [(self.plain_channel, p) for p in packets]
         out: list = []
         self._frames += data
         while len(self._frames) >= MARS_HEADER_SIZE:
+            if self._frames[1] not in (1, 2, 4, 8):
+                raise MalformedMessage("invalid MARS flags", 1)
             head = MARS_HEADER.decode(bytes(self._frames[:MARS_HEADER_SIZE]), self.record)
             if head.id != MARS_ID:
                 raise MalformedMessage("expected a MARS frame (0x53)", 0, head.node)
+            if head.length < MARS_HEADER_SIZE or (head.flags != MarsFlags.DATA and head.length != MARS_HEADER_SIZE):
+                raise MalformedMessage("invalid MARS length", 4, head.node)
+            if head.length > MARS_MAX_FRAME:
+                raise MalformedMessage("MARS frame exceeds the 1 MiB transport bound", 4, head.node)
             if len(self._frames) < head.length:
                 break  # the rest of this frame hasn't arrived yet
             payload = bytes(self._frames[MARS_HEADER_SIZE : head.length])
             del self._frames[: head.length]
-            channel = self.channels.get(head.session_id)
+            channel = self._wire_channels.get(head.session_id)
             if channel is None:
                 raise MalformedMessage(f"a MARS frame for unknown channel {head.session_id}", 0, head.node)
-            channel.send_window = max(channel.send_window, head.window)  # every frame carries the server's window
+            if channel.closed_by_server:
+                raise MalformedMessage("MARS frame after peer FIN", 1, head.node)
+            if head.flags == MarsFlags.SYN:
+                raise MalformedMessage("the server tried to open a MARS session", 1, head.node)
+            if channel.closed and head.flags == MarsFlags.DATA:
+                continue  # DATA already in flight after our FIN: ignore, per MC-SMP §3.1.5.1.1
+            expected = (channel.received + (head.flags == MarsFlags.DATA)) & MARS_MASK
+            if not channel.closed and head.sequence != expected:
+                raise MalformedMessage("invalid MARS sequence", 8, head.node)
+            if head.window != channel.send_window and not _mars_ahead(head.window, channel.send_window):
+                raise MalformedMessage("MARS send window moved backwards", 12, head.node)
+            channel.send_window = head.window
             while channel.waiting and self.can_send(channel):
                 out.append(self.data(channel, channel.waiting.pop(0)))
             if head.flags != MarsFlags.DATA:
                 if self.observing:
-                    self.observe(Event("mars", f"← MARS {head.node.shown}", head.node))
+                    identity = f" · application channel {channel.id}" if channel.wire_id != channel.id else ""
+                    self.observe(Event("mars", f"← MARS {head.node.shown}{identity}", head.node))
             match head.flags:
                 case MarsFlags.DATA:
+                    if not _mars_ahead(channel.receive_window, channel.received):
+                        raise MalformedMessage("MARS receive window exceeded", 8, head.node)
                     channel.received = head.sequence
-                    packets = channel.unpacker.feed(payload)
-                    if self.capture:
-                        for p in packets:
-                            self.capture("receive", channel.id, p.raw)
-                    out += [(channel.id, p) for p in packets]
+                    out.append((channel.id, MarsData(payload)))
                 case MarsFlags.FIN:
                     channel.closed = channel.closed_by_server = True
                     out.append((channel.id, None))
-                case MarsFlags.SYN:
-                    raise MalformedMessage("the server tried to open a MARS session", 0, head.node)
         return out
 
 
@@ -464,9 +549,14 @@ class ConnectionCore:
     def __init__(self, options: Options, observe: Callable[[Event], None] | None = None):
         self.options = options
         self.link = Link(options.record, lambda event: None)
+        self._next_channel = 0  # never reuse a public lifetime, even without MARS
         self._joiner = Joiner()  # joins packets into messages while connecting
         self._observer: Callable[[Event], None] | None = None
         self._capture: Any = None
+        self._capture_owner = object()  # a physical lifetime, not a reusable channel/session id
+        self._capture_failure: CaptureError | None = None
+        self.observation_error: Exception | None = None
+        self._on_capture_failure: Callable[[CaptureError], None] = lambda failure: None
         self.set_observe(observe)
         self.session = SessionState()
         self.server: Record | None = None  # the LOGINACK
@@ -490,6 +580,7 @@ class ConnectionCore:
             raise SerialChannelMisuse(f"observability can't change while serial channel {busy[0]} has a request in "
                                       "flight: change it between exchanges")
         self._observer = observe if level_of(observe) is not Level.OFF else None
+        self.observation_error = None
         self._route()
 
     def set_capture(self, capture: Any) -> None:
@@ -499,23 +590,53 @@ class ConnectionCore:
         if busy:
             raise SerialChannelMisuse(f"a capture can't start or stop while serial channel {busy[0]} has a request in "
                                       "flight: change it between exchanges")
+        if capture is not None and (claim := getattr(capture, "_claim", None)) is not None:
+            claim(self._capture_owner)  # reject sharing before changing the current route
         self._capture = capture
-        self.link.capture = capture.packet if capture is not None else None
+        self.link.capture = self._capture_packet if capture is not None else None
         self._route()
 
     def _route(self) -> None:
         """Send events to the observer, the capture, or both. A capture needs every event's line, not its tree."""
         observer, capture = self._observer, self._capture
         self.observing = observer is not None or capture is not None  # with neither, no event is built
-        if observer and capture:
-            self.observe = lambda event: (observer(event), capture(event))
-        else:
-            self.observe = observer or capture or (lambda event: None)
+        self.observe = self._emit
         record = level_of(observer) is Level.FULL  # only full keeps inspection trees
         self.options.record = self.link.record = record
         self.link.observe, self.link.observing = self.observe, self.observing
         for unpacker in (self.link._plain, self._joiner._unpacker, *(c.unpacker for c in self.link.channels.values())):
             unpacker.record = record
+
+    def _emit(self, event: Event) -> None:
+        if self._capture_failure is not None:
+            raise self._capture_failure
+        if self._observer is not None:
+            try:
+                self._observer(event)
+            except Exception as failure:
+                self.observation_error, self._observer = failure, None
+                self.observing = self.link.observing = self._capture is not None
+                # Keep this exchange's decoding mode: changing it halfway through
+                # a response can change the inspection record already being built.
+        if self._capture is not None:
+            try:
+                self._capture(event)
+            except Exception as failure:
+                self._capture_failed(failure)
+
+    def _capture_packet(self, direction: str, channel: int | None, packet: bytes) -> None:
+        if self._capture_failure is not None:
+            raise self._capture_failure
+        try:
+            self._capture.packet(direction, channel, packet)
+        except Exception as failure:
+            self._capture_failed(failure)
+
+    def _capture_failed(self, cause: Exception) -> None:
+        failure = CaptureError(cause)
+        self.failure = self._capture_failure = failure
+        self._on_capture_failure(failure)  # the shell closes the socket synchronously
+        raise failure from cause
 
     # ----------------------------------------------------------------------- connect: hello → secure → log in → ready
 
@@ -617,6 +738,11 @@ class ConnectionCore:
         self._malformed_is_a_connect_error("log in", lambda m: self._final_done(reply, m, "login reply"), message)
         self._read_login_reply(reply)
 
+        # CHANGE_PASSWORD is a one-time server operation. A completed final login
+        # commits its result locally; routing/refused/incomplete logins never do.
+        if o.new_password:
+            self.options = dataclasses.replace(o, password=o.new_password, new_password="")
+
         self.link.packet_size = self.session.packet_size  # the announced size applies from the next message
         self.link.mars = o.mars  # MARS framing starts here, after login
         self._login = self.session.snapshot()
@@ -698,29 +824,25 @@ class ConnectionCore:
         for r in records:
             if r.token == "ENVCHANGE":
                 if r.kind == EnvKind.ROUTING:
+                    if r.old != 0:
+                        raise ConnectError("log in", "the routing announcement has a nonempty old value")
                     routing = r.new
                 else:
                     self._announce(r)
         for r in records:
             if r.token == "FEATUREEXTACK":
                 self.features = dict(r.features)
-        utf8 = self.features.get(login7.Feature.UTF8_SUPPORT)
-        self.negotiated["utf8_support"] = bool(utf8 and utf8[0] & 1)  # json then arrives as UTF-8
-        encryption = self.features.get(login7.Feature.COLUMN_ENCRYPTION)
-        if encryption:  # every result now starts with a key table, and encrypted values carry crypto metadata (D-60)
-            self.negotiated["column_encryption"] = encryption[0]
-            if encryption[0] >= 2 and len(encryption) > 1:  # with enclaves, the server names its enclave's type. The
-                # name is its length in characters, then UTF-16LE (observed: 02 03 “VBS”)
-                self.negotiated["enclave_type"] = bytes(encryption[2 : 2 + 2 * encryption[1]]).decode("utf-16-le")
-        classification = self.features.get(login7.Feature.DATA_CLASSIFICATION)
-        if classification:  # its version decides whether ranks are sent (D-8)
-            self.negotiated["data_classification_version"] = classification[0]
+        self.negotiated.update(login7.result_context(self.features))
         if ack is None:
             raise LoginRejected(errors)
         if ack.tds_version != login7.TDS_7_4:
             raise ConnectError("log in", f"the server speaks {login7.tds_version_name(ack.tds_version)}; "
                                          "TDS 7.4 or later is required (D-2)")
         if routing is not None:
+            if routing.protocol != 0:
+                raise ConnectError("log in", f"the routing protocol is {routing.protocol}, not TCP (0)")
+            if routing.port == 0 or not routing.server or "\x00" in routing.server:
+                raise ConnectError("log in", "the routing target has an invalid server name or port")
             raise Routed(routing.server, routing.port)
         self.server = ack
 
@@ -728,12 +850,18 @@ class ConnectionCore:
 
     def open_channel(self, owner: Any) -> tuple[int, list[Send]]:
         """Without MARS a connection has exactly one serial channel; with MARS, as many as are opened."""
+        if self.failure is not None:
+            raise ConnectionError(self.why_broken()) from self.failure
         open_now = [c for c in self.link.channels.values() if not c.closed]
         if not self.link.mars and open_now:
             raise TooManySerialChannels()
-        channel_id = 0 if not self.link.mars else max(self.link.channels, default=-1) + 1
-        channel = Channel(channel_id, owner, Unpacker(self.options.record))
-        self.link.channels[channel_id] = channel
+        if not self.link.mars:
+            # The previous lifetime was proven quiescent. Its stale handles are
+            # rejected by identity; retaining its owner/state is unnecessary.
+            self.link.channels.clear()
+        channel_id = self._next_channel
+        channel = self.link.open_channel(channel_id, owner)
+        self._next_channel += 1
         if self.observing:
             self.observe(Event("channel", f"open serial channel {channel_id}"))
         if not self.link.mars:
@@ -741,21 +869,69 @@ class ConnectionCore:
         return channel_id, [self.link.channel_frame(channel, MarsFlags.SYN)]
 
     def close_channel(self, channel_id: int) -> list[Send]:
-        """Anyone may close a channel (D-23)."""
+        """Release a quiescent channel. Active close must cancel/drain first."""
         channel = self.link.channels.get(channel_id)
         if channel is None or channel.closed:
             return []
+        if channel.busy:
+            raise ExchangeInProgress(channel_id)
+        if channel.open:
+            raise RuntimeError("cannot release an unfinished bulk continuation")
+        channel.closing = True
         channel.closed = True
         if self.observing:
             self.observe(Event("channel", f"close serial channel {channel_id}"))
         return [self.link.channel_frame(channel, MarsFlags.FIN)] if self.link.mars else []
+
+    def revoke_channel(self, channel_id: int) -> None:
+        """Revoke authority before any shell await or potentially failing I/O."""
+        channel = self.link.channels.get(channel_id)
+        if channel is None or channel.closed:
+            return
+        channel.closing = True
+
+    def begin_channel_close(self, channel_id: int) -> list[Send]:
+        """Only the private drainer may now advance the exchange."""
+        self.revoke_channel(channel_id)
+        channel = self.link.channels[channel_id]
+        if channel.open and not channel.busy:
+            # INSERT BULK's response ended, but the server still expects data.
+            # Give its Attention acknowledgement the same sole reader/deadline
+            # as active-response cleanup; FIN alone does not cancel this work.
+            channel.open = None
+            channel.busy, channel.writer = True, None
+            channel.reader = ResponseReader(record=self.options.record, announce=self._announce,
+                                            negotiated=self.negotiated)
+        return self.cancel(channel_id)
+
+    def drain_channel(self, channel_id: int) -> Generator[Action, Any, None]:
+        """Cleanup's sole reader, after the shell has excluded the owner reader."""
+        channel = self.link.channels[channel_id]
+        if not channel.closing:
+            raise RuntimeError("channel cleanup requires revoked authority")
+        reader = channel.reader
+        if reader is not None:
+            reader.keep_new, reader.discard_new = False, True
+            for result_set in reader.result_sets:
+                result_set._drop_unread()
+        while channel.busy:
+            if reader is None:
+                raise RuntimeError("busy channel has no response to drain")
+            if reader.paused:
+                reader.resume()  # an unclaimed large value may have paused decoding
+            if reader.ended:
+                self._ended(channel)
+                break
+            yield from self._read_channel(channel)
 
     def hand_over(self, channel_id: int, owner: Any, new_owner: Any) -> None:
         self._check_owner(channel_id, owner)
         self.link.channels[channel_id].owner = new_owner
 
     def _check_owner(self, channel_id: int, owner: Any) -> Channel:
-        channel = self.link.channels[channel_id]
+        channel = self.link.channels.get(channel_id)
+        if channel is None or channel.closing or channel.closed:
+            raise ChannelClosed(channel_id)
         if channel.owner is not owner:
             raise NotTheOwner(channel_id)
         return channel
@@ -764,6 +940,16 @@ class ConnectionCore:
     # An exchange is one turn in the conversation on a serial channel. Every operation is built on it (D-33).
     # Constraint: neither this code nor the response reader branches on the kind of operation. The differences belong
     # in the request definitions and the outer layers.
+
+    def exchange_channel(self, channel_id: int, owner: Any) -> Channel:
+        """Check authority/failure/overlap before the shell waits on its reader lock.
+        Recheck when starting the procedure, since an await can change the state."""
+        channel = self._check_owner(channel_id, owner)
+        if self.failure is not None:
+            raise ConnectionError(self.why_broken()) from self.failure
+        if channel.busy:
+            raise ExchangeInProgress(channel_id)
+        return channel
 
     def exchange(self, channel_id: int, owner: Any, request: Request,
                  decrypt: Callable | None = None) -> Generator[Action, Any, ResponseReader]:
@@ -775,11 +961,7 @@ class ConnectionCore:
 
         `decrypt` is Always Encrypted's hook (D-60). Given an encrypted value's type and ciphertext, it returns the
         value. Without it, encrypted values arrive as EncryptedValue: their ciphertext, as sent."""
-        channel = self._check_owner(channel_id, owner)
-        if self.failure is not None:  # checked first: a request in progress when the connection failed never ends
-            raise ConnectionError(self.why_broken()) from self.failure
-        if channel.busy:
-            raise ExchangeInProgress(channel_id)
+        channel = self.exchange_channel(channel_id, owner)
         continues = getattr(request, "continues", None)  # requests that come in pairs say so (bulk load, D-50)
         if channel.open != continues:
             raise OutOfTurn(channel_id, channel.open, continues)
@@ -798,7 +980,8 @@ class ConnectionCore:
         except GeneratorExit:
             raise  # abandoned without cleanup: the channel stays busy, so the connection is never lent again
         except BaseException:
-            yield from self._undo(channel)
+            if self.failure is None:  # failed recording already revoked the whole connection
+                yield from self._undo(channel)
             raise
         channel.writer = None
         return channel.reader
@@ -863,11 +1046,9 @@ class ConnectionCore:
                 self._show("send", "→", "request abandoned · ignore + last", None, writer.headers[-1:], b"", channel,
                            count=1)
             while not reader.ended:
-                packet = yield Receive(channel.id)
+                packet = yield from self._receive_packet(channel)
                 if packet is None:
                     break
-                if self.link.mars:
-                    yield from self._return_credit(channel)
                 reader.feed(packet.body, packet.last, packet.header)
             self._show_response(channel, reader)
         channel.opening = None  # undone: nothing was opened
@@ -884,19 +1065,21 @@ class ConnectionCore:
     def read(self, channel_id: int, owner: Any) -> Generator[Action, Any, None]:
         """Feed the channel's response one more packet. Once the response has ended, the channel is free."""
         channel = self._check_owner(channel_id, owner)
+        yield from self._read_channel(channel)
+
+    def _read_channel(self, channel: Channel) -> Generator[Action, Any, None]:
+        channel_id = channel.id
         reader = channel.reader
         if reader is None or reader.ended:
             return
         if self.failure is not None:
             raise ConnectionError(self._in_flight(reader, self.failure)) from self.failure
         try:
-            packet = yield Receive(channel_id)
+            packet = yield from self._receive_packet(channel)
         except OSError as e:  # the connection broke while this request was in progress
             raise ConnectionError(self._in_flight(reader, e)) from e
         if packet is None:
             raise ConnectionError(f"the server closed serial channel {channel_id}")
-        if self.link.mars:
-            yield from self._return_credit(channel)
         try:
             if packet.type != PacketType.SERVER_MESSAGE:
                 raise MalformedMessage(f"expected a server message, got a {packet.type.name} packet", 0, packet.header)
@@ -924,7 +1107,11 @@ class ConnectionCore:
 
     def resume(self, channel_id: int) -> None:
         """Decode a paused response's bytes already received. Once the response has ended, the channel is free."""
-        channel = self.link.channels[channel_id]
+        channel = self.link.channels.get(channel_id)
+        if channel is None:
+            raise ChannelClosed(channel_id)
+        if channel.closing or channel.closed:
+            raise ChannelClosed(channel_id)
         reader = channel.reader
         if reader is None or reader.ended:
             return
@@ -951,11 +1138,30 @@ class ConnectionCore:
         channel.waiting.append(packets[0])  # sent as soon as the server raises the window
         return []
 
+    def _receive_packet(self, channel: Channel) -> Generator[Action, Any, Packet | None]:
+        """Return one TDS packet; account credit per consumed SMP DATA frame."""
+        while not channel.packets:
+            incoming = yield Receive(channel.id)
+            if incoming is None:
+                return None
+            if isinstance(incoming, MarsData):
+                channel.packets.extend(channel.unpacker.feed(incoming.body))
+                yield from self._return_credit(channel)
+                if self.link.capture:
+                    for packet in channel.packets:
+                        self.link.capture("receive", channel.id, packet.raw)
+            else:
+                # Plain transport and core callers that supply a packet directly.
+                if self.link.mars:
+                    yield from self._return_credit(channel)
+                return incoming
+        return channel.packets.popleft()
+
     def _return_credit(self, channel: Channel) -> Generator[Action, Any, None]:
-        """MARS: the owner has read one more packet, so the server may send one more. Credit is returned in steps."""
-        channel.consumed += 1
-        if channel.receive_window - channel.consumed < MARS_WINDOW // 2:
-            channel.receive_window = channel.consumed + MARS_WINDOW
+        """MARS: the owner consumed one more DATA frame. Return its credit in steps."""
+        channel.consumed = (channel.consumed + 1) & MARS_MASK
+        if ((channel.receive_window - channel.consumed) & MARS_MASK) < MARS_WINDOW // 2:
+            channel.receive_window = (channel.consumed + MARS_WINDOW) & MARS_MASK
             yield self.link.channel_frame(channel, MarsFlags.ACK)
 
     def _show_response(self, channel: Channel, reader: ResponseReader) -> None:
@@ -978,7 +1184,7 @@ class ConnectionCore:
         """Prepare this connection to be lent again. Returns False if it can't be, because with a request still in
         progress, its next borrower would read that request's response. Otherwise its channels close, and its session
         will be reset."""
-        if any(c.busy for c in self.link.channels.values()):
+        if any(c.busy or c.open or (c.closing and not c.closed) for c in self.link.channels.values()):
             if self.observing:
                 self.observe(Event("pool", "can't be lent again: a request is still in progress, so it will be closed"))
             return False, []
@@ -999,6 +1205,10 @@ class ConnectionCore:
 
     def recovery_refusal(self) -> str | None:
         """Why this connection's session can't be recovered, or None if it can."""
+        if any(c.open or c.opening for c in self.link.channels.values()):
+            return "an unfinished bulk conversation must be completed or abandoned explicitly"
+        if self._capture_failure is not None:
+            return "the requested saved recording is incomplete; open a new connection explicitly"
         if self.recovery is None:
             if login7.Feature.SESSION_RECOVERY not in self.options.features:
                 return "the login didn't ask for session recovery (it isn't among connect(features=…))"
@@ -1013,16 +1223,16 @@ class ConnectionCore:
     def adopt(self, old: ConnectionCore) -> list[Send]:
         """After a recovery login, this connection continues the old connection's session (D-57). What recovery needs
         stays as the first login established it. The serial channels that were open on the old connection are opened
-        here, with the same ids and owners, and each is free. Under MARS each is opened with SYN, including the
-        channels that the server closed when the session ended."""
+        here, with the same application ids and owners, and each is free. Under MARS each gets a fresh wire id
+        and is opened with SYN, including the channels that the server closed when the session ended."""
         self.recovery = Recovery(old.recovery.initial, old.recovery.initial_states, dict(old.recovery.states))
         self._login = old._login
+        self._next_channel = old._next_channel
         sends = []
         for c in old.link.channels.values():
-            if c.closed and not c.closed_by_server:  # closed by the application: it stays closed
+            if c.closing or (c.closed and not c.closed_by_server):  # revoked by the application: it stays revoked
                 continue
-            channel = Channel(c.id, c.owner, Unpacker(self.options.record))
-            self.link.channels[c.id] = channel
+            channel = self.link.open_channel(c.id, c.owner)
             if self.link.mars:
                 sends.append(self.link.channel_frame(channel, MarsFlags.SYN))
         return sends
@@ -1032,13 +1242,17 @@ class ConnectionCore:
     def close(self) -> list[Send]:
         """Close every channel, then end TLS. TDS has no logout message: closing the connection ends the session."""
         self._step("close")
-        sends = [s for c in list(self.link.channels) for s in self.close_channel(c)]
+        # Connection destruction discards every outstanding conversation; unlike
+        # channel release, it never promises that a busy channel became reusable.
+        sends = []
+        for channel in self.link.channels.values():
+            channel.closing = channel.closed = True
         if self.link.tls:
             sends.append(Send(self.link.tls.close()))
         return sends
 
-    def feed(self, raw: bytes) -> list[Send | tuple[int, Packet | None]]:
-        """Bytes from the socket, once connected. The shell routes each packet to its channel's inbox."""
+    def feed(self, raw: bytes) -> list[Send | tuple[int, Packet | MarsData | None]]:
+        """Connected bytes: route packets/DATA frames to each channel's inbox."""
         return self.link.feed(raw)
 
     # ----------------------------------------------------------------------- helpers shared by the procedures

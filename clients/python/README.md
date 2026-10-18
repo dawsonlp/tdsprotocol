@@ -2,6 +2,8 @@
 
 A TDS 7.4 and 8.0 client whose code teaches the protocol, and which can display what it does while it runs. The design is in [`docs/design/`](../../docs/design/README.md).
 
+See [the release notes](CHANGELOG.md) for the corrections found during Rust development.
+
 ## Run it
 
 First, from the repository root, start the local SQL Server 2025 with its test certificate. The steps are in [`docker/macos/tls`](../../docker/macos/tls/README.md):
@@ -46,9 +48,56 @@ async with tds.Pool("127.0.0.1", 14325, user="sa", password=..., ssl_context=ssl
 
 `tds.connect(...)` returns a single `Connection`, which is used the same way. Requests are made only on a serial channel.
 
+For settings that can change, implement `ConfigService.read()` to return an
+immutable `tds.ConnectionConfig` and construct the pool once:
+
+```python
+class Settings:
+    async def read(self) -> tds.ConnectionConfig:
+        # Application-controlled async configuration/secret resolution.
+        return await load_current_sql_settings()
+
+pool = tds.Pool.from_config(
+    Settings(), size=5,
+    services=tds.ConnectionServices(ssl_context=context),
+    timeout=15.0, cleanup_timeout=5.0,
+)
+```
+
+Construction is lazy. Each physical opening/recovery reads once; idle reuse does
+not. Values include host, port, user/password, initial database and login defaults;
+TLS/callback bindings and pool limits remain fixed. Each pool compares its own
+accepted snapshot, including the credential. Known obsolete idle/returned
+connections are discarded; active borrowers continue. Login rejection fails
+loudly without retry/fallback, and a later corrected read can succeed through the
+same pool. Recovery accepts password-only changes and preserves original channel
+handles, including after pool closure. There is no watcher or monitoring thread.
+Readers must cooperate with async cancellation and must not reenter this pool.
+
+An undiscovered rotation can still fail the first SQL request carrying deferred
+session reset. The client reports that failure and never replays SQL. Source
+failures raise `ConfigurationError` with a safe phase/reason; inspecting
+`source_error` is explicit. See the [configuration API](tds/config.py).
+
+`new_password` is a distinct server-changing direct-login request. Pools reject
+it. A fully successful direct login retains the new credential for recovery and
+clears the request. Lost completion sets `password_change_uncertain` on the error
+and adds an exception note; cancellation likewise cannot undo a server change.
+
 `tds_version="8.0"` (or `strict=True`) starts TLS before anything else. The default is `"7.4"`, which agrees on encryption in the hello. In both cases the whole connection is encrypted. The certificate is checked with Python's `ssl.SSLContext`, passed as `ssl_context`. If the certificate must name a host other than the one connected to, `server_hostname` gives that name (D-10). [Connect › Options](../../docs/design/3-reference/connect.md#options) describes each option.
 
-`observe` receives what the running client does. It can be `observe.Printer(Level.OUTLINE)`, `observe.Printer(Level.FULL)` or any callable. `None` turns it off, which costs the least. `connection.observe` changes it between exchanges. `capture=tds.capture.Capture("session.jsonl")` records the conversation in a file, and `tds.capture.replay("session.jsonl", Printer(Level.FULL))` shows it again, offline, exactly as before. A capture holds query text and data. It holds the password only if it is asked to (D-12).
+`observe` receives what the running client does. It can be `observe.Printer(Level.OUTLINE)`, `observe.Printer(Level.FULL)` or any callable. `None` turns it off, which costs the least. `connection.observe` changes it between exchanges. `capture=tds.capture.Capture("session.jsonl")` records the conversation in a file, and `tds.capture.replay("session.jsonl", Printer(Level.FULL))` shows it again, offline, exactly as before. A capture holds query text and data. It holds the password only if it is asked to (D-12). Saved table inputs decode as `types.TableInput`, retaining their declaration and exact rows; they do not become result cells. The Rust development branch also reads these files with `tds --replay session.jsonl`.
+
+Each Capture belongs to one physical connection, even after detachment. Pools
+require `capture_factory`, a callable returning a new Capture with a distinct
+output per opened connection. Reusing the same transport across loans keeps its
+recording. Connect also supports the factory for separate files on routing and
+recovery; a direct capture refuses those transitions. The application owns and
+closes its capture resources. A failed live observer is disabled and its exception
+is available as `connection.observation_error`; database work and recording
+continue. A recording write/flush failure instead raises `tds.CaptureError` and
+discards the connection. Its `cause` retains the writer error. Sent SQL may still
+have executed; closing is not proof of rollback.
 
 `odbc=True`, the default, sets the login's ODBC flag, so the session starts with ODBC's defaults (ANSI options on, unlimited TEXTSIZE), as ODBC, .NET and JDBC clients get them. `odbc=False` gives the server's own defaults, which truncate large values to 4,096 bytes (D-9).
 
