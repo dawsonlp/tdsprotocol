@@ -10,6 +10,10 @@
   "outcome": "configure retention and distinguish controller, live SQL and memory-erasure evidence."
 };
   page.body = () => [
+    "<blockquote>",
+    "<p>Included in Python v0.3.0. The logs and manifest below retain the original",
+    "implementation checkpoint, before the release commit and version update.</p>",
+    "</blockquote>",
     "<p>Intent: give Python applications the D-66 trade-offs already agreed for Rust,",
     "without sharing plaintext keys between physical connections or pool borrowers.",
     "Transaction retention is the default; outside a transaction it becomes exchange",
@@ -187,6 +191,20 @@
     "source hashes, evidence hashes, commands, counts, test-function inventory,",
     "transport modes and evidence limits. Test-suite elapsed times are not CPU or",
     "throughput benchmarks.</p>",
+    "<h2 id=\"isolated-v0-3-0-release-verification\">Isolated v0.3.0 release verification</h2>",
+    "<p>The main-based Python-only release checkout independently passed <strong>866 tests,",
+    "13 Windows/Azure infrastructure skips</strong> in 148.29 seconds, including the",
+    "existing Python/.NET interoperability test. <a href=\"../docs/design/experiments/python-encryption-retention-evidence/release-main-suite.log\">Release-checkout log</a>.",
+    "Its selected source hashes match the original implementation evidence.</p>",
+    "<p>The first isolated run lacked ignored TLS fixtures for ten mock login/routing",
+    "tests. Existing local test certificate/key fixtures were linked into the",
+    "checkout, and the complete suite then passed; no product-code change was needed.",
+    "No key material was copied into Git or release assets.</p>",
+    "<p>The v0.3.0 wheel and source distribution build offline. All 34 packaged Python",
+    "modules match this checkout; an isolated installed wheel reports version 0.3.0,",
+    "imports the new API, passes CLI help and exercises all three retention options,",
+    "value encryption/decryption and owned-buffer cleanup. Checksums accompany the",
+    "GitHub release assets. Rust implementation files are absent from this release.</p>",
   ].join('\n');
   window.TDS.page(page);
 })();

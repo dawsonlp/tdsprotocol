@@ -1,0 +1,28 @@
+ssssssssss.............................................................. [  8%]
+......................................s................................. [ 16%]
+........................................................................ [ 24%]
+........................................................................ [ 32%]
+........................................................................ [ 40%]
+..........ss............................................................ [ 49%]
+........................................................................ [ 57%]
+........................................................................ [ 65%]
+........................................................................ [ 73%]
+........................................................................ [ 81%]
+........................................................................ [ 90%]
+........................................................................ [ 98%]
+...............                                                          [100%]
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_azure_live.py:75: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:90: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:105: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:116: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:136: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:147: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:158: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:165: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:180: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_azure_live.py:215: the Azure test infrastructure isn't up: infra/azure (terraform apply, then configure.py)
+SKIPPED [1] tests/test_certstore_windows.py:31: the Windows certificate store runs on the Azure SQL VM: infra/azure/windows-tests.sh
+SKIPPED [1] tests/test_kerberos_azure.py:32: Kerberos runs on the Azure runner: infra/azure/kerberos.sh
+SKIPPED [1] tests/test_kerberos_azure.py:44: Kerberos runs on the Azure runner: infra/azure/kerberos.sh
+866 passed, 13 skipped in 148.29s (0:02:28)

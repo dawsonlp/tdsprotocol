@@ -18,6 +18,7 @@ Read in order. Each part builds on the one before it.
 | A | [The Client](A-the-client.md) | How the code is built and what the running client shows | 10 min |
 | B | [Building the Client](B-building-the-client.md) | Where the code lives, the milestones, and how each is tested | 10 min |
 | C | [Roadmap](C-roadmap.md) | What comes after the milestones: conveniences, a Rust client, application drivers | 5 min |
+| Check | [Python Key Retention](experiments/python-encryption-retention.md) | Policy API, lifecycle boundaries, test scenarios and evidence | as needed |
 
 ## How every page is built
 

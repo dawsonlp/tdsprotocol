@@ -5,6 +5,9 @@
   const A = 'Agreed', P = 'Proposed', O = 'Open', X = 'Deferred';
 
   const records = [
+    { n: 66, s: A, t: 'Encryption key reuse defaults to the transaction; applications choose the tradeoff', link: ['python-encryption-retention'],
+      body: 'Transaction retention is the default, with exchange fallback in autocommit. Applications choose exchange scope or fixed-age reuse across transactions within one physical connection and exclusive pool lease, with independent local master/column settings and strict overrides. Hits never extend deadlines. Pool return/reset, context changes, failure/recovery and close clear/revoke keys. Expiry reloads without limiting transaction duration. Rust key-ownership development exposed the need to replace Python’s shared context cache (D-60). Python implements these choices in its SQL facade and clears owned mutable key buffers; Python/backend temporary copies and native provider memory remain outside that guarantee.',
+      why: 'The user requested explicit efficiency/security tradeoffs after examining repeated key work during Rust development.' },
     { n: 1, s: A, t: 'Documentation approach', body: 'Organize the docs by learning-science principles: Model → Worked Example → Reference → Decisions → Done When. Code and runtime observability use the same model and names.',
       why: 'Readers learn the overall structure first, then add the details to it. One model expressed three times is learned once.' },
     { n: 2, s: A, t: 'Protocol versions', body: 'TDS 7.4 and 8.0 only. Login fails with a clear error on anything lower.',

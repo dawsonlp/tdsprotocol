@@ -1,6 +1,6 @@
 # Python client release notes
 
-## Unreleased
+## 0.3.0 — 2026-10-18
 
 Implementing explicit key ownership and lifecycle handling in Rust exposed a
 necessary correction in the Python reference: decrypted keys were shared across
@@ -26,6 +26,30 @@ change; this release delivers the Python implementation.
 - Preserve the pending bulk continuation when row production fails before any
   data packet is sent. Awaited channel close must cancel/drain that preparation;
   unresolved connections cannot return to the pool or recover.
+
+### Compatibility and verification
+
+Transaction retention replaces the old shared context-wide default. Outside an
+explicit transaction it falls back to exchange retention. Select `Policy.time`
+for bounded reuse across transactions on one physical connection/pool lease.
+A per-exchange override does not retroactively erase entries retained by earlier
+exchanges; changing session defaults clears them. Direct `Encryption.cell_key`
+is uncached and caller-owned; close the returned key or use explicit session and
+exchange guards. Custom provider overrides and backends' bytes input contract
+are preserved.
+
+Development validation: **866 passed, 13 Windows/Azure infrastructure skips**,
+including independent Python/.NET Always Encrypted interoperability. Forty new
+live policy cases cover TDS 7.4/8.0 with plain/MARS. The thirteen skips are ten
+Azure checks, one Windows certificate-store check and two Azure Kerberos checks.
+The retained design, scenarios and raw evidence are linked from the Python README.
+Python/library temporary copies are outside the owned-buffer erasure guarantee.
+
+The isolated main-based v0.3.0 checkout independently passed **866 tests with 13
+skips** in 148.29 seconds. Wheel/source builds, all 34 packaged Python modules,
+isolated installed-wheel imports/version/CLI and all retention options were
+verified. The release contains Python changes and their documentation.
+
 
 ## 0.2.0 — 2026-10-18
 

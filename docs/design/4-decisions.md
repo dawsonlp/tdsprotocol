@@ -544,6 +544,17 @@ Python's TLS engine works entirely in memory (`ssl.MemoryBIO`), so the core driv
 
 ---
 
+**D-66 · Encryption key reuse defaults to the transaction; applications choose the tradeoff** · *Agreed 2026-10-18* · [Python implementation and evidence](experiments/python-encryption-retention.md)
+
+- Transaction scope is the default, with exchange fallback outside an explicit transaction. Retention never creates or extends a SQL transaction.
+- Applications can choose exchange scope or fixed maximum-age reuse across transactions/autocommit within one physical connection and exclusive pool lease. Hits do not extend the deadline. Local master and column policies are independent; strict overrides use separate scopes. Changing defaults between exchanges clears prior entries.
+- Pool return/reset, physical failure/recovery, context changes and close clear/revoke retained authority. Expired keys reload on demand rather than limiting transaction duration.
+- Implementing explicit Rust key ownership exposed the need to replace Python's earlier shared context cache (D-60). Python implements these policies in its transparent SQL facade. It overwrites owned mutable key buffers; Python/backend temporary copies and provider-owned native secrets remain outside that guarantee.
+
+*Why:* the user requested explicit efficiency/security tradeoffs after examining the repeated key work exposed by Rust development.
+
+---
+
 ## Proposed and open
 
 Nothing is proposed or open.
