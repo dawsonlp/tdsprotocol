@@ -73,7 +73,9 @@ client; the Rust implementation remains development work on `rust-client`.
   2025 with verified TLS, TDS 7.4/8.0 and plain/MARS. The skips are Azure (10),
   Kerberos (2) and Windows certificate store (1). This does not establish full
   cross-platform/failover acceptance. Release-checkout verification is recorded
-  in the GitHub release notes.
+  in the GitHub release notes. The isolated `main` release checkout also passed
+  **782 tests with 13 skips** in 117.39 seconds; the built wheel passed isolated
+  version/import/CLI checks, and its package source matches that checkout.
 
 ### Compatibility notes
 

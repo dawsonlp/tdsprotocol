@@ -6,6 +6,8 @@ A client for Microsoft's **Tabular Data Stream (TDS)** protocol, versions 7.4 an
 
 **Read the design online: [dawsonlp.github.io/tdsprotocol](https://dawsonlp.github.io/tdsprotocol/)**. It is an interactive guide to TDS and to this client, with byte-by-byte packet diagrams that show details when you hover over them. Begin with *The Model*, a five-minute read.
 
+**Python release:** [v0.2.0](https://github.com/dawsonlp/tdsprotocol/releases/tag/v0.2.0). See [the release notes](clients/python/CHANGELOG.md) for lifecycle, recording, recovery and exact-value corrections found during Rust development.
+
 **Status:** the Python client's milestones M1–M15, M17 and M18 are built. They cover TDS 7.4 and 8.0, every request and token, MARS, bulk load, transactions, session recovery, routing, Always Encrypted, and SQL Server, Windows and Entra ID logins. Next is M16, the convenience layer and the synchronous shell ([Done When](docs/design/5-done-when.md)).
 
 **[Roadmap](docs/design/C-roadmap.md):** conveniences for the standard patterns of use, then a Rust client built with the Python code and tests as its reference, then application drivers such as DB-API.

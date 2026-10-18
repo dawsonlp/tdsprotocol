@@ -64,7 +64,6 @@ What the client cannot do yet, or what has not been confirmed. Each is described
 
 | Gap | Where | Until |
 |---|---|---|
-| Replay can't decode a table-valued parameter's rows | [The Client §6](A-the-client.md#6--what-the-running-client-shows--agreed-d-12) | not scheduled |
 | Database mirroring's partner is tested only with constructed bytes, because SQL Server on Linux has no mirroring and the Windows test server was not mirrored | [Login Response](3-reference/login-response.md) | not scheduled |
 | Enhanced routing (ENVCHANGE 21, routing to a database) is not followed. The test server acknowledged the feature with 0, so enhanced routing was never observed | [Connect › Options](3-reference/connect.md#options) | a server that sends it |
 | Always Encrypted's enclaves run only without attestation. Microsoft Azure Attestation and Host Guardian Service are not built | [Always Encrypted › Enclaves](3-reference/always-encrypted.md#enclaves) | not scheduled |

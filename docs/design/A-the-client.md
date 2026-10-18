@@ -414,7 +414,7 @@ Every line is generated from the definitions; nothing is labeled separately for 
   - `replay("session.jsonl", Printer(Level.FULL))` decodes the packets with the same definitions and shows the identical view;
   - the login's password is zeroed unless `keep_password=True`;
   - query text and data stay;
-  - **not yet:** a table-valued parameter's rows can't be decoded on replay, because the driver can write them but has no definition for reading them yet. Replay shows that message's line, and says it can't decode it and why.
+  - saved table-valued inputs decode their declaration, default columns, sort/unique hints, column placement and exact rows as `types.TableInput`, separately from result cells (Python 0.2.0).
 - **The password stays hidden at full** unless an observer reveals it for the sessions it watches: `Printer(…, reveal_password=True)`.
 
 **Still to design** (carried over from the earlier draft):
