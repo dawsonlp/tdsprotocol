@@ -38,6 +38,63 @@ async fn fixture() -> (tokio::net::TcpListener, Arc<Source>, ConnectionServices)
     (listener, source, ConnectionServices::new(options.roots))
 }
 
+fn rejected_login(number: u32) -> Vec<u8> {
+    let mut body = number.to_le_bytes().to_vec();
+    body.extend([1, 14, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let mut token = vec![0xaa];
+    token.extend((body.len() as u16).to_le_bytes());
+    token.extend(body);
+    token
+}
+
+#[tokio::test]
+async fn authentication_refusal_rereads_once_and_only_reopens_for_changed_settings() {
+    for rejection in [18456, 18452] {
+        let (listener, source, services) = fixture().await;
+        let update = source.clone();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (mut peer, _) = Peer::await_login(socket, false).await;
+            update.value.lock().unwrap().password = "rotated-test-password".into();
+            peer.reply(&rejected_login(rejection)).await;
+            peer.expect_eof().await;
+            Peer::login_next(&listener, 0x74000004, false)
+                .await
+                .drain_to_eof()
+                .await;
+        });
+        let pool = Pool::from_config(source.clone(), 1, services, PoolPolicy::default()).unwrap();
+        let lease = pool.acquire().await.unwrap();
+        assert_eq!(source.calls.load(Ordering::SeqCst), 2);
+        drop(lease);
+        pool.close().await.unwrap();
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn unchanged_refused_credentials_are_not_retried() {
+    for rejection in [18456, 18452] {
+        let (listener, source, services) = fixture().await;
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (mut peer, _) = Peer::await_login(socket, false).await;
+            peer.reply(&rejected_login(rejection)).await;
+            peer.expect_eof().await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let pool = Pool::from_config(source.clone(), 1, services, PoolPolicy::default()).unwrap();
+        assert!(pool.acquire().await.is_err());
+        assert_eq!(source.calls.load(Ordering::SeqCst), 2);
+        pool.close().await.unwrap();
+        server.await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn failed_read_is_redacted_and_a_later_read_can_succeed_on_the_same_pool() {
     let (listener, source, services) = fixture().await;

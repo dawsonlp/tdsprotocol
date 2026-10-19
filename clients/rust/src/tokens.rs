@@ -95,6 +95,7 @@ impl Done {
 /// The first slice exposes records in wire order; it does not infer operations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Record {
+    Sspi(crate::auth::Token),
     ReturnStatus(i32),
     OutputValue(OutputValue),
     FeatureAck(Vec<(u8, Vec<u8>)>),
@@ -453,6 +454,7 @@ impl Decoder {
         ) {
             let name = match self.pending.first().copied() {
                 Some(0xad) => "LOGINACK",
+                Some(0xed) => "SSPI",
                 Some(0xaa) => "ERROR",
                 Some(0xab) => "INFO",
                 Some(0x81) => "COLMETADATA",
@@ -483,6 +485,13 @@ impl Decoder {
             if let (Some(node), Err(error)) = (&mut self.inspection, &parsed) {
                 node.issue = Some(error.to_string());
             }
+            if self.pending.first() == Some(&0xed)
+                && let Some(node) = &mut self.inspection
+            {
+                node.sensitive = true;
+                node.raw.fill(0);
+                node.shown = "[redacted]".into();
+            }
         }
         let record = match parsed {
             Ok(record) => record,
@@ -493,6 +502,10 @@ impl Decoder {
             Err(e) => return Err(e),
         };
         let n = r.offset;
+        if matches!(record, Record::Sspi(_)) {
+            use zeroize::Zeroize;
+            self.pending[..n].zeroize();
+        }
         if let Record::Columns(columns) = &record {
             self.columns = Some(columns.clone());
             if self.pending.starts_with(&[0x81, 0xff, 0xff]) {
@@ -629,6 +642,17 @@ impl Decoder {
     fn decode(&self, r: &mut Reader<'_>) -> Result<Record> {
         let tag = r.field("token", |r| r.u8())?;
         match tag {
+            0xed => {
+                let length = usize::from(r.field("length", |r| r.u16())?);
+                if length > crate::auth::MAX_TOKEN {
+                    return Err(Error::new(ErrorKind::Limit("SSPI token")));
+                }
+                let token = r.field("security token", |r| {
+                    crate::auth::Token::new(r.take(length)?.to_vec())
+                });
+                r.sensitive();
+                Ok(Record::Sspi(token?))
+            }
             0xa3 => {
                 classification::read(r, self.classification_version).map(Record::Classification)
             }

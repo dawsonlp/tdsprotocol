@@ -8,6 +8,8 @@ pub const TDS_7_4: u32 = 0x74000004;
 
 /// No Debug implementation: this value holds authentication material.
 pub struct Login {
+    pub integrated_security: bool,
+    pub sspi: crate::auth::Token,
     pub user: String,
     pub password: String,
     pub new_password: String,
@@ -37,6 +39,8 @@ pub struct Login {
 impl Default for Login {
     fn default() -> Self {
         Self {
+            integrated_security: false,
+            sspi: Default::default(),
             user: String::new(),
             password: String::new(),
             new_password: String::new(),
@@ -92,6 +96,18 @@ impl Login {
         Ok(features)
     }
     pub fn encode(&self) -> Result<Vec<u8>> {
+        if self.integrated_security
+            && (!self.user.is_empty() || !self.password.is_empty() || !self.new_password.is_empty())
+        {
+            return Err(Error::new(ErrorKind::Parameter(
+                "SQL credentials with integrated login",
+            )));
+        }
+        if !self.integrated_security && !self.sspi.is_empty() {
+            return Err(Error::new(ErrorKind::Parameter(
+                "SSPI token without integrated login",
+            )));
+        }
         let features = self.requested_features()?;
         let mut out = vec![0; 94];
         out[4..8].copy_from_slice(&TDS_7_4.to_le_bytes());
@@ -100,6 +116,9 @@ impl Login {
         out[16..20].copy_from_slice(&self.process_id.to_le_bytes());
         out[24] = 0xe0; // report database/language changes; initial database must succeed
         out[25] = 1 | if self.odbc { 2 } else { 0 }; // initial language must succeed; ODBC session defaults
+        if self.integrated_security {
+            out[25] |= 0x80;
+        }
         out[26] = if self.read_only_intent { 0x20 } else { 0 };
         out[27] = u8::from(!self.new_password.is_empty()); // fChangePassword
         out[32..36].copy_from_slice(&0x0409_u32.to_le_bytes()); // client LCID, as in Python; session language is separate
@@ -146,6 +165,11 @@ impl Login {
         for at in [78, 82, 86] {
             out[at..at + 2].copy_from_slice(&end);
         }
+        out[80..82].copy_from_slice(&(self.sspi.as_bytes().len() as u16).to_le_bytes());
+        out.extend(self.sspi.as_bytes());
+        let password_at =
+            u16::try_from(out.len()).map_err(|_| Error::new(ErrorKind::Limit("LOGIN7 offsets")))?;
+        out[86..88].copy_from_slice(&password_at.to_le_bytes());
         let count = u16::try_from(self.new_password.encode_utf16().count())
             .map_err(|_| Error::new(ErrorKind::Limit("LOGIN7 new password")))?;
         out[88..90].copy_from_slice(&count.to_le_bytes());

@@ -1,9 +1,28 @@
 # Rust client handover
 
-Prepared 2026-10-18. Branch: `rust-client`. Committed baseline `6e2da04` contains
-the implementation and interrupted-I/O tests/acceptance records. Field inspection,
-roadmap decisions and the local completion continuation below are subsequent
-working-tree work.
+## GCP lab closed — 2026-10-19 04:29 UTC
+
+The owner authorized teardown after reviewing the campaign. Terraform destroyed
+the lab resources and dedicated project `tds-rust-auth-77681f69a4`. Independent
+cloud inventory found zero VMs, disks, reserved IPs, snapshots, forwarding rules,
+routers, firewalls, subnets, VPCs and storage buckets. The campaign guest service
+account was removed; only Google's default Compute service account remained
+before project shutdown. Cloud DNS's API was disabled, so its zone inventory was
+unavailable rather than reported as a successful empty query.
+
+At **04:29:52 UTC**, the project was `DELETE_REQUESTED`, billing was disabled and
+the billing account was detached. Both lab and project Terraform states were
+empty; the earlier default-network cleanup state was also empty. This is verified
+shutdown, not immediate permanent deletion. Actual billed total remains unverified.
+Protected test evidence, cleanup logs, final inventory and local states are
+retained under `infra/gcp/`; do not reuse the closed campaign's inputs/expiry.
+Earlier descriptions of a running lab below are historical. Recreating a lab
+requires a new campaign; a clean end-to-end deployment rehearsal remains open.
+
+Prepared 2026-10-18. Branch: `rust-client`. Commit `452d458` contains the local
+Rust completion checkpoint, field inspection, encryption, tests and retained
+acceptance evidence, and has been pushed to `origin/rust-client`. The earlier
+`6e2da04` implementation/interrupted-I/O checkpoint is historical.
 Inspect `git status` before editing to distinguish any further changes.
 Python key-retention changes are committed and released as **v0.3.0** on `main`
 and annotated tag `v0.3.0` at `1e974dc`. The Rust implementation remains unpublished.
@@ -58,6 +77,103 @@ sequential. Rust release/publication is a separate future task.
 
 ## Latest checkpoint: transparent local-key Always Encrypted
 
+### Active Windows authentication continuation — 2026-10-19 UTC
+
+The owner authorized implementation and bringing up the GCP lab, with a **$10
+total campaign ceiling including retries**, a $1 efficiency target and retention
+through review/fix/retest. Work remains uncommitted on `rust-client`.
+
+`integrated-auth` adds opaque bounded SSPI continuations, zeroizing owned tokens/
+credentials, portable `sspi` 0.23.0 NTLM/Kerberos/Negotiate, explicit TCP KDC I/O,
+TLS endpoint binding, fresh recovery contexts and credential-source reread on
+authentication refusal. Native Windows SSPI is isolated in `native-sspi`, keeping
+the protocol crate's unsafe-code prohibition. CLI options and the stdin-only
+`login_probe` example are included. Native blocking calls can outlive cancellation;
+counted workers/reapers own eventual cleanup and cannot install late results.
+
+The latest full local all-feature run recorded **252 passed, 61 live tests
+ignored**; the subsequent 18452/18456 configuration cases and strict Clippy pass.
+Focused tests cover verified-TLS NTLM, early LOGINACK refusal, login/KDC deadlines,
+SSPI fragmentation/round limits, per-message completion and replay privacy.
+Native MSVC builds and **64 distinct real Windows SQL Server login/transport
+combinations pass** across macOS portable, Linux portable, Windows portable and
+Windows signed-in native SSPI. See the [live evidence checkpoint](docs/design/experiments/rust-gcp-authentication-evidence.md)
+for the exact conditions, lifecycle/Browser/encryption results and unmet gates.
+Native MSVC full regression also passed 252 tests, 61 ignored, zero failures.
+Native NTLM/Kerberos passed eight authenticated lifecycle combinations. Local-key
+AE passed all four transports from macOS NTLM and Linux Kerberos, plus native
+Windows Kerberos with TDS 8.0/MARS. SQL was updated in place to CU27 (16.0.4295.3)
+to correct Microsoft's documented RTM strict-mode RPC defect; all 64 login
+combinations were repeated successfully afterward. Strict native workspace
+Clippy passes. This does not close the remaining acceptance gates below.
+
+**Owner decision: document and defer dependency changes.** Portable NTLM remains
+available with its documented retained-key erasure limitation. SQL Extended
+Protection is unsupported; neither Required policy nor the tested Allowed/NTLM
+combination passed. No dependency forks/patch sets or TLS backend changes are
+planned. This is an accepted scope limitation, not a security-correctness claim.
+See the [provider review](docs/design/experiments/rust-authentication-provider-review.md),
+which links two unsubmitted upstream drafts, and the
+[cross-client findings](docs/design/experiments/rust-python-authentication-limitations.md)
+for documented Python follow-up work. Those Python findings are not fixed.
+The SQL experiment was restored to `ExtendedProtection=0`; verified TLS encryption
+remains required. Other campaign acceptance and teardown gates remain open.
+The [follow-up development plan](docs/design/experiments/gcp-authentication-development-plan.md)
+is approved and in progress: Python capture privacy, provider completion/bounds,
+SQL credential refresh, a gated Windows configuration design, remaining Rust
+platform acceptance, and cross-client testing/cleanup. The
+[follow-up evidence](docs/design/experiments/gcp-authentication-follow-up-evidence.md)
+records implemented Python privacy, sanitized replay metadata, token/round/message
+bounds and SQL source reread/retry. Local Python: 532 passed, 379 live/Azure cases
+deselected. macOS Rust: 253 passed/61 ignored; native Windows: 254 passed/61 ignored.
+Native Windows strict workspace Clippy passes. Five existing Rust live recovery/
+rotation functions and eight Python live configuration functions passed on GCP.
+Real native cancellation observed outstanding workers and eventual retirement
+in four opening profiles. The previously listed native cancellation/SQL rotation
+gates must be read with this newer evidence.
+
+Two decisions remain pending in the owner input panel: custom-provider completion
+compatibility and Python Windows credential-source representation. The owner
+deferred built-in synchronous provider isolation to the
+[roadmap backlog](docs/design/C-roadmap.md#backlog--python-kerberos-opening-deadline).
+A Linux test configured for 1500 ms remained
+blocked in pyspnego startup when its process was stopped at 4010 ms. This is an
+unfixed deadline defect, not a successful timeout check. See the
+[concrete API proposal](docs/design/experiments/python-windows-authentication-contract.md).
+Final SSPI routing is corrected, including coalesced LOGINACK and refusal of
+invalid final tokens/extra output. Requiring explicit provider completion and
+Python Windows configuration still need the owner decisions.
+Windows lifecycle reruns passed after two task timeouts; the cause remains
+unconfirmed and the diagnostics/repeat results are retained. No teardown occurred.
+
+Terraform project: `tds-rust-auth-77681f69a4`, region `us-central1`, zone
+`us-central1-a`, isolated network and DC/SQL/Linux/separate Windows VMs. Billing
+is linked to the same verified existing account; its ID and credentials stay in
+ignored inputs. Absolute VM DELETE expiry: **2026-10-19 04:43:47.946868 UTC**.
+The paid clock began **00:47:35.142494 UTC** and is retained in the protected cost
+ledger. Thirteen local cost/plan/configuration/certificate tests pass. The modeled full window plus
+contingency/cleanup reserve stays below $10; actual billing is not yet verified.
+
+An initial metadata update unexpectedly replaced fresh VMs because the provider
+treated equivalent `Z` and `+00:00` expiry strings as different ForceNew values.
+This happened before domain setup or credentials were delivered. Canonical `Z`
+inputs plus a tested guard now refuse *all* delete/replacement actions in apply.
+The subsequent plan preserved existing VMs and added only the Windows runner.
+Do not blindly extend expiry through Terraform: this provider marks that field
+ForceNew. Review an in-place scheduling operation and reconcile state instead.
+
+Use `infra/gcp/lab.py` and `configure.py`, protected `gcp.json`, `secrets/`, cost
+ledger and Terraform states. Do not print their credentials or delete state.
+DC/domain, SQL Developer, SPNs, verified CA and both runners are configured.
+`campaign.py` runs asserted smoke probes; `runner.py` refreshes dirty-source
+snapshots and builds current probes. Protected artifacts include the accepted
+64-case set, source hashes, failure cases and the Extended Protection experiment.
+Verify live state before resuming. Normal
+teardown follows reviewed acceptance/evidence export, not a test process exit.
+Expiry and budget remain safety limits; warn before they force cleanup.
+
+### Previously completed local encryption checkpoint
+
 The local SQL integration is implemented in [design O](docs/design/O-rust-transparent-encryption.md):
 version-one negotiation and wire metadata, exact normalization, fresh parameter
 descriptions, named parameter encryption, authenticated rows/outputs and owned
@@ -86,10 +202,24 @@ borrowed plaintext chunk readers are not provided; crypto values are bounded at
 16 MiB. This is the finite local AE scope, not full Python parity.
 
 Next is the [Windows/provider campaign](docs/design/P-windows-authentication-campaign.md).
-The owner has been asked to approve the optional portable/native SSPI provider
-approach and supply an explicit GCP project/region plus maximum spend/window.
-No authentication dependency, Windows-authentication implementation, cloud
-resource, Rust release or new commit is claimed. Changes stay on `rust-client`.
+The owner selected Terraform setup/teardown in `infra/gcp/`, beside `infra/azure/`.
+The [GCP plan](infra/gcp/README.md) defines six iterations, the additional-login
+test matrix, a proposed separate Windows runner for remote native SSPI, cost
+inputs and independently verified teardown. This is planning, not deployed IaC.
+The owner clarified that Terraform must create a new dedicated GCP project and
+that portable/native authentication providers are to be tested, with support
+determined by evidence. The owner supplied a **$10 total campaign ceiling**,
+including retries, with **$1 or less as the target**, and requested updates.
+Routine naming/location/sizing choices are delegated. Retain the lab through
+reviewed acceptance and fix/retest; do not tear down after the first suite or
+recoverable failure. The earlier one-hour expiry is superseded: price a safety
+deadline covering setup/test/review/retest within the $10 ceiling and warn before
+budget/expiry forces cleanup. The previous project's billing
+account is to be reused, but its ID/parent, permissions and final prices remain
+unverified. No paid apply until those checks and cumulative cost preflight pass.
+GCP CLI login is available; Terraform credentials and
+deployment permissions remain unverified. No authentication dependency,
+Windows-authentication implementation, cloud resource or Rust release is claimed.
 The local checklist remains excluded from Git. Scoped Rust is not done until
 Windows acceptance and verified lab teardown are complete.
 
@@ -155,7 +285,8 @@ Retained counters, raw logs, source hashes and cost JSON are linked from evidenc
 Those local SQL integration requirements are now completed by the latest
 checkpoint above. Scoped Rust remains unfinished until Windows acceptance.
 
-All source changes remain uncommitted. No GCP resources have been created.
+That local source checkpoint is now committed in `452d458`. No GCP resources
+have been created.
 
 ## Previous slice: connection/scalar-query field inspection
 
@@ -294,8 +425,11 @@ Timing is part of local completion rather than the overall roadmap objective.
 See [the roadmap](docs/design/C-roadmap.md) for gates and cost/lifecycle requirements.
 No GCP resources have been provisioned. `gcloud` and Terraform are installed;
 the current gcloud default project belongs to another production workload and
-must not be used implicitly. A target project/region and finite cost/test window
-are still needed before deployment. Cloud permissions/quotas are unverified.
+must not be used. The owner selected a new dedicated project, the previous
+project's billing account and a $10 total ceiling/$1 target. Keep one lab through
+review/fix/retest, with a budget-checked safety expiry; verify project/billing
+permissions and final prices before apply.
+Cloud permissions/quotas are unverified.
 
 The existing server is `mssql-2025`, `127.0.0.1:14325`, database `tds_test`.
 Recheck availability. Use existing Compose and ignored credentials/test CA; do not

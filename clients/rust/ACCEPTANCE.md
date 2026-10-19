@@ -1,11 +1,23 @@
 # Rust client development: evidence
 
-Observed locally through 2026-10-18, branch `rust-client`. This is a development slice,
+Observed locally through 2026-10-19, branch `rust-client`. This is a development slice,
 not a release or a claim of Python connection-package parity.
 
-The check table is current. The sections below retain earlier checkpoints;
-[transparent Always Encrypted](#transparent-always-encrypted) is the latest
-checkpoint; the key-policy and earlier completion sections are historical.
+The latest [Windows authentication checkpoint](../../docs/design/experiments/rust-gcp-authentication-evidence.md)
+records the new provider implementation, 64 live login combinations against
+Windows SQL Server 2022 CU27, authenticated lifecycle/encryption evidence and
+two documented security dependency limitations, accepted as scope deferrals. The
+[follow-up report](../../docs/design/experiments/gcp-authentication-follow-up-evidence.md)
+records **253 passed, 61 ignored** on macOS and **254 passed, 61 ignored** on
+native Windows; strict Clippy passed on both. Before PR submission, the macOS
+all-feature suite, strict Clippy, formatting, Python non-live suite (**532 passed,
+379 deselected**) and infrastructure checks (**13 passed**) passed again.
+The GCP lab and project were subsequently destroyed and independently verified;
+remaining acceptance and release limitations are retained in the support matrix.
+
+The table and sections below retain the earlier local encrypted-client
+checkpoint and its separate Docker-backed evidence. Their counts are historical;
+they do not claim that all ignored Docker functions ran against the GCP lab.
 
 ## Environment
 

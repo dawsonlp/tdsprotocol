@@ -31,6 +31,8 @@ Read in order. Each part builds on the one before it.
 | N | [Encryption Policy Implementation](N-encryption-policy-implementation.md) | Implemented key service, ownership, deadlines, worker cancellation and driver lifecycle link | as needed |
 | O | [Rust Transparent Always Encrypted](O-rust-transparent-encryption.md) | Implemented wire/value/parameter/result adapter and finite local SQL acceptance | as needed |
 | P | [Windows Authentication Campaign](P-windows-authentication-campaign.md) | Provider proposal, missing deployment constraints and transient GCP acceptance/teardown gates | as needed |
+| Plan | [GCP Authentication Corrections](experiments/gcp-authentication-development-plan.md) | Six iterations for Python fixes, shared authentication parity, remaining Rust acceptance and verified cleanup; dependency changes remain deferred | as needed |
+| Check | [GCP Follow-up Evidence](experiments/gcp-authentication-follow-up-evidence.md) | Implemented corrections, Windows runtime results, retained failures and remaining API/worker choices | as needed |
 | Check | [Rust SQL Encryption Evidence](experiments/rust-transparent-encryption.md) | Independent .NET, lifecycle, fault and capture boundaries; repeatable regression results | as needed |
 | Check | [Encryption Policy Scenarios](experiments/encryption-policy-scenarios.md) | Named synthetic, controlled-peer and live SQL lifecycle acceptance scenarios and their evidence limits | as needed |
 | Check | [Encryption Policy Evidence](experiments/encryption-policy-evidence.md) | Retained counters, regression results, native cleanup review, driver observations and actual service cost | as needed |

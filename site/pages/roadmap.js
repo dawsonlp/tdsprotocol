@@ -18,6 +18,9 @@
       ])}
       <p>Phase 3 depends on phase 2. Rust does not depend on completing Python M16.</p>
 
+      <h3 id="backlog--python-kerberos-opening-deadline">Backlog · Python Kerberos opening deadline</h3>
+      <p><b>Deferred by the owner; unfixed.</b> An unreachable KDC blocked synchronous pyspnego startup beyond a 1500 ms opening deadline; the watchdog stopped the process at 4010 ms. Proposed correction: bounded workers with serialized context calls, retained ownership of unfinished native work and rejection of late results. Acceptance covers prompt caller timeout, event-loop responsiveness, cancellation/late cleanup, worker bounds, shutdown behavior and live Kerberos regression checks. Caller timeout cannot forcibly cancel a native call. Details and retained evidence are linked from the repository roadmap.</p>
+
       <h2 id="1-a-rust-client">1 · A Rust client</h2>
       <p><b>Goal:</b> a second client that follows the same design in Rust. Its code teaches the protocol as the Python code does, with the same names, and links to the same reference pages.</p>
       <p><b>Development path:</b> establish the local Python baseline, analyze its code, agree ownership/permissions and exact representations, then implement Rust in small tested slices. The ${L('rust', 'Rust development plan')} begins with those rules; the ${L('python-baseline', 'Python baseline')} separates offline, local-live and remote validation.</p>

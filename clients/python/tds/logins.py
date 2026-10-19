@@ -19,8 +19,28 @@ including routed and recovered connections, begins its own exchange of tokens.
 """
 
 import enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Protocol
+
+MAX_TOKEN = 48 * 1024  # driver resource limits, not TDS protocol maxima
+MAX_ROUNDS = 8         # includes the initial provider step
+MAX_LOGIN_MESSAGE = 64 * 1024
+
+
+def _redact_authentication(node):
+    """Copy an inspection tree without SSPI payloads or ancestor raw copies.
+
+    Decoded records used by the provider remain untouched. Safe sibling fields
+    such as LOGINACK remain inspectable even when they share the same message.
+    """
+    def visit(item, hidden=False):
+        hidden = hidden or item.name == "SSPI"
+        children = [visit(child, hidden) for child in item.children]
+        contains = hidden or any(secret for _, secret in children)
+        return (replace(item, raw=bytes(len(item.raw)) if contains else item.raw,
+                        shown="authentication payload hidden" if hidden else item.shown,
+                        children=[child for child, _ in children]), contains)
+    return visit(node)[0] if node is not None else None
 
 
 class SecurityExchange(Protocol):

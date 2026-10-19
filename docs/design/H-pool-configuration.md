@@ -10,6 +10,14 @@ bounded failures. Later attempts can succeed after an operator corrects the
 source. Neither client discovers an authoritative password-change event or
 changes the server password on behalf of a pool.
 
+GCP follow-up, 2026-10-19: configured Python SQL openings now match Rust's
+recognized 18452/18456 refusal handling: reread once, reopen once only when the
+snapshot changed, and retain one absolute deadline. Neither client retries
+application SQL. Current Python Windows configuration and provider scheduling
+remain separate decisions; SQL refresh does not establish those capabilities.
+See the [follow-up evidence](experiments/gcp-authentication-follow-up-evidence.md)
+and [API proposal](experiments/python-windows-authentication-contract.md).
+
 **Status, 2026-10-17:** the user approved this design and authorized implementation.
 Both clients now implement the SQL configuration source, snapshot comparison,
 opening/recovery reads and retirement rules below. The source is supplied by the

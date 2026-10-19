@@ -1,5 +1,24 @@
 # Python client release notes
 
+## Unreleased — GCP authentication follow-up
+
+Rust/GCP interoperability testing exposed shared-client corrections:
+
+- Redact incoming Windows-login payloads in default captures and SSPI copies in
+  inspection/replay. Preserve safe login/feature evidence without reconstructing
+  omitted authentication tokens. Sanitize provider-start/step error diagnostics.
+- Process final SSPI tokens alongside LOGINACK; refuse invalid final tokens,
+  output after server acceptance and duplicate challenges.
+- Bound Windows authentication to 48 KiB tokens, eight provider steps including
+  the initial step, and 64 KiB assembled login replies.
+- On configured SQL pool opening refusal (18452/18456), reread credentials once
+  and reopen only for changed settings within the original deadline. Never
+  replay application SQL.
+
+The [follow-up evidence](../../docs/design/experiments/gcp-authentication-follow-up-evidence.md)
+records remaining completion/configuration/worker decisions and the failed
+blocking-provider deadline case. This work is not a released version.
+
 ## 0.3.0 — 2026-10-18
 
 Implementing explicit key ownership and lifecycle handling in Rust exposed a

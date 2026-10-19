@@ -96,11 +96,22 @@ impl Peer {
         Self::await_login_protocol(socket, mars, pem, ProtocolVersion::V8_0).await
     }
     pub async fn await_login_protocol(
-        mut socket: TcpStream,
+        socket: TcpStream,
         mars: bool,
         pem: &[u8],
         protocol: ProtocolVersion,
     ) -> (Self, Vec<u8>) {
+        let mut peer = Self::secure_protocol(socket, mars, pem, protocol).await;
+        let (kind, login) = peer.message().await;
+        assert_eq!(kind, packet::LOGIN);
+        (peer, login)
+    }
+    pub async fn secure_protocol(
+        mut socket: TcpStream,
+        mars: bool,
+        pem: &[u8],
+        protocol: ProtocolVersion,
+    ) -> Self {
         if protocol == ProtocolVersion::V7_4 {
             assert_eq!(raw_message(&mut socket).await.0, packet::HELLO);
             socket
@@ -166,9 +177,7 @@ impl Peer {
             assert_eq!(peer.message().await.0, packet::HELLO);
             peer.reply(&prelogin::encode_with_mars(mars)).await;
         }
-        let (kind, login) = peer.message().await;
-        assert_eq!(kind, packet::LOGIN);
-        (peer, login)
+        peer
     }
     pub fn tls_server_name(&self) -> Option<&str> {
         self.tls.server_name()

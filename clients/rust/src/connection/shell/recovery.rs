@@ -35,6 +35,21 @@ pub(super) fn protocol_core(
     login_name: Option<&str>,
     data: Option<Vec<u8>>,
 ) -> Result<ConnectionCore> {
+    if options.windows_auth.is_some() {
+        #[cfg(not(feature = "integrated-auth"))]
+        return Err(Error::new(ErrorKind::Unsupported(
+            "integrated-auth feature is disabled",
+        )));
+        #[cfg(feature = "integrated-auth")]
+        if !options.user.is_empty()
+            || !options.password.is_empty()
+            || !options.new_password.is_empty()
+        {
+            return Err(Error::new(ErrorKind::Parameter(
+                "SQL credentials with integrated login",
+            )));
+        }
+    }
     let name = ServerName::try_from(
         options
             .server_name
@@ -51,6 +66,8 @@ pub(super) fn protocol_core(
         })?,
     };
     let login = Login {
+        integrated_security: options.windows_auth.is_some(),
+        sspi: Default::default(),
         user: options.user.clone(),
         password: options.password.clone(),
         new_password: options.new_password.clone(),
@@ -108,6 +125,7 @@ async fn physical_recovery(
             .at(Step::Configuration, Execution::NotSent));
         }
         options.password.clone_from(&candidate.password);
+        options.windows_auth.clone_from(&candidate.windows_auth);
         options.new_password.clear();
         Some(candidate)
     } else {
@@ -131,10 +149,35 @@ async fn physical_recovery(
     core.observe_recovery(false);
     core.observe_start()?;
     let outcome = async {
+        #[cfg(feature = "integrated-auth")]
+        let mut authentication: Option<crate::auth::Context> = None;
         let mut socket = TcpStream::connect((options.host.as_str(), options.port)).await?;
         socket.set_nodelay(true)?;
         let mut input = [0; 16384];
         loop {
+            #[cfg(feature = "integrated-auth")]
+            if let Some(challenge) = core.take_authentication_request() {
+                if authentication.is_none() {
+                    authentication = Some(crate::auth::Context::new(
+                        options.windows_auth.as_ref().ok_or_else(|| {
+                            Error::new(ErrorKind::State("missing authentication provider"))
+                        })?,
+                        &options.host,
+                        options.port,
+                    )?);
+                }
+                let binding = core.authentication_binding()?;
+                let (token, complete) = timeout_at(
+                    deadline,
+                    authentication
+                        .as_mut()
+                        .expect("new context")
+                        .step(challenge, &binding),
+                )
+                .await
+                .map_err(|_| Error::new(ErrorKind::Timeout))??;
+                core.provide_authentication_token(token, complete)?;
+            }
             deliver_traces(&mut core, &mut observer, &mut capture, endpoint, began)?;
             socket.write_all(&core.take_output()).await?;
             if core.is_ready() {

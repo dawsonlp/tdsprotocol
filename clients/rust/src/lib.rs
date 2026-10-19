@@ -9,6 +9,7 @@
 #[cfg(test)]
 extern crate self as tds_client;
 
+pub mod auth;
 pub mod browser;
 pub mod capture;
 pub mod config;

@@ -59,6 +59,7 @@ pub trait ConfigService: Send + Sync {
 /// an application's separate clone cannot change an accepted or opening value.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConnectionConfig {
+    pub windows_auth: Option<crate::auth::WindowsAuth>,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -93,6 +94,7 @@ impl ConnectionConfig {
     ) -> Self {
         Self {
             host: host.into(),
+            windows_auth: None,
             port,
             user: user.into(),
             password: password.into(),
@@ -114,13 +116,22 @@ impl ConnectionConfig {
         }
     }
     pub fn validate(&self) -> ConfigResult<()> {
+        if self.windows_auth.is_some() && (!self.user.is_empty() || !self.password.is_empty()) {
+            return Err(ConfigError::new(
+                ConfigPhase::Validation,
+                "SQL credentials with integrated login",
+            ));
+        }
         if self.vector_support > 2 || self.data_classification > 2 {
             return Err(ConfigError::new(
                 ConfigPhase::Validation,
                 "unsupported requested feature version",
             ));
         }
-        if self.host.is_empty() || self.port == 0 || self.user.is_empty() {
+        if self.host.is_empty()
+            || self.port == 0
+            || (self.user.is_empty() && self.windows_auth.is_none())
+        {
             return Err(ConfigError::new(
                 ConfigPhase::Validation,
                 "host/user must be nonempty and port nonzero",
@@ -131,6 +142,12 @@ impl ConnectionConfig {
     pub fn compatible_with(&self, previous: &Self) -> bool {
         let mut refreshed = self.clone();
         refreshed.password.clone_from(&previous.password);
+        match (&self.windows_auth, &previous.windows_auth) {
+            (Some(current), Some(old)) if current.compatible_with(old) => {
+                refreshed.windows_auth.clone_from(&previous.windows_auth)
+            }
+            _ => {}
+        }
         refreshed == *previous
     }
 }

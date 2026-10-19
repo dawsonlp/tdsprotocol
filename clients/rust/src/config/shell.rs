@@ -32,6 +32,7 @@ impl ConnectionServices {
     }
     pub(crate) fn options(&self, c: &ConnectionConfig, p: PoolPolicy) -> ConnectOptions {
         ConnectOptions {
+            windows_auth: c.windows_auth.clone(),
             host: c.host.clone(),
             port: c.port,
             user: c.user.clone(),
@@ -78,6 +79,7 @@ impl ConnectionConfig {
     pub fn from_options(o: &ConnectOptions) -> Self {
         Self {
             host: o.host.clone(),
+            windows_auth: o.windows_auth.clone(),
             port: o.port,
             user: o.user.clone(),
             password: o.password.clone(),

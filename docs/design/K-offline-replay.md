@@ -9,6 +9,17 @@ Approved iteration, 2026-10-18. The existing unversioned JSONL format remains
 readable. This iteration does not change capture writers or introduce a new
 schema. A future incompatible format requires an explicit version decision.
 
+GCP follow-up, 2026-10-19: Python now omits incoming Windows-login packet bodies
+by default and marks packet lines with `redacted: "windows-login"`. Valid parsed
+login events may carry additive base64 `safe_login_tokens`: SSPI payloads are
+zeroed before serialization, while non-secret login/feature records remain.
+Current Python/Rust readers restore those typed records and negotiation context,
+while reporting that authentication payloads are unavailable. The supplemental
+records are not reconstructed authentication tokens or proof of server/provider
+completion. Older recordings remain readable; readers ignoring the new optional
+fields may lack negotiation context after raw authentication redaction. See the
+[follow-up evidence](experiments/gcp-authentication-follow-up-evidence.md).
+
 ## Representation
 
 One recording represents one physical connection. Its application channel IDs

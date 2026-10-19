@@ -81,6 +81,7 @@ impl Observer {
 /// No callback, socket, task or clock is stored here.
 #[derive(Default)]
 pub(crate) struct Observations {
+    pub(crate) mask_login: bool,
     pub level: Level,
     pub capture: bool,
     pub keep_password: bool,
@@ -223,7 +224,15 @@ impl Observations {
         }
     }
     pub fn record(&mut self, channel: Option<u64>, record: &Record) {
-        let inspection = (self.level == Level::Full).then(|| Inspection::Record(record.clone()));
+        let inspection = (self.level == Level::Full).then(|| {
+            Inspection::Record(match record {
+                Record::Sspi(token) => Record::Sspi(
+                    crate::auth::Token::new(vec![0; token.as_bytes().len()])
+                        .expect("bounded token"),
+                ),
+                _ => record.clone(),
+            })
+        });
         self.event(
             "token",
             || match record {
@@ -245,6 +254,7 @@ impl Observations {
                 Record::Message(message) => format!("INFO · {}", message.number),
                 Record::Environment(_) => "ENVCHANGE".into(),
                 Record::LoginAck { .. } => "LOGINACK".into(),
+                Record::Sspi(_) => "SSPI · [redacted]".into(),
                 Record::Classification(_) => "DATACLASSIFICATION".into(),
                 Record::Tables(_) => "TABNAME".into(),
                 Record::ColumnInfo(_) => "COLINFO".into(),
@@ -321,7 +331,12 @@ impl Observations {
     }
     pub fn received(&mut self, channel: Option<u64>, packet: &packet::Packet) {
         if self.enabled() {
-            let bytes = [packet.header.as_slice(), &packet.body].concat();
+            let mut bytes = [packet.header.as_slice(), &packet.body].concat();
+            // Login SSPI tokens may cross any packet boundary. Preserve headers
+            // and typed non-secret events, but omit all raw integrated-login replies.
+            if self.mask_login {
+                bytes[packet::HEADER..].fill(0);
+            }
             self.packet("receive", channel, &bytes, &bytes);
         }
     }
@@ -346,7 +361,7 @@ impl Observations {
             return Ok(());
         }
         let redacted;
-        let view = if kind == packet::LOGIN {
+        let view = if matches!(kind, packet::LOGIN | packet::SSPI) {
             redacted = packet::split(kind, &crate::capture::without_password(kind, body), size)?;
             redacted.as_slice()
         } else {
@@ -356,7 +371,11 @@ impl Observations {
             self.packet(
                 "send",
                 channel,
-                if self.keep_password { raw } else { safe },
+                if self.keep_password && kind != packet::SSPI && !self.mask_login {
+                    raw
+                } else {
+                    safe
+                },
                 safe,
             );
         }

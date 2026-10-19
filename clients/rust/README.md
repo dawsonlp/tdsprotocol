@@ -11,12 +11,64 @@ not correct behavior; previously agreed differences remain explicit.
 
 The unpublished `tds-client` crate uses edition 2024. It is tested with Rust
 1.99.1 on Apple Silicon; that exact tested version is the initial minimum.
-Older Rust releases are not claimed. Native Windows acceptance remains part of
-the GCP campaign.
+Older Rust releases are not claimed. Native MSVC Windows regression and live
+authentication evidence are recorded in the GCP campaign reports below.
 `Cargo.lock` records the tested dependency resolution. Tokio is the default,
 optional shell; `--no-default-features` builds the protocol core without Tokio.
 rustls uses its aws-lc provider explicitly, without installing a global provider.
 Trust roots come from the caller; the client has no insecure verification mode.
+
+## Optional integrated authentication
+
+Build with `--features integrated-auth` for portable explicit-credential NTLM,
+Kerberos and Negotiate, or native Windows SSPI using the signed-in process.
+SQL password login remains the default. Authentication methods, providers and
+credential sources are distinct choices; Negotiate does not permit NTLM fallback
+unless `allow_ntlm_fallback` is explicitly enabled.
+
+```rust,no_run
+use tds_client::{ConnectOptions, auth::{Method, WindowsAuth}};
+# fn example(roots: rustls::RootCertStore) {
+let mut auth = WindowsAuth::explicit(Method::Kerberos, "tdsuser@TDS.TEST", "test-only-password");
+auth.kdc_url = Some("tcp://10.43.1.4:88".into());
+auth.service_principal = Some("MSSQLSvc/tdssql.tds.test:1433".into());
+let mut options = ConnectOptions::integrated("10.43.1.5", 1433, auth, roots);
+options.server_name = Some("tdssql.tds.test".into());
+# }
+```
+
+The TCP destination, verified TLS name and SQL SPN are separate identities.
+Portable Kerberos currently requires an explicit TCP KDC URL; ticket-cache,
+keytab and HTTP KDC-proxy APIs are not implemented. Native Windows uses
+`WindowsAuth::signed_in(Method::Negotiate)` with process credentials; impersonated
+thread identity is not an automatic pool configuration key. Retire the pool if
+an external identity changes. Fixed-SPN routing is refused until the application
+supplies the target's configuration. Every recovery creates a fresh context.
+
+One opening deadline covers KDC/token operations. Native Windows calls can outlive
+caller cancellation; a counted worker/reaper owns their eventual handle cleanup
+and cannot install a late session. Opaque tokens and our owned password/buffer
+copies are zeroized. **Portable NTLM has an accepted, documented dependency erasure
+limitation**, detailed in the [provider review](../../docs/design/experiments/rust-authentication-provider-review.md).
+The [sspi zeroization report](../../docs/design/experiments/upstream-sspi-ntlm-zeroization.md)
+is an unsubmitted draft; there is no verified upstream ticket to link for that finding.
+
+CLI equivalents: `--auth ntlm|kerberos|negotiate`, `--native-windows`, `--spn`,
+`--kdc-url` and `--allow-ntlm-fallback`. Passwords remain environment inputs, never
+arguments. `login_probe` reads protected JSON on stdin and prints session evidence.
+The [GCP evidence checkpoint](../../docs/design/experiments/rust-gcp-authentication-evidence.md)
+records 64 successful real Windows SQL Server login/transport combinations across
+macOS, Linux and Windows. **Required Extended Protection is unsupported**: SQL
+needs `tls-unique`, which the pinned rustls API does not expose. The owner chose documentation and potential upstream reports rather than
+dependency forks/patch sets or TLS backend changes. NTLM's erasure limitation
+remains; wider acceptance remains open. Entra remains deferred. The
+[follow-up report](../../docs/design/experiments/gcp-authentication-follow-up-evidence.md)
+records later regression/cancellation evidence and verified lab/project teardown.
+Upstream reference: [rustls #995 — tls-unique channel binding](https://github.com/rustls/rustls/issues/995),
+closed as not planned by the original requester. The maintainers raised security
+constraints; no implementation is committed. Our
+[SQL Server follow-up draft](../../docs/design/experiments/upstream-rustls-channel-binding.md)
+is unsubmitted.
 
 ## Optional encryption key service
 
@@ -316,7 +368,7 @@ redacted configuration for subsequent logins.
 The [Pool rustdoc example](src/pool.rs) shows the complete acquire/use/release path.
 
 `Pool::from_config(Arc<dyn ConfigService>, capacity, services, policy)?` supplies
-current SQL connection values without replacing the pool. Implement `read()` by
+current SQL/Windows connection values without replacing the pool. Implement `read()` by
 returning a `ConfigRead<'_>` future with an owned `ConnectionConfig`. Construction
 does no I/O. Each physical opening or eligible recovery reads once within the
 opening deadline; ordinary idle checkout does not. `ConnectionServices` holds
@@ -326,7 +378,9 @@ fixed TLS roots/server-name override and observation/recording bindings;
 The pool compares effective values, including passwords, with its own last
 accepted snapshot. Active borrowers continue; known obsolete idle/returned
 sessions are discarded. A superseded late login fails explicitly. A rejected
-login does not retry, fall back or poison the pool: later openings read again.
+physical login rereads the source once. If effective configuration changed, it
+retries physical opening once within the original deadline; unchanged refusal
+is returned. This never retries application SQL or silently changes auth methods.
 Recovery allows password-only changes and preserves the routed target and
 original logical channel handles. Borrowed recovery remains possible after pool
 closure. No source watcher, notification service or extra OS thread is created.

@@ -35,6 +35,98 @@ fn done(status: u16) -> Vec<u8> {
     b.extend([0; 10]);
     b
 }
+
+#[test]
+fn python_safe_login_evidence_preserves_negotiation_without_authentication_bytes() {
+    let login = tds_client::login7::Login {
+        integrated_security: true,
+        sspi: tds_client::auth::Token::new(vec![1]).unwrap(),
+        ..Default::default()
+    }
+    .encode()
+    .unwrap();
+    let mut safe = vec![0xed, 1, 0, 0, 0xae, 10, 1, 0, 0, 0, 0, 0xff];
+    safe.extend(done(0));
+    let mut lines = packets("send", None, packet::LOGIN, &login, 4096);
+    lines.extend(packets(
+        "receive",
+        None,
+        packet::REPLY,
+        &vec![0; safe.len()],
+        17,
+    ));
+    lines.push(json!({"t":2,"event":"receive","text":"← login reply",
+        "safe_login_tokens":STANDARD.encode(&safe)}));
+    let (summary, items) = read(&lines);
+    assert_eq!(summary.records, 3);
+    assert!(items.iter().any(|item| matches!(&item.content,
+        Content::Record(record) if matches!(record.as_ref(), Record::FeatureAck(features)
+            if features == &vec![(10,vec![0])]))));
+    assert!(items.iter().any(|item| matches!(&item.content,
+        Content::Diagnostic{issue:Issue::Incomplete,description,..} if description.contains("redacted"))));
+    assert!(!items.iter().any(|item| matches!(
+        &item.content,
+        Content::Diagnostic {
+            issue: Issue::Malformed,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn integrated_security_recordings_withhold_tokens_and_explain_redacted_replies() {
+    let login = tds_client::login7::Login {
+        integrated_security: true,
+        sspi: tds_client::auth::Token::new(b"initial-secret-token".to_vec()).unwrap(),
+        ..Default::default()
+    }
+    .encode()
+    .unwrap();
+    let mut lines = packets("send", None, packet::LOGIN, &login, 4096);
+    let mut challenge = vec![0xed, 19, 0];
+    challenge.extend(b"server-secret-token");
+    lines.extend(packets("receive", None, packet::REPLY, &challenge, 4096));
+    lines.extend(packets(
+        "send",
+        None,
+        packet::SSPI,
+        b"client-secret-token",
+        4096,
+    ));
+    let mut ack = vec![0xad, 10, 0, 1];
+    ack.extend(0x74000004_u32.to_be_bytes());
+    ack.extend([0, 16, 0, 0, 1]);
+    ack.extend(done(0));
+    lines.extend(packets("receive", None, packet::REPLY, &ack, 4096));
+    let (_, items) = read(&lines);
+    assert!(
+        items
+            .iter()
+            .filter_map(|i| match &i.content {
+                Content::Packet { body, .. } => Some(body),
+                _ => None,
+            })
+            .all(Option::is_none)
+    );
+    for item in &items {
+        if let Content::Record(record) = &item.content
+            && let Record::Sspi(token) = record.as_ref()
+        {
+            assert!(token.as_bytes().iter().all(|b| *b == 0));
+        }
+    }
+    let mut redacted = packets("send", None, packet::LOGIN, &login, 4096);
+    redacted.extend(packets("receive", None, packet::REPLY, &[0; 80], 4096));
+    let (_, items) = read(&redacted);
+    assert!(items.iter().any(|i| matches!(&i.content,Content::Diagnostic{issue:Issue::Incomplete,description,..} if description.contains("redacted"))));
+    assert!(!items.iter().any(|i| matches!(
+        &i.content,
+        Content::Diagnostic {
+            issue: Issue::Malformed,
+            ..
+        }
+    )));
+}
 #[test]
 fn omitted_metadata_is_missing_evidence_instead_of_malformed_wire() {
     let mut body = vec![0x81, 0xff, 0xff];

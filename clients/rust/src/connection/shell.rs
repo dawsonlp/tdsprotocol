@@ -42,6 +42,7 @@ use crate::{
 /// Explicit trust roots and credentials. Debug never displays the password.
 #[derive(Clone)]
 pub struct ConnectOptions {
+    pub windows_auth: Option<crate::auth::WindowsAuth>,
     pub observe: Option<Observer>,
     /// New physical connection, new recording and distinct output. Never called
     /// merely because an existing transport is lent to its next borrower.
@@ -84,6 +85,16 @@ pub struct ConnectOptions {
     pub column_encryption: bool,
 }
 impl ConnectOptions {
+    pub fn integrated(
+        host: impl Into<String>,
+        port: u16,
+        authentication: crate::auth::WindowsAuth,
+        roots: RootCertStore,
+    ) -> Self {
+        let mut options = Self::new(host, port, "", "", roots);
+        options.windows_auth = Some(authentication);
+        options
+    }
     pub fn new(
         host: impl Into<String>,
         port: u16,
@@ -93,6 +104,7 @@ impl ConnectOptions {
     ) -> Self {
         Self {
             observe: None,
+            windows_auth: None,
             capture_factory: None,
             version: ProtocolVersion::V7_4,
             mars: false,
@@ -436,6 +448,14 @@ impl Connection {
                         .at(Step::Login, Execution::NotSent));
                     }
                     routed_from = Some(here);
+                    if target
+                        .windows_auth
+                        .as_ref()
+                        .is_some_and(|auth| auth.service_principal.is_some())
+                    {
+                        return Err(Error::new(ErrorKind::Unsupported("routed integrated login with a fixed SPN requires explicit target configuration"))
+                            .at(Step::Login, Execution::NotSent));
+                    }
                     target.host = route.server.clone();
                     target.port = route.port;
                     target.server_name = None; // verify the routed destination's own identity
@@ -496,6 +516,8 @@ impl Connection {
             endpoint.clone(),
             ready,
             DriverSettings {
+                #[cfg(feature = "integrated-auth")]
+                login_deadline: deadline,
                 observer: options.observe.clone(),
                 capture,
                 reconnect: Reconnect {
@@ -1227,6 +1249,8 @@ struct Reconnect {
     configuration: Option<crate::config::Binding>,
 }
 struct DriverSettings {
+    #[cfg(feature = "integrated-auth")]
+    login_deadline: Instant,
     observer: Option<Observer>,
     capture: Option<Capture>,
     reconnect: Reconnect,
@@ -1236,6 +1260,10 @@ struct Broken {
     idle: bool,
 }
 struct Driver {
+    #[cfg(feature = "integrated-auth")]
+    login_deadline: Instant,
+    #[cfg(feature = "integrated-auth")]
+    authentication: Option<crate::auth::Context>,
     reconnect: Reconnect,
     broken: Option<Broken>,
     observer: Option<Observer>,
@@ -1380,6 +1408,39 @@ fn deliver_traces(
 }
 
 impl Driver {
+    #[cfg(feature = "integrated-auth")]
+    async fn authenticate(&mut self) -> Result<()> {
+        if self.core.is_ready() {
+            self.authentication = None;
+            return Ok(());
+        }
+        let Some(challenge) = self.core.take_authentication_request() else {
+            return Ok(());
+        };
+        let options = &self.reconnect.options;
+        if self.authentication.is_none() {
+            let auth = options
+                .windows_auth
+                .as_ref()
+                .ok_or_else(|| Error::new(ErrorKind::State("missing authentication provider")))?;
+            self.authentication = Some(crate::auth::Context::new(
+                auth,
+                &options.host,
+                options.port,
+            )?);
+        }
+        let binding = self.core.authentication_binding()?;
+        let context = self.authentication.as_mut().expect("created context");
+        let result = tokio::select! {
+            result = timeout_at(self.login_deadline, context.step(challenge, &binding)) =>
+                result.map_err(|_| Error::new(ErrorKind::Timeout))?,
+            _ = self.endpoint.changed.notified() => return Err(Error::new(ErrorKind::Canceled)),
+        }?;
+        if self.endpoint.is_revoked() {
+            return Err(Error::new(ErrorKind::Canceled));
+        }
+        self.core.provide_authentication_token(result.0, result.1)
+    }
     fn deliver_observations(&mut self) -> Result<()> {
         deliver_traces(
             &mut self.core,
@@ -2013,6 +2074,8 @@ impl Driver {
                 continue;
             }
             self.update_position();
+            #[cfg(feature = "integrated-auth")]
+            self.authenticate().await?;
             self.deliver_observations()?;
             if self.endpoint.is_revoked() || self.stopping {
                 return Ok(());
@@ -2206,6 +2269,10 @@ async fn drive(
     settings: DriverSettings,
 ) {
     let mut driver = Driver {
+        #[cfg(feature = "integrated-auth")]
+        login_deadline: settings.login_deadline,
+        #[cfg(feature = "integrated-auth")]
+        authentication: None,
         observer: settings.observer,
         capture: settings.capture,
         reconnect: settings.reconnect,

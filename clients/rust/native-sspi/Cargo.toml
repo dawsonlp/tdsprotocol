@@ -1,0 +1,11 @@
+[package]
+name = "tds-native-sspi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Small native Windows SSPI boundary for the TDS development client"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = ["Win32_Security_Authentication_Identity", "Win32_Security_Credentials"] }
+zeroize = "=1.9.1"

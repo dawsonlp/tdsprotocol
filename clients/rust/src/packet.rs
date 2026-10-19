@@ -15,6 +15,7 @@ pub const ATTENTION: u8 = 0x06;
 pub const BULK: u8 = 0x07;
 pub const TRANSACTION: u8 = 0x0e;
 pub const LOGIN: u8 = 0x10;
+pub const SSPI: u8 = 0x11;
 pub const HELLO: u8 = 0x12;
 
 #[derive(Debug)]

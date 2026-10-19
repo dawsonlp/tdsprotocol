@@ -114,6 +114,7 @@ class Event:
     took: str = ""  # durations, shown after the line. For a connect step, the time since connecting began. For a
     # response, the time to its first packet and to its end. Kept apart from `text`, so that lines from different runs
     # can be compared
+    safe_login_tokens: bytes | None = None  # typed login evidence; SSPI payloads already zeroed
 
 
 # =========================================================================== failures
@@ -555,6 +556,9 @@ class ConnectionCore:
         self._capture: Any = None
         self._capture_owner = object()  # a physical lifetime, not a reusable channel/session id
         self._capture_failure: CaptureError | None = None
+        self._authenticating = False  # redact incoming raw Windows-login packets
+        self._authentication_rounds = 0
+        self._authentication_message_size = 0
         self.observation_error: Exception | None = None
         self._on_capture_failure: Callable[[CaptureError], None] = lambda failure: None
         self.set_observe(observe)
@@ -630,7 +634,14 @@ class ConnectionCore:
         if self._capture_failure is not None:
             raise self._capture_failure
         try:
-            self._capture.packet(direction, channel, packet)
+            if self._authenticating and direction == "receive" and not getattr(self._capture, "keep_password", False):
+                masked = packet[:8] + bytes(len(packet) - 8)
+                if (redacted := getattr(self._capture, "redacted_authentication_packet", None)) is not None:
+                    redacted(direction, channel, masked)
+                else:
+                    self._capture.packet(direction, channel, masked)
+            else:
+                self._capture.packet(direction, channel, packet)
         except Exception as failure:
             self._capture_failed(failure)
 
@@ -680,10 +691,13 @@ class ConnectionCore:
             login7.OptionFlags2.ODBC_CLIENT if o.odbc else login7.OptionFlags2(0))  # on by default (D-9)
         features = login7.feature_list(o.features, {login7.Feature.SESSION_RECOVERY: recovery} if recovery else None)
         if isinstance(login, logins.WindowsLogin):  # the first token goes in the login; the server may challenge it
+            self._authenticating = True
             user = password = ""
             flags_2 |= login7.OptionFlags2.WINDOWS_AUTH
-            exchange = login.provider.begin(o.host, o.port)
-            windows_auth = bytes((yield from self._obtain("the Windows login's first token", exchange.step, None)) or b"")
+            exchange = yield from self._windows_call(login.provider.begin, o.host, o.port)
+            windows_auth = yield from self._windows_step(exchange, None)
+            if not windows_auth:
+                raise ConnectError("log in", "the Windows provider supplied no initial token")
         elif federated:
             user = password = ""
             token = None
@@ -718,16 +732,23 @@ class ConnectionCore:
             reply = self._malformed_is_a_connect_error("log in", lambda m: self._tokens(m, "login reply", final=False),
                                                        message)
             done = any(r.token in ("LOGINACK", "ERROR") for r in reply)
-            challenge = next((r.buffer for r in reply if r.token == "SSPI"), None)
+            refused = any(r.token == "ERROR" for r in reply)
+            challenges = [r.buffer for r in reply if r.token == "SSPI"]
+            if len(challenges) > 1:
+                raise ConnectError("log in", "multiple Windows authentication challenges in one reply")
+            challenge = challenges[0] if challenges else None
             info = next((r for r in reply if r.token == "FEDAUTHINFO"), None)
-            if exchange is not None and challenge is not None and not done:
-                answer = yield from self._obtain("the answer to the server's token", exchange.step, bytes(challenge))
+            if exchange is not None and challenge is not None and not refused:
+                answer = yield from self._windows_step(exchange, bytes(challenge))
+                if done and answer:
+                    raise ConnectError("log in", "the Windows provider produced another token after server acceptance")
                 if answer:  # NTLM's challenge needs an answer. Kerberos's mutual authentication doesn't. The server
                     # sends its token, then its LOGINACK, without waiting. An empty answer would arrive after the
                     # login, as a request the server can't read, and the server would close the connection (observed)
                     yield from self._send_secret("Windows authentication: the answer to the server's token",
                                                  PacketType.WINDOWS_AUTH, bytes(answer))
-                continue
+                if not done:
+                    continue
             if info is not None and isinstance(login, logins.EntraLogin):
                 where = _fed_auth_info(info)
                 spn, sts_url = where.get(FedAuthInfoId.SPN, ""), where.get(FedAuthInfoId.STS_URL, "")
@@ -739,6 +760,7 @@ class ConnectionCore:
             break
         self._malformed_is_a_connect_error("log in", lambda m: self._final_done(reply, m, "login reply"), message)
         self._read_login_reply(reply)
+        self._authenticating = False
 
         # CHANGE_PASSWORD is a one-time server operation. A completed final login
         # commits its result locally; routing/refused/incomplete logins never do.
@@ -1311,16 +1333,26 @@ class ConnectionCore:
                        "connection already in use (one at a time), or a server shutting down") if step == "hello" else ""
                 raise ConnectError(step, f"the server closed the connection{why}")
             for item in self.link.feed(data):
-                if isinstance(item, tuple) and item[1] is not None and (message := self._joiner.add(item[1])):
-                    self._pending.append(message)
+                if isinstance(item, tuple) and item[1] is not None:
+                    packet = item[1]
+                    if self._authenticating:
+                        self._authentication_message_size += len(packet.body)
+                        if self._authentication_message_size > logins.MAX_LOGIN_MESSAGE:
+                            raise ConnectError(step, "Windows login message exceeds the driver size limit")
+                        if packet.last:
+                            self._authentication_message_size = 0
+                    if (message := self._joiner.add(packet)) is not None:
+                        self._pending.append(message)
         return self._pending.pop(0)
 
-    @staticmethod
-    def _malformed_is_a_connect_error(step: str, read: Callable[[Message], Any], message: Message) -> Any:
+    def _malformed_is_a_connect_error(self, step: str, read: Callable[[Message], Any], message: Message) -> Any:
         """While connecting, a reply that can't be read fails the step, saying what arrived (D-53)."""
         try:
             return read(message)
         except MalformedMessage as e:
+            if self._authenticating:
+                raise ConnectError(step, f"the Windows login reply is malformed at byte {e.offset:#x}; "
+                                         "authentication payload hidden") from None
             shown = message.body[:32].hex(" ").upper() + (" …" if len(message.body) > 32 else "")
             raise ConnectError(step, f"the server's reply can't be read: {e}. It arrived as {len(message.body)} "
                                      f"bytes: {shown}") from e
@@ -1344,7 +1376,16 @@ class ConnectionCore:
         for r in records:
             counts[r.token] = counts.get(r.token, 0) + 1
         node.shown = " ".join(f"{n}×{k}" if k > 1 else n for n, k in counts.items())
-        self._show("receive", "←", what, node, message.headers, message.body, channel)
+        safe_login_tokens = None
+        if self._capture is not None and self._authenticating and what == "login reply":
+            safe = bytearray(message.body)
+            for record in records:
+                if record.token == "SSPI":
+                    start, end = record.node.start + 3, record.node.end
+                    safe[start:end] = bytes(end - start)
+            safe_login_tokens = bytes(safe)
+        self._show("receive", "←", what, node, message.headers, message.body, channel,
+                   safe_login_tokens=safe_login_tokens)
         return records
 
     @staticmethod
@@ -1370,6 +1411,30 @@ class ConnectionCore:
             return (yield Obtain(fn, args))
         except Exception as e:
             raise ConnectError("log in", f"{what} couldn't be made: {type(e).__name__}: {e}") from e
+
+    def _windows_step(self, exchange, challenge):
+        if challenge is not None and len(challenge) > logins.MAX_TOKEN:
+            raise ConnectError("log in", "Windows authentication challenge exceeds the driver token limit")
+        if self._authentication_rounds >= logins.MAX_ROUNDS:
+            raise ConnectError("log in", "Windows authentication exceeds the driver round limit")
+        self._authentication_rounds += 1
+        token = yield from self._windows_call(exchange.step, challenge)
+        if token is None:
+            token = b''
+        if not isinstance(token, (bytes, bytearray, memoryview)):
+            raise ConnectError("log in", "the Windows provider returned a non-byte token")
+        if len(token) > logins.MAX_TOKEN:
+            raise ConnectError("log in", "Windows authentication output exceeds the driver token limit")
+        return bytes(token)
+
+    @staticmethod
+    def _windows_call(fn, *args):
+        try:
+            return (yield Obtain(fn, args))
+        except Exception as failure:
+            error = ConnectError("log in", "the Windows authentication provider refused or failed")
+            error.provider_error = failure  # explicit inspection, excluded from ordinary diagnostics
+            raise error from None
 
     def _send_secret(self, what: str, kind: PacketType, body: bytes) -> Generator[Action, Any, None]:
         """Send a message that is only a credential. It is shown by its length only, at every level, and captures zero
@@ -1401,7 +1466,8 @@ class ConnectionCore:
 
     def _show(self, kind: str, arrow: str, what: str, node: Node | None, headers: list[Node], body: bytes,
               channel: Channel | None = None, size: int | None = None, shown: str | None = None,
-              tree: Node | None = None, count: int | None = None) -> None:
+              tree: Node | None = None, count: int | None = None,
+              safe_login_tokens: bytes | None = None) -> None:
         if not self.observing:  # off: nothing is described
             return
         where = f" · channel {channel.id}" if channel is not None and self.link.mars else ""
@@ -1412,5 +1478,8 @@ class ConnectionCore:
         packets = f"{count} packet{'s' if count != 1 else ''}"
         tree = tree or node
         whole = Node(what, 0, size, kept(body), children=[*headers, tree]) if tree is not None else None
+        if what == "login reply":
+            whole = logins._redact_authentication(whole)
         if self.observing:
-            self.observe(Event(kind, f"{arrow} {what}{where} · {size} B · {packets}{summary}", whole))
+            self.observe(Event(kind, f"{arrow} {what}{where} · {size} B · {packets}{summary}", whole,
+                               safe_login_tokens=safe_login_tokens))

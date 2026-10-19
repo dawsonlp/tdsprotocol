@@ -54,6 +54,7 @@ pub enum Content {
 pub enum Message {
     Prelogin(Vec<(u8, Vec<u8>)>),
     TlsHandshake { bytes: usize },
+    Authentication { bytes: usize },
     Login(Login),
     Request(decode::Request),
     RequestBulk(Vec<Record>),
@@ -87,6 +88,7 @@ struct Replay<F> {
     features: BTreeSet<u8>,
     context_known: bool,
     hello_reply: bool,
+    integrated_login: bool,
     start_seen: bool,
     line: usize,
     time: f64,
@@ -182,6 +184,65 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                     took: line.get("took").cloned(),
                 },
             )?;
+            if kind == "receive"
+                && text.starts_with("← login reply")
+                && let Some(encoded) = line.get("safe_login_tokens")
+            {
+                let Some(encoded) = encoded.as_str() else {
+                    self.issue(
+                        None,
+                        Issue::Malformed,
+                        None,
+                        "safe login evidence must be base64 text",
+                    )?;
+                    return Ok(false);
+                };
+                if !self.integrated_login || encoded.len() > 88_000 {
+                    self.issue(
+                        None,
+                        Issue::Malformed,
+                        None,
+                        "unexpected or oversized safe login evidence",
+                    )?;
+                    return Ok(false);
+                }
+                let Ok(body) = STANDARD.decode(encoded) else {
+                    self.issue(
+                        None,
+                        Issue::Malformed,
+                        None,
+                        "invalid safe login evidence encoding",
+                    )?;
+                    return Ok(false);
+                };
+                if body.len() > 65_536 {
+                    self.issue(
+                        None,
+                        Issue::Malformed,
+                        None,
+                        "oversized safe login evidence",
+                    )?;
+                    return Ok(false);
+                }
+                let key = (Direction::Receive, None);
+                let mut stream = self.streams.remove(&key).unwrap_or_default();
+                // Supplemental typed evidence preserves non-secret negotiation
+                // records. Raw wire payload remains withheld; authentication
+                // tokens are unavailable, not reconstructed from their zeros.
+                self.response(
+                    key,
+                    &mut stream,
+                    &packet::Packet {
+                        header: [0; 8],
+                        kind: packet::REPLY,
+                        status: 1,
+                        last: true,
+                        session_id: 0,
+                        body,
+                    },
+                )?;
+                self.streams.insert(key, stream);
+            }
         } else if let Some(direction) = line.get("packet").and_then(Json::as_str) {
             let direction = match direction {
                 "send" => Direction::Send,
@@ -256,8 +317,9 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                 ),
             )?;
         }
-        let credential =
-            key.0 == Direction::Send && matches!(packet.kind, packet::LOGIN | 0x08 | 0x11);
+        let credential = (key.0 == Direction::Send
+            && matches!(packet.kind, packet::LOGIN | 0x08 | 0x11))
+            || (key.0 == Direction::Receive && self.integrated_login);
         self.item(
             Some(key),
             Content::Packet {
@@ -265,6 +327,23 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                 body: (!credential).then(|| packet.body.clone()),
             },
         )?;
+        if key.0 == Direction::Receive
+            && self.integrated_login
+            && packet.body.iter().all(|b| *b == 0)
+        {
+            if packet.last {
+                self.issue(
+                    Some(key),
+                    Issue::Incomplete,
+                    None,
+                    "integrated login payload was redacted; authentication cannot be reconstructed",
+                )?;
+                stream.pending_response = false;
+                stream.fed = 0;
+            }
+            self.streams.insert(key, stream);
+            return Ok(true);
+        }
         if !stream.failed {
             if key.0 == Direction::Receive && packet.kind == packet::REPLY && !self.hello_reply {
                 self.response(key, &mut stream, &packet)?;
@@ -382,7 +461,13 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                     stream.failed = true;
                     break;
                 }
-                Ok(Some(record)) => {
+                Ok(Some(mut record)) => {
+                    if let Record::Sspi(token) = &record {
+                        record = Record::Sspi(
+                            crate::auth::Token::new(vec![0; token.as_bytes().len()])
+                                .expect("bounded token"),
+                        );
+                    }
                     if stream.final_seen {
                         self.issue(
                             Some(key),
@@ -452,6 +537,7 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                         && (!stream.canceling || done.acknowledges_cancel())
                     {
                         stream.final_seen = true;
+                        self.integrated_login = false;
                     }
                     self.summary.records += 1;
                     self.item(Some(key), Content::Record(Box::new(record)))?;
@@ -503,6 +589,7 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             return Err(Error::new(ErrorKind::Unsupported("server packet type")));
         }
         if kind == packet::LOGIN {
+            self.integrated_login = body.get(25).is_some_and(|flags| flags & 0x80 != 0);
             self.hello_reply = false;
             self.streams
                 .entry((Direction::Receive, key.1))
@@ -511,6 +598,10 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             return login(&crate::capture::without_password(kind, body))
                 .map(|v| Some(Message::Login(v)));
         }
+        if kind == packet::SSPI {
+            return Ok(Some(Message::Authentication { bytes: body.len() }));
+        }
+        self.integrated_login = false;
         let response = self.streams.entry((Direction::Receive, key.1)).or_default();
         response.pending_response = true;
         if kind == packet::ATTENTION {
@@ -594,6 +685,7 @@ pub fn replay_with_inspection(
         features: BTreeSet::new(),
         context_known: true,
         hello_reply: false,
+        integrated_login: false,
         start_seen: false,
         line: 0,
         time: 0.0,

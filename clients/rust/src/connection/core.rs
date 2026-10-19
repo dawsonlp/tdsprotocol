@@ -60,6 +60,7 @@ enum Phase {
 
 #[derive(Default)]
 struct ResponseStream {
+    continuation: bool,
     packets: Unpacker,
     decoder: Decoder,
     message_end: bool,
@@ -97,6 +98,10 @@ impl ResponseStream {
         elapsed: Option<Duration>,
     ) -> Result<Option<Record>> {
         loop {
+            if self.continuation && self.message_end && self.decoder.is_empty() {
+                self.message_end = false;
+                self.continuation = false;
+            }
             if self.terminal.is_some() {
                 if !self.decoder.is_empty() {
                     return Err(Error::malformed(0, "data after final completion"));
@@ -106,6 +111,7 @@ impl ResponseStream {
                     return Ok(self.terminal.take());
                 }
             } else if let Some(record) = self.decoded(observations, channel)? {
+                self.continuation = matches!(record, Record::Sspi(_));
                 if matches!(&record,Record::Done(done) if
                     if canceling { done.acknowledges_cancel() } else { done.is_final() })
                 {
@@ -174,6 +180,11 @@ struct ChannelState {
 }
 
 pub struct ConnectionCore {
+    integrated_security: bool,
+    authentication_request: Option<Option<crate::auth::Token>>,
+    authentication_pending: bool,
+    authentication_complete: bool,
+    authentication_rounds: u8,
     version: ProtocolVersion,
     phase: Phase,
     login: Option<Login>,
@@ -255,6 +266,7 @@ impl ConnectionCore {
         }
         let feature_requests = login.requested_features()?;
         let recovery_requested = login.session_recovery;
+        let integrated_security = login.integrated_security;
         Ok(Self {
             version,
             phase: if version == ProtocolVersion::V8_0 {
@@ -263,6 +275,11 @@ impl ConnectionCore {
                 Phase::Hello
             },
             login: Some(login),
+            integrated_security,
+            authentication_request: None,
+            authentication_pending: false,
+            authentication_complete: !integrated_security,
+            authentication_rounds: 0,
             tls,
             time,
             stream: ResponseStream::default(),
@@ -586,11 +603,80 @@ impl ConnectionCore {
     fn begin_login(&mut self) -> Result<()> {
         self.phase = Phase::Login;
         self.session.tls_version = self.tls.protocol_version();
+        if self.integrated_security {
+            self.observations.mask_login = true;
+            self.authentication_request = Some(None);
+            self.authentication_pending = true;
+            return Ok(());
+        }
         let login = self
             .login
             .take()
             .ok_or_else(|| Error::new(ErrorKind::State("login already consumed")))?;
         self.send(packet::LOGIN, &login.encode()?)
+    }
+
+    /// Some(None) starts a fresh context; Some(Some(token)) continues it.
+    /// No request can be produced before verified TLS.
+    pub fn take_authentication_request(&mut self) -> Option<Option<crate::auth::Token>> {
+        self.authentication_request.take()
+    }
+    #[cfg(feature = "integrated-auth")]
+    pub(crate) fn authentication_binding(&self) -> Result<Vec<u8>> {
+        let certificate = self
+            .tls
+            .peer_certificates()
+            .and_then(|c| c.first())
+            .ok_or_else(|| Error::new(ErrorKind::State("authentication before verified TLS")))?;
+        crate::auth::channel_binding(certificate.as_ref())
+    }
+    pub fn provide_authentication_token(
+        &mut self,
+        token: crate::auth::Token,
+        complete: bool,
+    ) -> Result<()> {
+        if self.failure.is_some() {
+            return Err(Error::new(ErrorKind::Closed));
+        }
+        self.provide_authentication_token_inner(token, complete)
+            .map_err(|error| self.fail(error))
+    }
+    fn provide_authentication_token_inner(
+        &mut self,
+        token: crate::auth::Token,
+        complete: bool,
+    ) -> Result<()> {
+        if self.phase != Phase::Login
+            || !self.authentication_pending
+            || self.authentication_request.is_some()
+        {
+            return Err(Error::new(ErrorKind::State(
+                "unexpected authentication result",
+            )));
+        }
+        self.authentication_rounds += 1;
+        if self.authentication_rounds > crate::auth::MAX_ROUNDS {
+            return Err(Error::new(ErrorKind::Limit("SSPI rounds")));
+        }
+        self.authentication_pending = false;
+        self.authentication_complete = complete;
+        if let Some(mut login) = self.login.take() {
+            if token.is_empty() {
+                return Err(Error::new(ErrorKind::State(
+                    "empty initial authentication token",
+                )));
+            }
+            login.sspi = token;
+            let encoded = zeroize::Zeroizing::new(login.encode()?);
+            self.send(packet::LOGIN, &encoded)?;
+        } else if !token.is_empty() {
+            self.send(packet::SSPI, token.as_bytes())?;
+        } else if !complete {
+            return Err(Error::new(ErrorKind::State(
+                "empty continuing authentication token",
+            )));
+        }
+        self.read_login()
     }
 
     fn drain_tls(&mut self, target: &mut Vec<u8>) -> Result<()> {
@@ -695,7 +781,7 @@ impl ConnectionCore {
         self.send_frames(frames)
     }
     fn send(&mut self, kind: u8, body: &[u8]) -> Result<()> {
-        let plain = packet::split(kind, body, self.session.packet_size)?;
+        let plain = zeroize::Zeroizing::new(packet::split(kind, body, self.session.packet_size)?);
         self.observations
             .sent(kind, body, &plain, self.session.packet_size, None)?;
         self.observations.message(
@@ -748,6 +834,9 @@ impl ConnectionCore {
         Ok(())
     }
     fn read_login(&mut self) -> Result<()> {
+        if self.authentication_pending {
+            return Ok(());
+        }
         while let Some(record) =
             self.stream
                 .next_token(false, &mut self.observations, None, false, None)?
@@ -763,6 +852,14 @@ impl ConnectionCore {
                 self.apply(&record)?;
             }
             match record {
+                Record::Sspi(token) => {
+                    if !self.integrated_security || self.login_ack || token.is_empty() {
+                        return Err(Error::malformed(0, "unexpected SSPI continuation"));
+                    }
+                    self.authentication_request = Some(Some(token));
+                    self.authentication_pending = true;
+                    return Ok(());
+                }
                 Record::FeatureAck(features) => {
                     for (id, data) in features {
                         if !self.feature_requests.contains_key(&id)
@@ -817,6 +914,9 @@ impl ConnectionCore {
                     if self.login_ack {
                         return Err(Error::malformed(0, "duplicate LOGINACK"));
                     }
+                    if !self.authentication_complete || self.authentication_pending {
+                        return Err(Error::malformed(0, "LOGINACK before provider completion"));
+                    }
                     self.login_ack = true;
                     self.session.server_version = Some(server_version);
                 }
@@ -851,6 +951,7 @@ impl ConnectionCore {
                     }
                     self.observations.message("receive", "login reply", None);
                     self.login_session = Some(self.session.clone());
+                    self.observations.mask_login = false;
                     if let Some(bytes) = self.initial_states.take() {
                         self.recovery =
                             Some(crate::session::Recovery::new(self.session.clone(), &bytes)?);
@@ -1165,6 +1266,9 @@ impl ConnectionCore {
                 self.mars,
                 self.elapsed,
             )? {
+                if matches!(record, Record::Sspi(_)) {
+                    return Err(Error::malformed(0, "SSPI token after login"));
+                }
                 self.observations.record(Some(id), &record);
                 self.session.session_id = channel.stream.session_id;
                 return Ok(Some(record));
@@ -1420,6 +1524,99 @@ mod tests {
             core.channel_timing(1).unwrap().until_end(),
             Some(Duration::from_secs(7))
         );
+    }
+    fn auth_core() -> ConnectionCore {
+        // State tests only; controlled peers prove TLS-before-provider ordering.
+        let mut core = core();
+        core.integrated_security = true;
+        core.authentication_complete = false;
+        core.login = Some(Login {
+            integrated_security: true,
+            ..Default::default()
+        });
+        core.begin_login().unwrap();
+        assert!(matches!(core.take_authentication_request(), Some(None)));
+        core.provide_authentication_token(crate::auth::Token::new(vec![1]).unwrap(), false)
+            .unwrap();
+        core
+    }
+    #[test]
+    fn sspi_round_limit_fails_closed_and_empty_results_cannot_start_login() {
+        let mut candidate = core();
+        assert!(
+            candidate
+                .provide_authentication_token(Default::default(), true)
+                .is_err()
+        );
+        assert!(candidate.is_failed());
+        let mut candidate = auth_core();
+        for _ in 1..crate::auth::MAX_ROUNDS {
+            candidate
+                .stream
+                .packets
+                .feed(&packet::split(packet::REPLY, &[0xed, 1, 0, 42], 4096).unwrap())
+                .unwrap();
+            candidate.read_login().unwrap();
+            assert!(matches!(
+                candidate.take_authentication_request(),
+                Some(Some(_))
+            ));
+            candidate
+                .provide_authentication_token(crate::auth::Token::new(vec![2]).unwrap(), false)
+                .unwrap();
+        }
+        candidate
+            .stream
+            .packets
+            .feed(&packet::split(packet::REPLY, &[0xed, 1, 0, 42], 4096).unwrap())
+            .unwrap();
+        candidate.read_login().unwrap();
+        candidate.take_authentication_request().unwrap();
+        assert!(matches!(
+            candidate
+                .provide_authentication_token(crate::auth::Token::new(vec![2]).unwrap(), false)
+                .unwrap_err()
+                .kind,
+            ErrorKind::Limit("SSPI rounds")
+        ));
+        assert!(candidate.is_failed());
+        assert!(candidate.take_output().is_empty());
+    }
+    #[test]
+    fn final_server_security_token_and_login_ack_can_share_one_message() {
+        let mut candidate = auth_core();
+        let mut reply = vec![0xed, 1, 0, 42, 0xad, 10, 0, 1];
+        reply.extend(TDS_7_4.to_be_bytes());
+        reply.extend([0, 16, 0, 0, 1]);
+        reply.extend([0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        candidate
+            .stream
+            .packets
+            .feed(&packet::split(packet::REPLY, &reply, 4096).unwrap())
+            .unwrap();
+        candidate.read_login().unwrap();
+        assert!(!candidate.is_ready());
+        candidate.take_authentication_request().unwrap();
+        candidate
+            .provide_authentication_token(Default::default(), true)
+            .unwrap();
+        assert!(candidate.is_ready());
+    }
+    #[test]
+    fn an_application_response_cannot_restart_authentication() {
+        let mut candidate = ready_core();
+        candidate.open_channel(1).unwrap();
+        candidate.begin(1, 1, &Batch::new("SELECT 1")).unwrap();
+        candidate
+            .channels
+            .get_mut(&1)
+            .unwrap()
+            .stream
+            .packets
+            .feed(&packet::split(packet::REPLY, &[0xed, 1, 0, 42], 4096).unwrap())
+            .unwrap();
+        assert!(candidate.next_record(1, 1).is_err());
+        assert!(candidate.is_failed());
     }
     fn core() -> ConnectionCore {
         ConnectionCore::new(

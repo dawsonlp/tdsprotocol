@@ -6,6 +6,7 @@ use std::{path::PathBuf, sync::Arc};
 use tds_client::{
     Batch, Call, Cell, Chunk, ConnectOptions, Connection, ProtocolVersion, Source, SourceRead,
     StreamedCall, Value,
+    auth::{Method, WindowsAuth},
     capture::Capture,
     observe::{Level, Observer},
 };
@@ -22,6 +23,11 @@ Connection:
   --user USER           default sa
   --database NAME       default tds_test
   --password-env NAME   default MSSQL_SA_PASSWORD; never a password argument
+  --auth sql|ntlm|kerberos|negotiate   default sql; others need integrated-auth
+  --native-windows      use signed-in Windows identity instead of a password
+  --spn NAME            explicit SQL service principal
+  --kdc-url tcp://HOST:88   portable Kerberos/Negotiate KDC
+  --allow-ntlm-fallback  explicitly permit Negotiate to choose NTLM
   --ca-file PATH        certificate authority PEM; verification is always enabled
   --server-name NAME    explicit certificate name, if different from host
   --tds-version 7.4|8.0 default 7.4
@@ -61,6 +67,11 @@ Without --fetch, rows are read forward and printed one at a time.
 ";
 
 struct Args {
+    authentication: Option<Method>,
+    native_windows: bool,
+    spn: Option<String>,
+    kdc_url: Option<String>,
+    allow_ntlm_fallback: bool,
     replay: Option<PathBuf>,
     host: String,
     port: u16,
@@ -86,6 +97,11 @@ impl Args {
     fn read() -> Result<Option<Self>> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut args = Self {
+            authentication: None,
+            native_windows: false,
+            spn: None,
+            kdc_url: None,
+            allow_ntlm_fallback: false,
             replay: None,
             host: "127.0.0.1".into(),
             port: 14325,
@@ -120,6 +136,14 @@ impl Args {
                     args.mars = true;
                     continue;
                 }
+                "--native-windows" => {
+                    args.native_windows = true;
+                    continue;
+                }
+                "--allow-ntlm-fallback" => {
+                    args.allow_ntlm_fallback = true;
+                    continue;
+                }
                 "--demo-transactions" => {
                     args.demo_transactions = true;
                     continue;
@@ -146,6 +170,17 @@ impl Args {
                 "--user" => args.user = value,
                 "--database" => args.database = value,
                 "--password-env" => args.password_env = value,
+                "--auth" => {
+                    args.authentication = match value.as_str() {
+                        "sql" => None,
+                        "ntlm" => Some(Method::Ntlm),
+                        "kerberos" => Some(Method::Kerberos),
+                        "negotiate" => Some(Method::Negotiate),
+                        _ => return Err("unknown authentication method".into()),
+                    }
+                }
+                "--spn" => args.spn = Some(value),
+                "--kdc-url" => args.kdc_url = Some(value),
                 "--ca-file" => args.ca = value.into(),
                 "--server-name" => args.server_name = Some(value),
                 "--tds-version" => {
@@ -195,6 +230,16 @@ impl Args {
         }
         if args.query.is_some() && args.procedure.is_some() {
             return Err("choose --query or --proc".into());
+        }
+        if args.authentication.is_none()
+            && (args.native_windows
+                || args.spn.is_some()
+                || args.kdc_url.is_some()
+                || args.allow_ntlm_fallback)
+        {
+            return Err(
+                "Windows authentication options require --auth ntlm, kerberos or negotiate".into(),
+            );
         }
         if !args.parameters.is_empty() && args.procedure.is_none() {
             return Err("parameters require --proc".into());
@@ -407,7 +452,11 @@ async fn run(args: Args) -> Result<()> {
     if let Some(path) = &args.replay {
         return replay::run(path, args.observe);
     }
-    let password = args.password()?;
+    let password = if args.native_windows {
+        String::new()
+    } else {
+        args.password()?
+    };
     let mut roots = rustls::RootCertStore::empty();
     let pem = std::fs::read(&args.ca)?;
     for cert in rustls_pemfile::certs(&mut pem.as_slice()) {
@@ -416,7 +465,19 @@ async fn run(args: Args) -> Result<()> {
     if roots.is_empty() {
         return Err("CA file contains no certificates".into());
     }
-    let mut options = ConnectOptions::new(args.host, args.port, args.user, password, roots);
+    let mut options = if let Some(method) = args.authentication {
+        let mut auth = if args.native_windows {
+            WindowsAuth::signed_in(method)
+        } else {
+            WindowsAuth::explicit(method, args.user, password)
+        };
+        auth.service_principal = args.spn;
+        auth.kdc_url = args.kdc_url;
+        auth.allow_ntlm_fallback = args.allow_ntlm_fallback;
+        ConnectOptions::integrated(args.host, args.port, auth, roots)
+    } else {
+        ConnectOptions::new(args.host, args.port, args.user, password, roots)
+    };
     options.database = args.database;
     options.server_name = args.server_name;
     options.version = args.version;

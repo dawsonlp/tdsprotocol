@@ -17,6 +17,32 @@
 
 Phase 3 depends on phase 2. Rust does not depend on completing Python M16.
 
+The [GCP authentication follow-up plan](experiments/gcp-authentication-development-plan.md)
+records corrections found during Rust Windows acceptance, including Python
+security/correctness gaps. These are shared-driver corrections before expanding
+conveniences. It preserves the owner's dependency deferrals and retention through
+review/fix/retest within the campaign's fixed budget and expiry; the historical
+lab proposal below does not override that later agreement.
+
+### Backlog · Python Kerberos opening deadline
+
+**Status:** deferred to the backlog by the owner after reviewing the GCP failure;
+the defect remains unfixed. An unreachable KDC left synchronous pyspnego startup
+blocked beyond a 1500 ms opening deadline; the independent watchdog stopped the
+process at 4010 ms. See the [retained evidence](experiments/gcp-authentication-follow-up-evidence.md#failures-retained-and-architectural-work-still-open).
+
+**Proposed fix:** isolate the built-in Spnego adapter's native operations in
+bounded workers, serialize each authentication context's calls, and retain
+ownership/capacity until native work actually finishes. Caller timeout must revoke
+late results without installing a connection. The detailed ownership and shutdown
+design is [recorded here](experiments/python-windows-authentication-contract.md#3-built-in-provider-worker-ownership).
+
+**Acceptance:** opening timeout returns within a defined tolerance while other
+event-loop work remains responsive; cancellation, late success/error cleanup and
+worker-capacity bounds pass deterministic tests; repeat the unreachable-KDC case
+and successful Kerberos login checks. Verify runtime shutdown separately: caller
+timeout does not promise forced cancellation of a native call.
+
 ## 1 · A Rust client
 
 **Goal:** a second client that follows the same design in Rust. Its code teaches the protocol as the Python code does, with the same names, and links to the same reference pages.

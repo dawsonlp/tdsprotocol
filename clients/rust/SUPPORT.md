@@ -1,6 +1,6 @@
 # Rust client support and remaining work
 
-Working state on `rust-client`, 2026-10-18. This is an unpublished implementation,
+Working state on `rust-client`, 2026-10-19. This is an unpublished implementation,
 not Python feature parity. The design pages define intended behavior for both
 languages; this matrix says what Rust currently implements and what still needs
 code, agreement or independent runtime evidence.
@@ -20,17 +20,25 @@ it is not an instruction to finish every item before M16. See the
 | Connection | Verified TLS, TDS 7.4/8.0, SQL login, app/host/process identity, language, ODBC, read-only intent, one-hop routing | Additional login vocabulary/features and provider contracts |
 | Recovery | Server-reported snapshots/refusals/reset, stable logical handles, fresh wire ids, old exchange retirement, explicit/idle recovery | Real remote failover/platform coverage; extend tests as types/requests arrive |
 | MARS/pool | Per-frame credit, independent readers, shared state/errors, whole-connection explicit leases, reset/discard, unresolved bulk discard | Broader authenticated/platform combinations; measured end-to-end performance |
-| Browser | Instance/machine/DAC, IPv4 broadcast, strict ASCII/UTF-8/Windows-1252, pure codec and controlled UDP | Other shared code pages; actual Windows Browser acceptance (Linux SQL Server has none) |
+| Browser | Instance/machine/DAC, IPv4 broadcast, strict ASCII/UTF-8/Windows-1252, pure codec and controlled UDP; live Windows SQL Browser UDP discovery | Other shared code pages; broader live instance/DAC/broadcast acceptance |
 | Requests | Literal batches; typed named/built-in RPC, batched owned/unique-source calls, defaults, input/output parameters, input-only TVPs/row sources; borrowed bulk finish/abort; explicit transaction-manager messages | Successful distributed-coordinator acceptance; broader server/type combinations |
 | Scalar data | Approved heterogeneous rows; integer/bit/float bits, decimal/money, temporal/GUID, bounded text/binary; exact checked structs, explicit SQL collation views and input writers | Broader server/version collation evidence; Browser codecs have a separate strict policy |
 | Large/special data | PLP max/XML/CLR/native JSON; legacy text/ntext/image reads and whole inputs; borrowed typed chunks, owned values, unique async sources; sql_variant; float32/float16 vector codecs; whole-cell TVP/bulk row sources | Binary XML; live float16 acceptance when the server offers it |
 | Responses | Ordered records, retained call groups/outputs, browse and sensitivity metadata/ranks, fetch/finish, forward result-set/row/value views, explicit read-ahead, once-only SQL errors, partial failure snapshots | Alternate compute tokens and provider extensions |
 | Observation/capture | Steps/messages/packets/tokens, optional-observer failure isolation, credential masking, physical-connection capture, native replay; exchange timing at every level; connection/RPC/TVP/bulk/transaction trees and incremental row/output fragments with ranges/raw/reference links | Complete metadata-extension fields; reconstruction of unrecorded NO_METADATA context; unsupported wire extensions |
-| Authentication | SQL authentication and separately authenticated restricted-principal acceptance | Required: Windows NTLM/Kerberos and selected provider adapters; deferred: Entra/federated exchanges |
+| Authentication | SQL; optional portable NTLM/Kerberos/Negotiate and native signed-in Windows SSPI; 64 real SQL Server login/transport combinations passed with verified TLS, plus controlled-peer scenarios | Required Extended Protection is unsupported: SQL expects tls-unique, unavailable through the pinned rustls API. Owner chose documented limitations and upstream drafts, without dependency forks/patch sets or TLS backend changes. Portable NTLM retained-key erasure is not guaranteed; wider lifecycle acceptance remains; Entra is deferred |
 | Direct password change | LOGIN7 encoding/redaction, final-success credential promotion, recovery, uncertain lost completion; pools reject one-time change requests | Broader server/platform acceptance |
 | Pool configuration | Comparable SQL snapshots, application source/static adapter, bounded opening/recovery reads, stale retirement and explicit failures | Built-in file providers, dynamic TLS/provider bindings and capacity; native platform acceptance |
 | Always Encrypted | Local PKCS#8 RSA/AES/HMAC; transaction/exchange/fixed-age policies; wire version one, exact normalization, fresh named-parameter preparation, results/outputs, owned bulk and independent .NET interoperability; explicit failure values and ciphertext-only core capture/replay | Owned AE values (16 MiB bound); encrypted source producers/borrowed plaintext chunks are not provided. Deferred: Windows certificate-store/Azure providers and enclaves/attestation |
-| Packaging/platforms | One safe Rust crate, Rust 1.99.1 minimum tested on macOS ARM64, optional Tokio/crypto, examples, MIT notice, repeatable checks and local package archive | Native Windows acceptance and broader platform evidence; publication is a separate authorized task |
+| Packaging/platforms | Safe protocol crate plus an isolated native Windows SSPI FFI crate; Rust 1.99.1 on macOS ARM64 and native MSVC Windows, optional Tokio/crypto, examples and MIT notices; four live native cancellation profiles retired their workers | Broader cancellation/security/platform evidence; companion-crate dependency requires a package/release strategy before publication; historical single-crate package evidence does not cover this workspace |
+
+Authentication upstream tracking: [rustls #995](https://github.com/rustls/rustls/issues/995)
+is closed as not planned by its original requester; no implementation is
+committed. The [sspi retained-state cleanup report](../../docs/design/experiments/upstream-sspi-ntlm-zeroization.md)
+and [rustls SQL Server follow-up](../../docs/design/experiments/upstream-rustls-channel-binding.md)
+remain unsubmitted drafts. No verified upstream ticket is recorded for the sspi
+erasure finding. See the [provider review](../../docs/design/experiments/rust-authentication-provider-review.md)
+for source evidence and the limitations we retain.
 
 The approved [public type/value API](../../docs/design/F-rust-value-api.md) is implemented for scalar and large reads.
 The [credential lifetime record](../../docs/design/G-login-credential-lifetime.md)
@@ -55,5 +63,10 @@ detailed timings remain separate work.
 The [transparent encryption design](../../docs/design/O-rust-transparent-encryption.md)
 and [acceptance report](../../docs/design/experiments/rust-transparent-encryption.md)
 close the local AE integration requirements. The [Windows/provider proposal](../../docs/design/P-windows-authentication-campaign.md)
-records the architectural/deployment decisions still awaiting the owner. No GCP
-resource or Windows-authentication implementation is claimed by local acceptance.
+records the deployed campaign and accepted dependency limitations. The
+[live checkpoint](../../docs/design/experiments/rust-gcp-authentication-evidence.md)
+separates Windows interoperability evidence from earlier local acceptance. The
+[follow-up report](../../docs/design/experiments/gcp-authentication-follow-up-evidence.md)
+records later tests and verified project/resource teardown on 2026-10-19;
+Windows credential rotation, broader acceptance and a clean deployment/expiry
+rehearsal remain open.

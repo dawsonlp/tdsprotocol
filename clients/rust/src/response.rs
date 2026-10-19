@@ -337,7 +337,7 @@ impl Retention {
                 }
                 self.record.sequence.push(Item::OutputValue(output.clone()));
             }
-            Record::LoginAck { .. } | Record::FeatureAck(_) => {
+            Record::LoginAck { .. } | Record::FeatureAck(_) | Record::Sspi(_) => {
                 return Err(Error::malformed(0, "LOGINACK in request response"));
             }
         }

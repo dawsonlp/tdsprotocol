@@ -142,8 +142,19 @@ impl Pool {
             .inner
             .services
             .options(&configuration, self.inner.policy);
-        let binding = Binding::new(self.inner.configuration.clone(), configuration);
-        Connection::connect_until(options, deadline, Some(binding)).await
+        let binding = Binding::new(self.inner.configuration.clone(), configuration.clone());
+        match Connection::connect_until(options, deadline, Some(binding)).await {
+            Err(original) if original.is_authentication_failure() => {
+                let refreshed = self.inner.configuration.read(deadline).await?;
+                if *refreshed == *configuration {
+                    return Err(original);
+                }
+                let options = self.inner.services.options(&refreshed, self.inner.policy);
+                let binding = Binding::new(self.inner.configuration.clone(), refreshed);
+                Connection::connect_until(options, deadline, Some(binding)).await
+            }
+            outcome => outcome,
+        }
     }
     pub fn capacity(&self) -> usize {
         self.inner.capacity

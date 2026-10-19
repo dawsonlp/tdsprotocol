@@ -4,6 +4,33 @@ A TDS 7.4 and 8.0 client whose code teaches the protocol, and which can display 
 
 See [the release notes](CHANGELOG.md) for the corrections found during Rust development.
 
+## Windows authentication limitations
+
+The GCP campaign exposed shared limitations and Python follow-up work; basic
+successful logins do not establish complete security acceptance. The current
+Spnego adapter supplies no TLS channel binding, so SQL Extended Protection is
+not an accepted capability. Provider-owned authentication-key erasure has not
+been audited to the same standard as the Rust source review.
+
+The GCP follow-up implements default incoming-token redaction, safe login
+metadata for replay, provider-error diagnostic masking, 48 KiB token/eight-step
+limits and a 64 KiB Windows-login message bound. Configured SQL pools reread once
+on SQL 18452/18456 and retry opening only for changed settings under the original
+deadline; application SQL is never replayed.
+
+Final SSPI tokens are processed even alongside LOGINACK; invalid final tokens,
+extra provider output after server acceptance and duplicate challenges are
+refused. Requiring explicit provider completion still awaits the custom-adapter
+compatibility decision. Windows configuration snapshots
+await their API decision. Synchronous pyspnego startup can block the event loop
+past the opening deadline; worker isolation is also awaiting an owner decision.
+See the
+[cross-client findings](../../docs/design/experiments/rust-python-authentication-limitations.md)
+and [follow-up evidence](../../docs/design/experiments/gcp-authentication-follow-up-evidence.md)
+for scope and remaining acceptance cases. The owner chose documentation
+and potential upstream reports; no dependency forks or TLS backend changes are
+being introduced for this work.
+
 ## Always Encrypted key retention
 
 ```python

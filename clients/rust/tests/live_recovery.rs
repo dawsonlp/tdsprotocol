@@ -17,6 +17,45 @@ use tokio::{
 };
 mod support;
 
+fn live_options() -> tds_client::ConnectOptions {
+    let Some(path) = std::env::var_os("TDS_LIVE_CONFIG") else {
+        return support::docker_options();
+    };
+    // An explicit protected configuration permits the same scenarios against
+    // the Windows lab through a loopback SSH tunnel. Never print its contents.
+    let bytes =
+        zeroize::Zeroizing::new(std::fs::read(path).expect("read protected live configuration"));
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("valid protected live configuration");
+    let pem =
+        std::fs::read(value["ca_file"].as_str().expect("live CA path")).expect("read live CA");
+    let mut roots = rustls::RootCertStore::empty();
+    for certificate in rustls_pemfile::certs(&mut pem.as_slice()) {
+        roots
+            .add(certificate.expect("live CA certificate"))
+            .expect("valid live CA");
+    }
+    let mut options = tds_client::ConnectOptions::new(
+        "127.0.0.1",
+        value["port"]
+            .as_u64()
+            .expect("live tunnel port")
+            .try_into()
+            .expect("valid live port"),
+        value["username"].as_str().expect("live username"),
+        value["password"].as_str().expect("live password"),
+        roots,
+    );
+    options.server_name = Some(
+        value["server_name"]
+            .as_str()
+            .expect("verified server hostname")
+            .into(),
+    );
+    options.database = "master".into();
+    options
+}
+
 #[derive(Clone, Default)]
 struct Output(Arc<std::sync::Mutex<Vec<u8>>>);
 impl std::io::Write for Output {
@@ -150,9 +189,7 @@ async fn pool_rotation_and_borrowed_recovery_read_current_credentials() {
     for version in [ProtocolVersion::V7_4, ProtocolVersion::V8_0] {
         for mars in [false, true] {
             let (name, a, b) = isolated_login();
-            let admin = Connection::connect(support::docker_options())
-                .await
-                .unwrap();
+            let admin = Connection::connect(live_options()).await.unwrap();
             let mut ddl = admin.serial_channel().await.unwrap();
             credential_sql(
                 &mut ddl,
@@ -160,7 +197,7 @@ async fn pool_rotation_and_borrowed_recovery_read_current_credentials() {
             )
             .await;
             let outcome = async {
-                let mut options = support::docker_options();
+                let mut options = live_options();
                 let relay = Relay::new(options.port).await;
                 options.port = relay.port;
                 options.user = name.clone();
@@ -171,7 +208,8 @@ async fn pool_rotation_and_borrowed_recovery_read_current_credentials() {
                 let source = Arc::new(ConfigSource(std::sync::Mutex::new(
                     tds_client::ConnectionConfig::from_options(&options),
                 )));
-                let services = tds_client::ConnectionServices::new(options.roots);
+                let mut services = tds_client::ConnectionServices::new(options.roots);
+                services.server_name = options.server_name;
                 let pool = tds_client::Pool::from_config(
                     source.clone(),
                     2,
@@ -245,9 +283,7 @@ async fn pool_rotation_and_borrowed_recovery_read_current_credentials() {
 async fn direct_password_change_promotes_credential_only_after_successful_login() {
     for version in [ProtocolVersion::V7_4, ProtocolVersion::V8_0] {
         let (name, a, b) = isolated_login();
-        let admin = Connection::connect(support::docker_options())
-            .await
-            .unwrap();
+        let admin = Connection::connect(live_options()).await.unwrap();
         let mut ddl = admin.serial_channel().await.unwrap();
         credential_sql(
             &mut ddl,
@@ -255,7 +291,7 @@ async fn direct_password_change_promotes_credential_only_after_successful_login(
         )
         .await;
         let outcome = async {
-            let mut options = support::docker_options();
+            let mut options = live_options();
             let relay = Relay::new(options.port).await;
             options.port = relay.port;
             options.user = name.clone();
@@ -285,7 +321,7 @@ async fn original_channels_and_close_controls_survive_repeated_recovery() {
     for version in [ProtocolVersion::V7_4, ProtocolVersion::V8_0] {
         for mars in [false, true] {
             timeout(Duration::from_secs(30), async {
-                let mut config = support::docker_options();
+                let mut config = live_options();
                 let relay = Relay::new(config.port).await;
                 config.port = relay.port;
                 config.version = version;
@@ -440,7 +476,7 @@ async fn interrupted_exchange_is_not_replayed_and_old_guards_cannot_close_replac
         for mars in [false, true] {
             for abandon in [false, true] {
                 timeout(Duration::from_secs(20), async {
-                    let mut config = support::docker_options();
+                    let mut config = live_options();
                     let relay = Relay::new(config.port).await;
                     config.port = relay.port;
                     config.version = version;
@@ -519,7 +555,7 @@ async fn server_state_refusals_and_feature_opt_out_prevent_reconnection() {
                 if mars && sql == "BEGIN TRANSACTION" {
                     continue;
                 }
-                let mut config = support::docker_options();
+                let mut config = live_options();
                 let relay = Relay::new(config.port).await;
                 config.port = relay.port;
                 config.version = version;

@@ -47,6 +47,7 @@ pub enum Execution {
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    Authentication(&'static str),
     #[cfg(feature = "encryption")]
     Encryption(crate::encryption::Error),
     NotYetRead(&'static str),
@@ -104,6 +105,13 @@ pub struct Error {
 }
 
 impl Error {
+    #[cfg(feature = "tokio")]
+    pub(crate) fn is_authentication_failure(&self) -> bool {
+        matches!(&self.cause().kind, ErrorKind::Authentication(_))
+            // Windows NTLM refusal is reported as 18452 by SQL Server; SQL
+            // credentials commonly use 18456. Both must refresh the source.
+            || matches!(&self.cause().kind, ErrorKind::Server(message) if matches!(message.number, 18452 | 18456))
+    }
     /// Underlying failure shared by several channel/close waiters. This unwraps
     /// only Shared; Cleanup still exposes both original and cleanup failures.
     pub fn cause(&self) -> &Self {
@@ -190,6 +198,7 @@ impl fmt::Display for Error {
         }
         write!(f, "TDS {:?}: ", self.step)?;
         match &self.kind {
+            ErrorKind::Authentication(reason) => write!(f, "authentication failed: {reason}"),
             #[cfg(feature = "encryption")]
             ErrorKind::Encryption(e) => e.fmt(f),
             ErrorKind::NotYetRead(reason) => write!(f, "not yet read: {reason}"),
