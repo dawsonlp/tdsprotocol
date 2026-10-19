@@ -10,6 +10,16 @@
     outcome: 'tell when each slice and milestone is finished, with four kinds of check: what a reader can do, what the client does, what the runtime shows, and how the code reads.',
     body: () => `
       <p>The milestones are planned in ${L('build', 'Building the Client §4', '4-milestones')}.</p>
+      <h2 id="rust-scoped-completion-agreed-2026-10-18-d-65">Rust scoped completion · agreed 2026-10-18 (${D(65)})</h2>
+      <p><b>Status: required, not complete.</b> The ${L('roadmap', 'roadmap', 'rust-completion-sequence--agreed-2026-10-18-d-65')} sets the sequence: local work, transient GCP Windows lab, Windows authentication, verified teardown. Earlier Python milestones below retain their language-specific scope.</p>
+      ${list([
+        'Local implementation is solid for its declared scope: agreed observation/replay gaps, exact values, failure/cleanup, readable source/examples, package/API review, supported Rust/platform floor and repeatable checks. Exclusions remain explicit; unavailable-environment skips are not acceptance.',
+        'Local-key Always Encrypted: metadata, normalization, authenticated cryptography and parameter orchestration; exact round trips plus independent .NET mutual read/write and deterministic lookups.',
+        'Reproducible Terraform GCP lab, domain/DNS/time/SPNs, verified SQL TLS and runners. Python and independent-client baselines establish the environment. Explicit project, region, current cost estimate and finite test window; create only after local work.',
+        'Live Windows NTLM local/domain, Kerberos and negotiation with actual scheme assertions, positive/negative cases, redaction, cancellation/failures and relevant pool/recovery. Both TDS versions and plain/MARS where supported; native Windows and actual Browser acceptance.',
+        'Retain redacted evidence and verify full removal of owned VMs, disks, addresses and other lab resources. Fixed expiry/delete fallback complements normal and failure-path teardown.',
+        'Accurate scope: defer Entra, Azure-specific features/providers, Windows certificate-store key-provider support and enclaves/attestation. No full Python/Azure/failover parity claim. M16 follows scoped completion; publication is separate.',
+      ])}
       <h2>Slice 1 · Connect &amp; log in</h2>
       <p><b>Status: partly built, checked 2026-10-16; updated by M12 and M13.</b> <b>Built and tested:</b> the spec’s samples round-trip (client 1); connecting on 7.4 with whole-connection encryption (2); every clear failure (4, M12); serial channels (6); the password never shown (runtime 5). <b>Built in M13:</b> connecting on 8.0 (3); offline replay (runtime 3); the observability levels (runtime 1, 2 and 4). <b>Not built:</b> routing (5, waits on D-11). <i>Built in M14.</i> <b>Not done:</b> the reader test, and a check of the code against its pages.</p>
       <h3>A reader can… (the documents work)</h3>

@@ -1,0 +1,146 @@
+[
+  {
+    "name": "CoordinatorAddress()",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "1600000012000000020000000000000000000100000000000000"
+  },
+  {
+    "name": "Propagate(cookie=b'cookie')",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "1600000012000000020000000000000000000100000001000600636f6f6b6965"
+  },
+  {
+    "name": "Promote()",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "160000001200000002000000000000000000010000000600"
+  },
+  {
+    "name": "Begin(isolation=None, name='')",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "1600000012000000020000000000000000000100000005000000"
+  },
+  {
+    "name": "Begin(isolation=<Isolation.SERIALIZABLE: 4>, name='a\ud83e\udd80')",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "160000001200000002000000000000000000010000000500040661003ed880dd"
+  },
+  {
+    "name": "Save(name='before')",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "1600000012000000020000000000000000000100000009000c6200650066006f0072006500"
+  },
+  {
+    "name": "Save(name='')",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "16000000120000000200000000000000000001000000090000"
+  },
+  {
+    "name": "Commit(name='', begin=None)",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "1600000012000000020000000000000000000100000007000000"
+  },
+  {
+    "name": "Rollback(name='before', begin=None)",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "1600000012000000020000000000000000000100000008000c6200650066006f007200650000"
+  },
+  {
+    "name": "Commit(name='outer', begin=Begin(isolation=<Isolation.SNAPSHOT: 5>, name='next'))",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "1600000012000000020000000000000000000100000007000a6f0075007400650072000105086e00650078007400"
+  },
+  {
+    "name": "Rollback(name='', begin=Begin(isolation=None, name=''))",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "16000000120000000200000000000000000001000000080000010000"
+  },
+  {
+    "name": "Begin(isolation=None, name='\\ud800')",
+    "transaction": 0,
+    "outstanding": 4,
+    "body": "160000001200000002000000000000000000010000000500000200d8"
+  },
+  {
+    "name": "CoordinatorAddress()",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b000000000000000200000000000000"
+  },
+  {
+    "name": "Propagate(cookie=b'cookie')",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b000000000000000200000001000600636f6f6b6965"
+  },
+  {
+    "name": "Promote()",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b00000000000000020000000600"
+  },
+  {
+    "name": "Begin(isolation=None, name='')",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b000000000000000200000005000000"
+  },
+  {
+    "name": "Begin(isolation=<Isolation.SERIALIZABLE: 4>, name='a\ud83e\udd80')",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b00000000000000020000000500040661003ed880dd"
+  },
+  {
+    "name": "Save(name='before')",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b000000000000000200000009000c6200650066006f0072006500"
+  },
+  {
+    "name": "Save(name='')",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b0000000000000002000000090000"
+  },
+  {
+    "name": "Commit(name='', begin=None)",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b000000000000000200000007000000"
+  },
+  {
+    "name": "Rollback(name='before', begin=None)",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b000000000000000200000008000c6200650066006f007200650000"
+  },
+  {
+    "name": "Commit(name='outer', begin=Begin(isolation=<Isolation.SNAPSHOT: 5>, name='next'))",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b000000000000000200000007000a6f0075007400650072000105086e00650078007400"
+  },
+  {
+    "name": "Rollback(name='', begin=Begin(isolation=None, name=''))",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b0000000000000002000000080000010000"
+  },
+  {
+    "name": "Begin(isolation=None, name='\\ud800')",
+    "transaction": 123,
+    "outstanding": 2,
+    "body": "160000001200000002007b00000000000000020000000500000200d8"
+  }
+]

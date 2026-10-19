@@ -1,0 +1,54 @@
+{
+  "method": "median of five batch means, ten transactions per batch after warmup; file read, worker scheduling, guarded buffers, value crypto, exchange/end cleanup included",
+  "results": [
+    {
+      "batch_mean_range_us": [
+        10728.8417,
+        10789.383399999999
+      ],
+      "bytes_per_value": 64,
+      "exchanges_per_transaction": 20,
+      "live_columns_after_end": 0,
+      "live_masters_after_end": 0,
+      "master_loads": 1000,
+      "median_transaction_wall_us": 10744.7167,
+      "profile": "exchange_exchange",
+      "transactions": 50,
+      "unwraps": 1000,
+      "work": "one deterministic encryption and authenticated decryption per exchange"
+    },
+    {
+      "batch_mean_range_us": [
+        5840.6334,
+        5995.5125
+      ],
+      "bytes_per_value": 64,
+      "exchanges_per_transaction": 20,
+      "live_columns_after_end": 0,
+      "live_masters_after_end": 0,
+      "master_loads": 50,
+      "median_transaction_wall_us": 5856.4334,
+      "profile": "transaction_exchange",
+      "transactions": 50,
+      "unwraps": 1000,
+      "work": "one deterministic encryption and authenticated decryption per exchange"
+    },
+    {
+      "batch_mean_range_us": [
+        559.9332999999999,
+        566.5667000000001
+      ],
+      "bytes_per_value": 64,
+      "exchanges_per_transaction": 20,
+      "live_columns_after_end": 0,
+      "live_masters_after_end": 0,
+      "master_loads": 50,
+      "median_transaction_wall_us": 563.1416999999999,
+      "profile": "transaction_transaction",
+      "transactions": 50,
+      "unwraps": 50,
+      "work": "one deterministic encryption and authenticated decryption per exchange"
+    }
+  ],
+  "scope": "Implemented key service, release build, warm PUBLIC synthetic PKCS8 PEM fixture; current-thread Tokio; no SQL/network or CPU measurement"
+}

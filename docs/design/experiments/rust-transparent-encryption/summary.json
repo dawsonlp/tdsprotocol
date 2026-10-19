@@ -1,0 +1,205 @@
+{
+  "started": "2026-10-18T23:01:03.340275+00:00",
+  "checks": [
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--check"
+      ],
+      "returncode": 0,
+      "seconds": 0.237061
+    },
+    {
+      "name": "default",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline"
+      ],
+      "returncode": 0,
+      "seconds": 121.71803,
+      "passed": 209,
+      "failed": 0,
+      "ignored": 57
+    },
+    {
+      "name": "core",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--no-default-features"
+      ],
+      "returncode": 0,
+      "seconds": 109.351991,
+      "passed": 90,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "encryption",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--all-features"
+      ],
+      "returncode": 0,
+      "seconds": 131.174348,
+      "passed": 240,
+      "failed": 0,
+      "ignored": 61
+    },
+    {
+      "name": "clippy-default",
+      "command": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 11.401482
+    },
+    {
+      "name": "clippy-core",
+      "command": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--no-default-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 10.065916
+    },
+    {
+      "name": "clippy-encryption",
+      "command": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "returncode": 0,
+      "seconds": 11.839805
+    },
+    {
+      "name": "rustdoc",
+      "command": [
+        "cargo",
+        "doc",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--all-features",
+        "--no-deps"
+      ],
+      "returncode": 0,
+      "seconds": 1.623829
+    },
+    {
+      "name": "live",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "/Users/dawsonlp/repos/tdsprotocol/clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1",
+        "--nocapture"
+      ],
+      "returncode": 0,
+      "seconds": 45.29016,
+      "passed": 61,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "additional_checks": [
+    {
+      "name": "default-live",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "clients/rust/Cargo.toml",
+        "--locked",
+        "--offline",
+        "--tests",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "passed": 57,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "package",
+      "command": [
+        "cargo",
+        "package",
+        "--manifest-path",
+        "clients/rust/Cargo.toml",
+        "--allow-dirty",
+        "--locked",
+        "--offline",
+        "--all-features"
+      ],
+      "returncode": 0
+    }
+  ],
+  "environment": {
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "branch": "rust-client",
+    "baseline_commit": "82998a9aae0413899722c0f4bb976f152c807c51",
+    "sql_image": "mcr.microsoft.com/mssql/server:2025-CU9-GDR1-ubuntu-24.04",
+    "sql_image_id": "sha256:742481d1b1186cccc81220a1eaacef244ca8d0f7d19c8e5c70df8ae541ffbab2",
+    "dotnet_sdk_image": "mcr.microsoft.com/dotnet/sdk@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa",
+    "dotnet_sdk_architecture": "arm64",
+    "sqlclient": "7.1.1"
+  },
+  "completed": "2026-10-18T23:10:18.935634+00:00",
+  "scope": "Uncommitted local source; no Rust publication, Windows authentication or cloud deployment",
+  "test_database_cleanup": "No tds_rust_ae_ campaign databases remain; final read-only inventory verified"
+}

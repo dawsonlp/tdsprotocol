@@ -1,0 +1,5 @@
+{"scope":"Rust buffer lifecycle, zeroize 1.9.1, optimized, wall time only","results":[
+{"bytes":32,"median_wall_ns":37.794,"batch_mean_range_ns":[32.573,46.361],"operations_per_batch":200000,"batches":5}
+,{"bytes":96,"median_wall_ns":46.653,"batch_mean_range_ns":[41.020,54.672],"operations_per_batch":200000,"batches":5}
+,{"bytes":2048,"median_wall_ns":505.377,"batch_mean_range_ns":[495.821,517.842],"operations_per_batch":200000,"batches":5}
+]}

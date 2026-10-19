@@ -839,9 +839,22 @@ class Pool:
         if self._config_state is None:
             return await connect(self._host, self._port, observe=self._observe, **self._options)
         configuration = await self._config_state.read(deadline)
-        options = {**self._options, **configuration._options()}
-        options["timeout"] = max(0, deadline - asyncio.get_running_loop().time())
-        connection = await connect(observe=self._observe, **options)
+        async def opening(value):
+            options = {**self._options, **value._options()}
+            options["timeout"] = max(0, deadline - asyncio.get_running_loop().time())
+            return await connect(observe=self._observe, **options)
+
+        async with asyncio.timeout_at(deadline):
+            try:
+                connection = await opening(configuration)
+            except LoginRejected as refusal:
+                if not any(error.number in (18452, 18456) for error in refusal.errors):
+                    raise
+                refreshed = await self._config_state.read(deadline)
+                if refreshed == configuration:
+                    raise
+                configuration = refreshed
+                connection = await opening(configuration)
         connection._configuration = (self._config_state, configuration)
         connection._timeout = self._timeout  # preserve the full budget for a later recovery
         return connection

@@ -1,0 +1,360 @@
+   Compiling tds-client v0.1.0 (/Users/dawsonlp/repos/tdsprotocol/clients/rust)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.78s
+     Running unittests src/lib.rs (target/debug/deps/tds_client-651f3d57e805b7e4)
+
+running 39 tests
+test browser::tests::requests_and_replies_match_the_python_mcsqlr_examples ... ok
+test browser::tests::every_short_datagram_wrong_length_tag_and_grammar_is_refused ... ok
+test browser::tests::encoded_name_limits_and_strict_codecs_preserve_the_python_values ... ok
+test capture::tests::buffered_flush_failure_is_returned_and_create_never_truncates ... ok
+test capture::tests::whole_login_redaction_preserves_every_header_and_split_boundary ... ok
+test connection::core::tests::busy_state_and_exchange_identity_survive_without_a_response_guard ... ok
+test connection::core::tests::channel_lifetimes_never_reuse_ids_and_mars_refuses_wire_id_exhaustion ... ok
+test connection::core::tests::a_missing_first_packet_clock_is_not_reconstructed_from_later_packets ... ok
+test connection::core::tests::ack_does_not_release_until_its_last_packet_and_unsolicited_ack_is_fatal ... ok
+test connection::core::tests::encoding_failure_keeps_the_reset_pending_and_emits_no_request ... ok
+test connection::core::tests::cancel_timing_waits_for_ack_and_never_invents_an_unsent_milestone ... ok
+test connection::core::tests::fatal_server_error_is_retained_and_prevents_reuse ... ok
+test connection::core::tests::final_token_waits_for_last_packet_and_never_accepts_trailing_payload ... ok
+test connection::core::tests::attention_waits_past_normal_done_for_ack_in_a_later_message ... ok
+test connection::core::tests::session_announcements_apply_before_reuse_and_empty_count_is_not_zero ... ok
+test connection::core::tests::sibling_channels_have_independent_exchange_clocks ... ok
+test connection::core::tests::malformed_input_permanently_revokes_core_output_and_authority ... ok
+test login7::tests::login_options_match_the_shared_python_definition_exactly ... ok
+test connection::core::tests::recovery_rebinds_logical_channels_and_recordings_use_logical_ids ... ok
+test login7::tests::password_change_matches_python_and_masks_both_credentials ... ok
+test mars::tests::fragmented_headers_lengths_and_flags ... ok
+test login7::tests::recovery_extension_matches_python_initial_and_recovery_logins ... ok
+test mars::tests::wraparound_and_fin_handshake ... ok
+test mars::tests::credit_is_per_consumed_frame_and_siblings_are_independent ... ok
+test packet::tests::malformed_lengths_and_changed_message_type_fail ... ok
+test requests::tests::autocommit_header_is_one_while_a_transaction_counts_concurrent_requests ... ok
+test session::tests::per_state_sequences_refusal_reset_and_exhaustion_follow_python ... ok
+test prelogin::tests::directory_requires_nonoverlapping_bounded_entries_and_full_encryption ... ok
+test session::tests::reset_restores_environment_but_transaction_waits_for_its_own_announcement ... ok
+test connection::core::tests::feature_acknowledgements_preserve_downgrades_and_reject_invalid_or_unrequested_values ... ok
+test tokens::tests::exact_text_keeps_unpaired_surrogates ... ok
+test session::tests::recovery_snapshots_match_python_and_the_mstds_example ... ok
+test tokens::tests::signed_return_status_spans_each_byte_boundary ... ok
+test tokens::tests::truncated_bounded_token_is_malformed_and_unknown_type_is_refused ... ok
+test tokens::tests::saved_json_columns_use_the_current_sessions_encoding ... ok
+test connection::core::tests::timing_requires_complete_packets_and_terminal_message_proof_at_every_level ... ok
+test tokens::tests::tokens_cross_every_boundary_without_losing_metadata ... ok
+test tokens::tests::recovery_tokens_cross_each_byte_boundary_and_reject_truncated_bodies ... ok
+test packet::tests::every_fragment_boundary_and_one_byte_feeds ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/browser.rs (target/debug/deps/browser-0f7b39ffcc77b173)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bulk_shell.rs (target/debug/deps/bulk_shell-49f09652ca9af122)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cancellation.rs (target/debug/deps/cancellation-43d38ac9b6e373f2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/channel_close.rs (target/debug/deps/channel_close-4e52e30e4d3dd9d7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-70f0275d71f118fe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/collations.rs (target/debug/deps/collations-eb6efec0a5b06284)
+
+running 2 tests
+test unknown_collations_unicode_only_and_unrepresentable_text_never_guess_or_replace ... ok
+test sql_code_pages_match_python_on_every_byte_pair_and_streaming_boundary ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+
+     Running tests/config.rs (target/debug/deps/config-d12ad6256d782d6e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/connection_failures.rs (target/debug/deps/connection_failures-50eff7eee48600a3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/decoder_robustness.rs (target/debug/deps/decoder_robustness-50b63eca5c1fe51c)
+
+running 1 test
+test seeded_malformed_messages_and_fragmented_tokens_never_panic_or_escape_bounds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/encryption_live.rs (target/debug/deps/encryption_live-39ba7e30b16ea35f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/inspection.rs (target/debug/deps/inspection-a6922dc98062a920)
+
+running 5 tests
+test malformed_token_keeps_a_located_prefix_and_disabled_inspection_builds_no_tree ... ok
+test null_bitmap_cells_have_zero_byte_spans_and_keep_the_bitmap_evidence ... ok
+test field_ranges_and_bytes_match_pythons_inspection_definitions ... ok
+test replay_inspection_masks_credential_spans_and_preserves_existing_diagnostics ... ok
+test login_credentials_are_redacted_and_tree_raw_and_rendering_are_bounded ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/inspection_extended.rs (target/debug/deps/inspection_extended-b96d4572fadd6a85)
+
+running 3 tests
+test bulk_known_length_payloads_remain_raw_instead_of_fabricating_plp_headers ... ok
+test streamed_row_and_output_fields_keep_token_ranges_at_every_small_fragment ... ok
+test rpc_table_and_transaction_fields_use_the_same_checked_readers_as_replay ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/inspection_shell.rs (target/debug/deps/inspection_shell-2d02e6c1d3f72533)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/json.rs (target/debug/deps/json-2fb9cb3ae24728f5)
+
+running 2 tests
+test json_utf8_rejects_overlong_out_of_range_invalid_and_truncated_characters ... ok
+test json_result_encodings_and_strict_utf8_parameters_match_python_at_every_fragment ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/large_values.rs (target/debug/deps/large_values-1d08aa93b387d40e)
+
+running 6 tests
+test xml_schema_and_legacy_table_provenance_are_retained_separately_from_payload ... ok
+test malformed_lengths_and_unfinished_values_are_not_complete ... ok
+test null_empty_nbc_and_legacy_pointer_have_distinct_boundaries ... ok
+test owned_large_parameter_and_result_bytes_match_python_codec ... ok
+test plp_every_fragment_keeps_exact_unicode_and_surrogate_boundaries ... ok
+test xml_and_large_outputs_materialize_without_pending_buffer_growth ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests/live_bulk.rs (target/debug/deps/live_bulk-58294dccd9d14360)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_login.rs (target/debug/deps/live_login-b3118f3ecbfe4774)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_recovery.rs (target/debug/deps/live_recovery-44bce02f781a6d34)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_replay.rs (target/debug/deps/live_replay-fb46e3a86ac0d5ba)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_rpc.rs (target/debug/deps/live_rpc-12412ea4cd753415)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_scalars.rs (target/debug/deps/live_scalars-18d95c18882767ea)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_special.rs (target/debug/deps/live_special-50458a4179689bcf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_streaming.rs (target/debug/deps/live_streaming-8cfda2af997e9a03)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_tables.rs (target/debug/deps/live_tables-6998afc6f0058d3a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_transactions.rs (target/debug/deps/live_transactions-8ae32f8bbf4ac8ad)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mars.rs (target/debug/deps/mars-377769616ae0dbc3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/metadata.rs (target/debug/deps/metadata-29c115613c272685)
+
+running 1 test
+test classification_versions_and_browse_tokens_decode_across_every_byte ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/observation.rs (target/debug/deps/observation-bb9f580a6856cf75)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/pool.rs (target/debug/deps/pool-5301fcb9508eb5e7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/recovery.rs (target/debug/deps/recovery-b1cbbc824531b133)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/replay.rs (target/debug/deps/replay-fb97ffcf80189fa8)
+
+running 10 tests
+test omitted_metadata_is_missing_evidence_instead_of_malformed_wire ... ok
+test python_event_text_preserves_lone_surrogates_pairs_and_literal_escape_sequences ... ok
+test truncated_packets_messages_values_and_unknown_formats_have_distinct_diagnostics ... ok
+test invalid_or_duplicate_negotiation_retires_later_decoding_instead_of_guessing ... ok
+test python_rpc_and_transaction_bodies_decode_with_exact_flags_and_values ... ok
+test interleaved_logical_channels_wait_for_real_attention_ack_and_keep_recorded_events ... ok
+test sql_bytes_are_decoded_without_using_recorded_human_text ... ok
+test feature_context_is_shared_but_metadata_readers_are_per_channel ... ok
+test python_large_input_layouts_and_table_rows_are_read_without_result_framing ... ok
+test malformed_recordings_preserve_prefix_and_never_echo_json_or_credentials ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/responses.rs (target/debug/deps/responses-5a48f35354df467e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/routing.rs (target/debug/deps/routing-d8c5d3a64350e4ee)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rpc.rs (target/debug/deps/rpc-efedf69ec54df86e)
+
+running 3 tests
+test invalid_declarations_values_and_rounding_are_refused_without_exposing_values ... ok
+test rpc_bodies_match_python_names_numbers_flags_default_null_and_batch_separator ... ok
+test output_values_decode_transactionally_across_every_boundary ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rpc_shell.rs (target/debug/deps/rpc_shell-57f87c7ddcc10803)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/scalars.rs (target/debug/deps/scalars-99fd728cc0483d2e)
+
+running 5 tests
+test exact_conversions_reject_rounding_and_calendar_overflow ... ok
+test declared_integer_identity_is_independent_of_wire_code ... ok
+test malformed_scalar_metadata_and_payloads_fail_without_committing_a_row ... ok
+test scalar_parameter_writers_match_the_python_wire_bytes ... ok
+test python_scalar_limits_decode_across_fragments_and_both_null_forms ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/streaming_shell.rs (target/debug/deps/streaming_shell-bd200ace39c73fa8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tables.rs (target/debug/deps/tables-17eda3d14ca93b07)
+
+running 1 test
+test input_only_table_requests_match_pythons_null_defaults_hints_and_value_layouts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tables_shell.rs (target/debug/deps/tables_shell-618d701eba377f98)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/timing.rs (target/debug/deps/timing-e1f3d75ac4abc80b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transactions.rs (target/debug/deps/transactions-2ec49cbd97fd3c87)
+
+running 1 test
+test transaction_messages_match_python_exactly_and_refuse_unencodable_inputs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/variant.rs (target/debug/deps/variant-55417d280f441498)
+
+running 2 tests
+test bounded_variant_corruption_fails_instead_of_waiting_for_more_bytes ... ok
+test variant_base_types_and_parameter_bytes_match_python_across_fragments ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/vector.rs (target/debug/deps/vector-8e2f2f475c269978)
+
+running 2 tests
+test malformed_vector_layout_count_element_and_width_are_refused ... ok
+test exact_vector_round_trips_match_python_and_binary16_conversion_is_exhaustive ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tds_client
+
+running 4 tests
+test src/replay.rs - replay::replay (line 560) - compile ... ok
+test src/requests/rpc.rs - requests::rpc (line 5) - compile ... ok
+test src/requests/rows.rs - requests::rows (line 5) - compile ... ok
+test src/text.rs - text (line 8) ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 1.88s; merged doctests compilation took 1.81s

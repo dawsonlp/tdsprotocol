@@ -1,0 +1,13 @@
+   Compiling tds-client v0.1.0 (/Users/dawsonlp/repos/tdsprotocol/clients/rust)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.83s
+     Running tests/encryption_live.rs (target/debug/deps/encryption_live-fc506cfeae14f3e7)
+
+running 1 test
+KP_CONTROLLED V7_4 mars=false old_closed=true new_loads=1 recoveries=1
+KP_CONTROLLED V7_4 mars=true old_closed=true new_loads=1 recoveries=1
+KP_CONTROLLED V8_0 mars=false old_closed=true new_loads=1 recoveries=1
+KP_CONTROLLED V8_0 mars=true old_closed=true new_loads=1 recoveries=1
+test kp28_controlled_physical_recovery_revokes_old_key_authority ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.07s
+

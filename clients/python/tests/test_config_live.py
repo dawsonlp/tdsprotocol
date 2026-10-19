@@ -56,24 +56,26 @@ def test_rotation_failed_login_and_borrowed_recovery_after_pool_close(server, ve
                     source = Source(tds.ConnectionConfig(server["host"], relay.port, name, a,
                                                         tds_version=version, mars=mars))
                     pool = tds.Pool.from_config(source, size=2,
-                                               services=tds.ConnectionServices(ssl_context=server["ssl_context"]))
+                                               services=tds.ConnectionServices(ssl_context=server["ssl_context"],
+                                                                              server_hostname=server.get("server_hostname")))
                     first = await pool._borrow()
                     original = first.serial_channel()
                     await fetch(original, "SELECT 11")
                     await credential_sql(channel, f"ALTER LOGIN [{name}] WITH PASSWORD='{b[:]}'")
-                    # A failed opening does not retry or poison this pool.
+                    # A refused opening rereads once; unchanged credentials do
+                    # not reopen or poison the pool.
                     with pytest.raises(tds.LoginRejected):
                         await pool._borrow()
-                    assert source.calls == 2 and pool.in_use == 1
+                    assert source.calls == 3 and pool.in_use == 1
                     source.value = dataclasses.replace(source.value, password=b)
                     second = await pool._borrow()
-                    assert source.calls == 3
+                    assert source.calls == 4
                     assert (await fetch(original, "SELECT 12")).result_sets[0].rows == ((12,),)
                     await pool._give_back(first)
                     assert not first.alive
                     await pool._give_back(second)
                     second = await pool._borrow()
-                    assert source.calls == 3  # idle checkout does not read configuration
+                    assert source.calls == 4  # idle checkout does not read configuration
                     active = second.serial_channel()
                     await fetch(active, "SELECT 21")  # apply the deferred reset
                     await credential_sql(channel, f"ALTER LOGIN [{name}] WITH PASSWORD='{c[:]}'")
@@ -88,7 +90,7 @@ def test_rotation_failed_login_and_borrowed_recovery_after_pool_close(server, ve
                     assert refused.value.__cause__.phase == "compatibility"
                     source.value = dataclasses.replace(source.value, database="")
                     await second.recover()  # no pool owner or spare capacity required
-                    assert source.calls == 5 and second.recoveries == 1
+                    assert source.calls == 6 and second.recoveries == 1
                     assert (await fetch(active, "SELECT 33")).result_sets[0].rows == ((33,),)
                     await pool._give_back(second)
             finally:
@@ -115,7 +117,8 @@ def test_root_close_interrupts_a_borrowed_configuration_read(server):
         async with Relay(server) as relay:
             source = Waiting(tds.ConnectionConfig(server["host"], relay.port, server["user"], server["password"]))
             pool = tds.Pool.from_config(source, size=1,
-                                       services=tds.ConnectionServices(ssl_context=server["ssl_context"]))
+                                       services=tds.ConnectionServices(ssl_context=server["ssl_context"],
+                                                                              server_hostname=server.get("server_hostname")))
             async with pool.connection() as connection:
                 await fetch(connection.serial_channel(), "SELECT 1")
                 relay.cut()
@@ -136,7 +139,8 @@ def test_recovery_candidate_superseded_by_a_new_opening_is_closed(server, monkey
         async with Relay(server) as relay:
             source = Source(tds.ConnectionConfig(server["host"], relay.port, server["user"], server["password"]))
             pool = tds.Pool.from_config(source, size=2,
-                                       services=tds.ConnectionServices(ssl_context=server["ssl_context"]))
+                                       services=tds.ConnectionServices(ssl_context=server["ssl_context"],
+                                                                              server_hostname=server.get("server_hostname")))
             old = await pool._borrow()
             await fetch(old.serial_channel(), "SELECT 1")
             original_run = tds.Connection._run

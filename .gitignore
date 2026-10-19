@@ -12,5 +12,8 @@ docs/specification/
 __pycache__/
 .pytest_cache/
 
+# Rust build output
+target/
+
 # macOS
 .DS_Store

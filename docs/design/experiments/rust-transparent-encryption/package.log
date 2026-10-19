@@ -1,0 +1,6 @@
+   Packaging tds-client v0.1.0 (/Users/dawsonlp/repos/tdsprotocol/clients/rust)
+    Packaged 177 files, 3.8MiB (881.6KiB compressed)
+   Verifying tds-client v0.1.0 (/Users/dawsonlp/repos/tdsprotocol/clients/rust)
+    Blocking waiting for file lock on build directory
+   Compiling tds-client v0.1.0 (/Users/dawsonlp/repos/tdsprotocol/clients/rust/target/package/tds-client-0.1.0)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.88s

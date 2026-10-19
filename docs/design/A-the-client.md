@@ -120,7 +120,7 @@ async with pool.connection() as connection:  # borrowed whole: yours alone until
 
 Per MS-TDS, a session reset doesn't reset distributed transactions or the isolation level (§2.2.3.1.2). A connection's session id (from the packet header) identifies its session while the session exists. SQL Server reuses ids after a session ends, so a new connection can get the id of a closed one.
 
-Every serial channel is **owned by the task that opened it** and **closes when its block ends**.
+The Python client follows D-21: every serial channel is **owned by the task that opened it** and **closes when its block ends**. The [Rust proposal](D-rust-development.md#1--ownership-and-permissions-come-first) uses unique movable authority instead of task identity (D-64); its core move/borrow and awaited cleanup contracts are agreed.
 
 | When client code… | …this happens |
 |---|---|
@@ -129,9 +129,17 @@ Every serial channel is **owned by the task that opened it** and **closes when i
 | uses a serial channel from another task | fails immediately, every time (D-21) |
 | cancels or closes from another task | allowed (D-23) |
 | hands a serial channel to another task explicitly | allowed; ownership moves (D-21) |
-| leaves the channel's block | the channel closes (D-21) |
+| leaves the channel's block | channel authority is revoked; an active exchange is canceled/drained before release (D-21) |
 | hits a fatal error on any channel | every channel on the connection fails with that error (D-17) |
 | receives an announcement on any channel | the connection's shared session state is updated (D-17) |
+
+Channel close revokes authority for one lifetime. If an exchange is active, close
+cancels and drains through acknowledgement **and its message boundary**, within a
+separate total cleanup budget (default 5 seconds). Failure or canceled cleanup
+discards the connection. Repeated close calls share the first deadline; stale
+controls cannot close a replacement. A plain channel's local lifetime id is not
+a fixed wire id. Closing does not promise rollback. A pool can reuse a connection
+after this cleanup is proved; an unresolved abandoned exchange still forces discard.
 
 MARS exists for one pattern: reading one result while making other requests on the same connection.
 
@@ -405,17 +413,39 @@ Every line is generated from the definitions; nothing is labeled separately for 
 - **Every byte is reachable:** `event.node.find("login reply", "LOGINACK", "tds version")`. Each structure in the full view names the reference page that explains it. Large values are summarized (D-47).
 - **Timing:**
   - Each connect step shows its time since connecting began: `● hello · at 24 ms`.
-  - Each response shows the time from sending to its first packet (roughly, how long the server took before answering) and to its end: `← response · … · first packet 12 ms · done 40 ms`.
-  - The durations are shown at the end of the line, separate from its text. A capture records them.
+  - Each response shows the time from complete request handoff to consumption of its first complete packet and to its terminal message boundary: `← response · … · first packet 12 ms · done 40 ms`. This is observed exchange latency, including transport, scheduling and application delay; it does not isolate server execution time.
+  - Durations are displayed separately from descriptive event text. A capture records them.
   - A capture's first line records the wall-clock start.
   - `response.timing` gives applications the same: `sent`, `first_packet`, `ended`, `until_first_packet`, `until_end`. It's collected at every level.
+  - Rust exposes `Response::timing()` and `FetchedResponse::timing`, using monotonic `Duration` milestones relative to a physical connection. Missing milestones remain unknown. Cancellation completion means its acknowledgement message ended, not SQL success or rollback. Recovery begins a fresh physical clock; snapshots of old exchanges keep their own evidence. Recorded `took` descriptions use measured durations, never replay runtime.
 - **Captures and replay:**
   - `capture=Capture("session.jsonl")`, or `connection.capture` between exchanges, records every event's line and every plaintext packet, with times;
   - `replay("session.jsonl", Printer(Level.FULL))` decodes the packets with the same definitions and shows the identical view;
   - the login's password is zeroed unless `keep_password=True`;
   - query text and data stay;
-  - saved table-valued inputs decode their declaration, default columns, sort/unique hints, column placement and exact rows as `types.TableInput`, separately from result cells (Python 0.2.0).
+  - saved table inputs retain their declaration, default columns, ordering hints, placement and exact rows. They are input evidence, not result cells;
+  - Rust's offline reader and CLI inspect the same recordings. [Design K](K-offline-replay.md) defines its evidence boundaries. [Design L](L-rust-field-inspection.md) records connection/request trees, incremental response fragments and remaining extension coverage.
 - **The password stays hidden at full** unless an observer reveals it for the sessions it watches: `Printer(…, reveal_password=True)`.
+- **Diagnostic output failure:** an optional observer that raises is disabled;
+  database work and any recording continue. Its exception is available separately
+  as `connection.observation_error`, cleared when an observer is installed.
+  Pool callbacks follow the same policy (`pool.observation_error`). The current
+  decoding mode remains unchanged until explicitly reconfigured. Saved-recording
+  failure instead raises `tds.CaptureError`, retains its writer `cause`, closes
+  the connection and wakes waiters. Each line is flushed to detect buffered write
+  failures; this is not a disk-durability guarantee. Recovery cannot resume an
+  incomplete recording. Sent SQL may have executed; closing does not prove rollback.
+
+**Recording ownership:** one recording belongs permanently to one physical
+connection. `Capture` rejects attachment to a different physical lifetime, even
+after detachment/close. Pools require `capture_factory`, a callable returning a
+new Capture with a distinct output for every opened connection. Reusing that
+connection across loans keeps its recording. Connect also accepts the factory
+for separate recordings when routing or recovery opens a new connection. A direct
+capture refuses those transitions. The application owns/closes its Python capture
+resources. This keeps the existing format, which has channel ids but no connection
+ids, independently replayable. Rust moves one non-Clone Capture into each driver
+and uses the same factory rule (Rust plan, section 8).
 
 **Still to design** (carried over from the earlier draft):
 - views: annotated hex dump, JSON

@@ -1,0 +1,365 @@
+{
+  "observed_at": "2026-10-18T16:00:40.214662-05:00",
+  "branch": "rust-client",
+  "base_revision": "6e2da043719cf98ecdebbce7391e3ca41bea39a6",
+  "state": "uncommitted working tree; source hashes identify tested implementation",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "scenario_ids": 30,
+  "scenario_test_functions": 31,
+  "rust_unit_controller_tests": 28,
+  "controlled_recovery_test_functions": 1,
+  "live_sql_test_functions": 2,
+  "checks": {
+    "scenarios": {
+      "log": "scenarios.log",
+      "sha256": "3de9c2997b1bb8cb8b8e987b587b6e9db096da1ecd6417f56a54d775deb8f3e6",
+      "passed": 28,
+      "failed": 0,
+      "ignored": 0,
+      "exit_code": 0
+    },
+    "live-final": {
+      "log": "live-final.log",
+      "sha256": "73ede412427aec0e0f169ded3284903cfc5ab7e4d8dc911756fb50b650833725",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "exit_code": 0
+    },
+    "live-before-fix": {
+      "log": "live-before-fix.log",
+      "sha256": "d4a39a5a51dd48569f92712b0b205d8ddcf0f397b2f19ab73e75e210791f3089",
+      "historical_failure": "Deferred-reset service retirement; MARS TSQL batch transaction setup",
+      "exit_code": 1
+    },
+    "recovery": {
+      "log": "recovery.log",
+      "sha256": "18d6bcbcbf82642e7a7a1267b5344e198a972ae6f4df19a82380349f480f0026",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "exit_code": 0
+    },
+    "all-features": {
+      "log": "all-features.log",
+      "sha256": "852163dff64a1b806a6252795dc44025b1e52593771e15f7f69a5f28ace5754e",
+      "passed": 235,
+      "failed": 0,
+      "ignored": 59,
+      "exit_code": 0
+    },
+    "default": {
+      "log": "default.log",
+      "sha256": "fe636e905e206e979ce09af3148f26f6c3cf222dae4746f848504fbb44657a97",
+      "passed": 206,
+      "failed": 0,
+      "ignored": 57,
+      "exit_code": 0
+    },
+    "core": {
+      "log": "core.log",
+      "sha256": "44903df10b95234743f6c8715ea9ea7488f2c7fd5541a10c12e262d7d6c5719c",
+      "passed": 87,
+      "failed": 0,
+      "ignored": 0,
+      "exit_code": 0
+    },
+    "live-all": {
+      "log": "live-all.log",
+      "sha256": "5e78d42ae2da17b959b5dccdbb37d253ed7a97bc26479aa5ed8a6f073b29b0ad",
+      "passed": 59,
+      "failed": 0,
+      "ignored": 0,
+      "exit_code": 0
+    },
+    "python-live": {
+      "log": "python-live.log",
+      "sha256": "f78a03c5ff3253e9c92546046700f7cb6e866e85a2ae27364b71a25bf4557ff1",
+      "passed": 96,
+      "exit_code": 0
+    },
+    "clippy": {
+      "log": "clippy.log",
+      "sha256": "1403912cbd8916e82d8c937c4812c533b31603fe65d1454cc0d16a0b65040d7c",
+      "exit_code": 0
+    },
+    "clippy-default": {
+      "log": "clippy-default.log",
+      "sha256": "ed527b83cc2b7f48cfa4b390e8457b0e7fe94eebb30f11ff48f0725d9c26c39c",
+      "exit_code": 0
+    },
+    "clippy-core": {
+      "log": "clippy-core.log",
+      "sha256": "38a089739c528aef7750c9e2bb8d4666937a8347570d3bcd95dc3c580d3ef924",
+      "exit_code": 0
+    },
+    "rustdoc": {
+      "log": "rustdoc.log",
+      "sha256": "b4d60b9315a4ffe3ff51f5bf7512fc586ded1f4fa5713a8ffc5c85cdec4e8b06",
+      "exit_code": 0
+    },
+    "fmt": {
+      "log": "fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0
+    }
+  },
+  "counter_snapshots": {
+    "KP01": {
+      "master_load_attempts": 1,
+      "master_loads": 1,
+      "unwrap_attempts": 1,
+      "unwraps": 1,
+      "hits": 39,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 0,
+      "live_masters": 1,
+      "live_columns": 1,
+      "pending": 0,
+      "closed": false
+    },
+    "KP02": {
+      "master_load_attempts": 20,
+      "master_loads": 20,
+      "unwrap_attempts": 20,
+      "unwraps": 20,
+      "hits": 20,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 0,
+      "live_masters": 0,
+      "live_columns": 0,
+      "pending": 0,
+      "closed": false
+    },
+    "KP03": {
+      "master_load_attempts": 1,
+      "master_loads": 1,
+      "unwrap_attempts": 20,
+      "unwraps": 20,
+      "hits": 20,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 0,
+      "live_masters": 1,
+      "live_columns": 0,
+      "pending": 0,
+      "closed": false
+    },
+    "KP04": {
+      "master_load_attempts": 1,
+      "master_loads": 1,
+      "unwrap_attempts": 1,
+      "unwraps": 1,
+      "hits": 39,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 0,
+      "live_masters": 0,
+      "live_columns": 1,
+      "pending": 0,
+      "closed": false
+    },
+    "KP05": {
+      "master_load_attempts": 20,
+      "master_loads": 20,
+      "unwrap_attempts": 20,
+      "unwraps": 20,
+      "hits": 20,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 0,
+      "live_masters": 0,
+      "live_columns": 0,
+      "pending": 0,
+      "closed": false
+    },
+    "KP09": {
+      "master_load_attempts": 2,
+      "master_loads": 2,
+      "unwrap_attempts": 2,
+      "unwraps": 2,
+      "hits": 4,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 2,
+      "discarded_loads": 0,
+      "live_masters": 1,
+      "live_columns": 1,
+      "pending": 0,
+      "closed": false
+    },
+    "KP10": {
+      "master_load_attempts": 1,
+      "master_loads": 1,
+      "unwrap_attempts": 1,
+      "unwraps": 1,
+      "hits": 1,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 2,
+      "discarded_loads": 0,
+      "live_masters": 0,
+      "live_columns": 0,
+      "pending": 0,
+      "closed": false
+    },
+    "KP16": {
+      "master_load_attempts": 1,
+      "master_loads": 1,
+      "unwrap_attempts": 1,
+      "unwraps": 1,
+      "hits": 7,
+      "coalesced": 7,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 0,
+      "live_masters": 1,
+      "live_columns": 1,
+      "pending": 0,
+      "closed": false
+    },
+    "KP17": {
+      "master_load_attempts": 1,
+      "master_loads": 1,
+      "unwrap_attempts": 0,
+      "unwraps": 0,
+      "hits": 0,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 1,
+      "live_masters": 0,
+      "live_columns": 0,
+      "pending": 0,
+      "closed": false
+    },
+    "KP25": {
+      "master_load_attempts": 1,
+      "master_loads": 1,
+      "unwrap_attempts": 1,
+      "unwraps": 1,
+      "hits": 1,
+      "coalesced": 0,
+      "evictions": 0,
+      "expirations": 0,
+      "discarded_loads": 0,
+      "live_masters": 0,
+      "live_columns": 0,
+      "pending": 0,
+      "closed": true
+    }
+  },
+  "source_sha256": {
+    "clients/python/tds/encryption/context.py": "9680a030c2fadd2a1dd339c8700b006a25bd8cbfab00d1f0c977c9d132229eb6",
+    "clients/python/tests/test_encryption.py": "199e2ab31f6dce585e966045e52ac103ef3c6ae119706380f99a3f3bf397bd71",
+    "clients/rust/Cargo.lock": "e92da336305982e63b3fbc72b13d902a07f77c526c85ea340b35d2fddd880086",
+    "clients/rust/Cargo.toml": "c72b25508519b5f8079acd3aad270a638402042ba3e42b7bf59e27c99c0b2f46",
+    "clients/rust/examples/key_policy_cost.rs": "d06c5abf5b1166846cefa0bfe94c451ef65b30566800ed068b640c60d066298e",
+    "clients/rust/src/connection/core.rs": "431384e44be9d6283850095fb9a15b868afbb7d15a86e913a8d12a1c11da2529",
+    "clients/rust/src/connection/shell/recovery.rs": "43205b3b17328ca728f63f214191dfc3e0a37e7a6fbaacbc04b5ac31436df6cb",
+    "clients/rust/src/connection/shell.rs": "7fa58dc6aeb98570b0a7565e68921ddaa65c73a809734fd2f4754f6b6b84f274",
+    "clients/rust/src/encryption/cell.rs": "395d9a1b72beaee57f980adfe147be49c6dca991c5dabd65c44f145d64806da1",
+    "clients/rust/src/encryption/local.rs": "7cda3fcd9b4bc10c5e1986ed2fc75ddb946aeed71ebd9e2c96fd7cc537932282",
+    "clients/rust/src/encryption/mod.rs": "d75be6f8bd1d307ffcf39ee6cc96a07fcb95201702d2c151c91af30d7254e23e",
+    "clients/rust/src/encryption/policy.rs": "ba46ffa2e80629e4150a0867dca366c37be0774baf5405630c8272635f3ad0fe",
+    "clients/rust/src/encryption/secret.rs": "246db9a761e145713156a2f62dffc80a7811f3716807a83b7efd03356927594b",
+    "clients/rust/src/encryption/tests.rs": "2d4729da2b53aa5afb38fd4e8ddef2fbd90bdd3a8090673766e8101e498503c1",
+    "clients/rust/tests/encryption_live.rs": "f39bb46b3b3690a60744ba5b85876de1fa90513fb12689e1bf9d423602edd93e",
+    "clients/rust/tests/fixtures/encryption/generate.py": "e115b548fd6f0e483dfaef7db12b9f7646a3ccf2016d974c68d870e09ad3606e",
+    "clients/rust/tests/fixtures/encryption/python.json": "b86ab0403039b154f0289ec06d9d10bfc0eb8383d5d5746c34c4ec4567def595",
+    "clients/rust/tests/fixtures/encryption/master.pem": "1d63b60548286669bab0d0b8c73370d1e74c61300899cf7e7247bc4d59351fec",
+    "clients/rust/tests/fixtures/encryption/README.md": "e9ed098f94721d07e5c059c86a8369c164c0214abfe7c0a3c93fb8ebaf6e428f",
+    "clients/rust/tests/fixtures/encryption/bad-crt.pem": "178beffc6ea1c6b2d25ebdd43ac6f05c7ea291432aea578a48416df7e62fd0f6",
+    "clients/rust/src/connection/shell/interruptions.rs": "5bee9600a36198ff6b10ed2d5f5796fbc3ea54375844291225e8badb3ed38910",
+    "clients/rust/src/lib.rs": "3eb5840f1fbfc36289bd94617e8cfe9af80005f1dea1a41433f0f971b59e2af0"
+  },
+  "native_source_review": [
+    {
+      "source": "aws-lc-rs-1.18.2/src/cipher/key.rs",
+      "sha256": "6b6cd11caba316fab7a1c67226f60881b8f8bf27cb37007c3b84a931017b634c",
+      "finding": "Expanded AES schedules zeroized in SymmetricCipherKey Drop"
+    },
+    {
+      "source": "aws-lc-rs-1.18.2/src/buffer.rs",
+      "sha256": "7935f484a83d9cef770f4ca1e7200b37da8f7c5839826e654e1a89dab8a58d81",
+      "finding": "Owned cipher input buffer zeroized on Drop"
+    },
+    {
+      "source": "aws-lc-rs-1.18.2/src/hmac.rs",
+      "sha256": "0869a6dc5b52183d678b4a1969e7b1ebf3d3f8a73931835c90ff886904dec73a",
+      "finding": "LcHmacCtx cleanup; secret output uses sign_to_buffer"
+    },
+    {
+      "source": "aws-lc-rs-1.18.2/src/ptr.rs",
+      "sha256": "710057f68afcc779c3be6d8335bd5a00d4f5450abe05598af39c1ac59bc0e5b8",
+      "finding": "EVP_PKEY owning pointer release"
+    },
+    {
+      "source": "aws-lc-rs-1.18.2/src/rsa/encryption.rs",
+      "sha256": "c160536a22a0116cf4675f55a157676714e436141361c00b3835773dc66e7a46",
+      "finding": "PrivateDecryptingKey PKCS8 parser and type/size checks"
+    },
+    {
+      "source": "aws-lc-sys-0.46.0/aws-lc/crypto/mem.c",
+      "sha256": "88651b6d0b7e135980f97408815e2d357b2c39eabb563e241e795792d60fc3a1",
+      "finding": "Default OPENSSL_free cleanses; custom hooks separate"
+    },
+    {
+      "source": "aws-lc-sys-0.46.0/aws-lc/crypto/fipsmodule/rsa/rsa.c",
+      "sha256": "a178c7ee4471af684a685fb2515d983762e58802a7355e42b8b70f0fdccaccd4",
+      "finding": "RSA_free BIGNUM destruction and RSA_check_key consistency"
+    },
+    {
+      "source": "aws-lc-sys-0.46.0/aws-lc/crypto/rsa_extra/rsa_asn1.c",
+      "sha256": "2c14056d37e79145ff2354f71b8f151221dc17210409ede1e00a1174fb0c5693",
+      "finding": "RSA_parse_private_key calls RSA_check_key"
+    },
+    {
+      "source": "aws-lc-sys-0.46.0/aws-lc/crypto/evp_extra/p_rsa_asn1.c",
+      "sha256": "030952a9a62483848ee27283d913b3994dabeb9526ed0f417e32cee964f17d38",
+      "finding": "PKCS8 RSA decode delegates to RSA_parse_private_key"
+    },
+    {
+      "source": "aws-lc-sys-0.46.0/aws-lc/crypto/fipsmodule/hmac/hmac.c",
+      "sha256": "014b175870b63c31ab0ecf956f2e743a4725530d8ce0e77e87829f4426654265",
+      "finding": "HMAC_CTX_cleanup calls OPENSSL_cleanse"
+    }
+  ],
+  "erasure_instrumentation": {
+    "owned_buffer_stages": [
+      "pem",
+      "base64",
+      "der",
+      "root",
+      "derived"
+    ],
+    "zero_before_deallocation": true,
+    "reads_freed_memory": false,
+    "native_or_register_inspection": false
+  },
+  "limits": [
+    "Transparent Always Encrypted SQL metadata/normalization/orchestration unimplemented",
+    "Rust/.NET mutual SQL interoperability not established by this campaign",
+    "Opaque security-context changes require explicit invalidation",
+    "Native cleanup evidence is source review of the pinned default-allocator build",
+    "No proof for all compiler moves, stack/register copies, process abort, custom allocators, swap or dumps",
+    "Python identity correction does not change its older lifetime/erasure guarantees",
+    "Service benchmark is wall time without SQL, network or process CPU measurement"
+  ],
+  "native_cache_storage": {
+    "boxed_prepared_keys": true,
+    "growth_live_entries": 17,
+    "vector_capacity_before": 4,
+    "vector_capacity_after": 32,
+    "retained_pointee_address_unchanged": true
+  },
+  "service_binary_sha256": "4d7fa32718f76518fe4369230c120d94b0f652671053f9e8e9bed9a5571846a8"
+}

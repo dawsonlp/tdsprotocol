@@ -1,0 +1,18 @@
+[
+  {
+    "name": "vector(5)",
+    "wire": "f51c00001c00a9010500000000000000803f00002040ffff7fff0100000000000080"
+  },
+  {
+    "name": "vector(5)",
+    "wire": "f51c0000ffff"
+  },
+  {
+    "name": "vector(5, float16)",
+    "wire": "f51200011200a901050001000000003c0041fffb01000080"
+  },
+  {
+    "name": "vector(5, float16)",
+    "wire": "f5120001ffff"
+  }
+]

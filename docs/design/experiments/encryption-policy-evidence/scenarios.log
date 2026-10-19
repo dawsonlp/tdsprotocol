@@ -1,0 +1,49 @@
+   Compiling tds-client v0.1.0 (/Users/dawsonlp/repos/tdsprotocol/clients/rust)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.92s
+     Running unittests src/lib.rs (target/debug/deps/tds_client-ef4a449d767bb878)
+
+running 28 tests
+test encryption::policy::tests::kp01_default_reuses_once_for_twenty_transaction_exchanges ... KP_EVIDENCE KP01 Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 39, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp02_exchange_scope_loads_and_erases_twenty_times ... KP_EVIDENCE KP02 Statistics { master_load_attempts: 20, master_loads: 20, unwrap_attempts: 20, unwraps: 20, hits: 20, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp03_transaction_master_exchange_columns ... KP_EVIDENCE KP03 Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 20, unwraps: 20, hits: 20, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 0, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp04_exchange_master_transaction_columns ... KP_EVIDENCE KP04 Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 39, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 1, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp05_autocommit_falls_back_to_exchange ... KP_EVIDENCE KP05 Statistics { master_load_attempts: 20, master_loads: 20, unwrap_attempts: 20, unwraps: 20, hits: 20, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp06_unchanged_outer_transaction_retains_keys_until_end ... ok
+test encryption::policy::tests::kp07_reused_descriptor_and_old_stream_cannot_join_new_transaction ... ok
+test encryption::policy::tests::kp08_time_reuses_across_transactions_and_autocommit ... ok
+test encryption::policy::tests::kp09_exact_deadline_is_not_refreshed_by_hit ... KP_EVIDENCE KP09 Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 4, coalesced: 0, evictions: 0, expirations: 2, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp10_idle_timer_erases_without_lookup_or_statistics_side_effect ... KP_EVIDENCE KP10 Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 1, coalesced: 0, evictions: 0, expirations: 2, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp11_long_transaction_and_live_stream_reload_after_expiry ... ok
+test encryption::policy::tests::kp12_master_and_column_clocks_are_independent ... ok
+test encryption::policy::tests::kp13_revocation_causes_and_new_borrower_isolation ... ok
+test encryption::policy::tests::kp14_complete_wrapped_identity_and_provider_binding_prevent_collision ... ok
+test encryption::policy::tests::kp15_eviction_reloads_without_losing_correctness ... ok
+test encryption::policy::tests::kp16_concurrent_first_loads_are_coalesced ... KP_EVIDENCE KP16 Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 7, coalesced: 7, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp17_canceled_request_cannot_insert_a_late_result ... KP_EVIDENCE KP17 Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 0, unwraps: 0, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 1, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+ok
+test encryption::policy::tests::kp18_revoked_transaction_or_session_rejects_late_provider_result ... ok
+test encryption::policy::tests::kp19_provider_errors_and_replacement_never_reuse_wrong_keys ... ok
+test encryption::policy::tests::kp20_invalid_duration_and_expiry_during_acquisition ... ok
+test encryption::policy::tests::kp21_python_cipher_fixtures_and_failures ... ok
+test encryption::policy::tests::kp22_owned_secret_buffers_zero_before_free_and_debug_redacts ... KP_EVIDENCE KP22 owned_buffers_cleared=5 all_zero_before_free=true
+ok
+test encryption::policy::tests::kp23_exchange_override_isolated_and_tightening_clears_broader_entries ... ok
+test encryption::policy::tests::kp24_drop_revokes_and_close_waits_for_running_work ... ok
+test encryption::policy::tests::kp25_runtime_shutdown_revokes_an_escaped_session ... KP_EVIDENCE KP25 Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 1, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: true }
+ok
+test encryption::policy::tests::kp27_provider_input_hardening_and_native_consistency_checks ... KP_EVIDENCE KP27 truncated_wrapped_prefixes=537 inconsistent_crt_rejected=true oversized_pem_rejected=true path_escape_rejected=true
+ok
+test encryption::policy::tests::kp29_decrypted_length_limit_applies_after_unpadding ... ok
+test encryption::policy::tests::kp30_native_key_allocation_stays_stable_when_cache_grows ... KP_EVIDENCE KP30 cells=17 cache_capacity_before=4 after=32 pointee_address_stable=true
+ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 57 filtered out; finished in 0.70s
+

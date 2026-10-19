@@ -1,0 +1,22 @@
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.08s
+     Running tests/encryption_live.rs (target/debug/deps/encryption_live-fc506cfeae14f3e7)
+
+running 2 tests
+test kp26_live_pool_return_and_next_borrower_reset ... KP_LIVE V7_4 mars=false pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V7_4 mars=true pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=false pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=true pooled Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 0, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+ok
+test kp26_live_transaction_boundaries_and_manual_encrypted_echo ... KP_LIVE V7_4 mars=false transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V7_4 mars=false timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V7_4 mars=true transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V7_4 mars=true timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=false transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V8_0 mars=false timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+KP_LIVE V8_0 mars=true transaction Statistics { master_load_attempts: 2, master_loads: 2, unwrap_attempts: 2, unwraps: 2, hits: 6, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 0, live_columns: 0, pending: 0, closed: false }
+KP_LIVE V8_0 mars=true timed Statistics { master_load_attempts: 1, master_loads: 1, unwrap_attempts: 1, unwraps: 1, hits: 5, coalesced: 0, evictions: 0, expirations: 0, discarded_loads: 0, live_masters: 1, live_columns: 1, pending: 0, closed: false }
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.54s
+

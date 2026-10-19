@@ -34,6 +34,125 @@ class Session:
         self.alive = False
 
 
+@pytest.mark.parametrize("number", [18452, 18456])
+@pytest.mark.parametrize("changed", [False, True])
+def test_authentication_refusal_rereads_once_and_retries_only_changed_configuration(monkeypatch, number, changed):
+    from tds.connection.core import LoginRejected
+    from tds.wire import Record
+
+    async def go():
+        source, attempts = Source(), []
+        refusal = LoginRejected([Record(number=number, severity=14, state=1, procedure="", line=1,
+                                        message="Artificial refusal", server_name="fixture")])
+
+        async def connect(*args, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                if changed:
+                    source.value = config("artificial-B")
+                raise refusal
+            return Session()
+
+        monkeypatch.setattr(shell, "connect", connect)
+        pool = tds.Pool.from_config(source, size=1)
+        if changed:
+            connection = await pool._borrow()
+            assert connection._configuration[1] == source.value
+            assert len(attempts) == 2 and attempts[1]['timeout'] <= attempts[0]['timeout']
+            await pool._give_back(connection)
+        else:
+            with pytest.raises(LoginRejected) as caught:
+                await pool._borrow()
+            assert caught.value is refusal and len(attempts) == 1
+        assert source.calls == 2 and pool._opening == 0
+        await pool.close()
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("second", ["unchanged", "refused-again", "unrelated", "source-error", "source-timeout"])
+def test_opening_refresh_is_bounded_and_preserves_failures(monkeypatch, second):
+    from tds.connection.core import LoginRejected
+    from tds.wire import Record
+
+    def rejected(number):
+        return LoginRejected([Record(number=number, severity=14, state=1, procedure="", line=1,
+                                     message="Artificial refusal", server_name="fixture")])
+
+    async def go():
+        attempts = []
+        class Changing(Source):
+            async def read(self):
+                if self.calls == 1:
+                    if second == "source-error":
+                        self.calls += 1
+                        raise ValueError("ARTIFICIAL-SOURCE-SECRET")
+                    if second == "source-timeout":
+                        self.calls += 1
+                        await asyncio.Future()
+                return await super().read()
+        source = Changing()
+        original = rejected(4060 if second == "unrelated" else 18456)
+        another = rejected(18456)
+        async def connect(*args, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                if second != "unchanged":
+                    source.value = config("artificial-B")
+                raise original
+            raise another
+        monkeypatch.setattr(shell, "connect", connect)
+        pool = tds.Pool.from_config(source, size=1, timeout=0.03 if second == "source-timeout" else 1)
+        expected = tds.ConfigurationError if second == "source-error" else TimeoutError if second == "source-timeout" else LoginRejected
+        with pytest.raises(expected) as caught:
+            await pool._borrow()
+        if second == "refused-again":
+            assert caught.value is another and len(attempts) == 2
+        elif second in ("unrelated", "unchanged"):
+            assert caught.value is original and len(attempts) == 1
+        else:
+            assert len(attempts) == 1
+            assert "ARTIFICIAL-SOURCE-SECRET" not in ''.join(traceback.format_exception(caught.value))
+        assert source.calls == (1 if second == "unrelated" else 2)
+        assert pool._opening == pool.in_use == pool.idle == 0
+        await pool.close()
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("action", ["cancel", "close"])
+def test_second_opening_is_cancellable_and_cannot_leak_pool_capacity(monkeypatch, action):
+    from tds.connection.core import LoginRejected
+    from tds.wire import Record
+
+    async def go():
+        source, entered, retired = Source(), asyncio.Event(), asyncio.Event()
+        attempts = []
+        async def connect(*args, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                source.value = config("artificial-B")
+                raise LoginRejected([Record(number=18456, severity=14, state=1, procedure="", line=1,
+                                            message="Artificial refusal", server_name="fixture")])
+            entered.set()
+            try:
+                await asyncio.Future()
+            finally:
+                retired.set()
+        monkeypatch.setattr(shell, "connect", connect)
+        pool = tds.Pool.from_config(source, size=1)
+        opening = asyncio.create_task(pool._borrow())
+        await entered.wait()
+        if action == "cancel":
+            opening.cancel()
+        else:
+            await pool.close()
+        with pytest.raises(asyncio.CancelledError if action == "cancel" else RuntimeError):
+            await opening
+        assert retired.is_set() and len(attempts) == source.calls == 2
+        assert pool._opening == pool.in_use == pool.idle == 0
+        await pool.close()
+    asyncio.run(go())
+
+
 def test_value_equality_immutability_features_and_safe_representation():
     first = config(features=list(reversed(tds.DEFAULT_FEATURES)))
     assert first == config() and "artificial" not in repr(first)

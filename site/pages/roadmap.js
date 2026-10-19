@@ -8,17 +8,46 @@
     where: `After ${L('build', 'Building the Client')}, whose milestones M1–M15, M17 and M18 are built. It sets out what comes next.`,
     outcome: 'say what each phase delivers, what it builds on, and which decisions it needs before it starts.',
     body: () => `
-      ${callout('notice', `Agreed, 2026-10-17 (${D(63)})`, `The three phases and their order are agreed. Each phase’s design is a proposal until it is agreed, as the driver’s was, before its code is written. Its milestones are then added to ${L('done-when', 'Done When')}.`)}
+      ${callout('notice', `Completion scope agreed, 2026-10-18 (${D(65)})`, `The order remains Rust, Python conveniences, then application drivers (${D(63)}). Finish local Rust work including local-key Always Encrypted, create a transient GCP Windows lab, implement and validate Windows authentication, then destroy the lab. Entra and Azure-specific providers are deferred. These are requirements, not claims of implementation or deployment. Affected API/provider designs are agreed before code.`)}
 
       <h2 id="the-phases">The phases</h2>
       ${table(['#', 'Phase', 'Delivers', 'Builds on'], [
-        ['1', '<b>Conveniences</b> (M16)', 'The standard patterns of use in one call each, in Python, asynchronous and synchronous', `The driver’s public surface (${D(39)})`],
-        ['2', '<b>A Rust client</b>', 'The same driver in Rust, following the same design', 'The design pages, and the Python code and tests'],
+        ['1', '<b>A Rust client</b>', 'The same driver in Rust, with explicit ownership/permissions and the same learning intent', 'The design pages, and the Python code and tests'],
+        ['2', '<b>Conveniences</b> (M16)', 'The standard patterns of use in one call each, in Python, asynchronous and synchronous', `The driver’s public surface (${D(39)})`],
         ['3', '<b>Application drivers</b>', 'DB-API 2.0 for Python, and possibly other standard interfaces', 'The conveniences'],
       ])}
-      <p>Phase 3 depends on phase 1 only, not on phase 2.</p>
+      <p>Phase 3 depends on phase 2. Rust does not depend on completing Python M16.</p>
 
-      <h2 id="1-conveniences">1 · Conveniences</h2>
+      <h3 id="backlog--python-kerberos-opening-deadline">Backlog · Python Kerberos opening deadline</h3>
+      <p><b>Deferred by the owner; unfixed.</b> An unreachable KDC blocked synchronous pyspnego startup beyond a 1500 ms opening deadline; the watchdog stopped the process at 4010 ms. Proposed correction: bounded workers with serialized context calls, retained ownership of unfinished native work and rejection of late results. Acceptance covers prompt caller timeout, event-loop responsiveness, cancellation/late cleanup, worker bounds, shutdown behavior and live Kerberos regression checks. Caller timeout cannot forcibly cancel a native call. Details and retained evidence are linked from the repository roadmap.</p>
+
+      <h2 id="1-a-rust-client">1 · A Rust client</h2>
+      <p><b>Goal:</b> a second client that follows the same design in Rust. Its code teaches the protocol as the Python code does, with the same names, and links to the same reference pages.</p>
+      <p><b>Development path:</b> establish the local Python baseline, analyze its code, agree ownership/permissions and exact representations, then implement Rust in small tested slices. The ${L('rust', 'Rust development plan')} begins with those rules; the ${L('python-baseline', 'Python baseline')} separates offline, local-live and remote validation.</p>
+      <p><b>How the Python client helps:</b></p>
+      <ul>
+        <li><b>The design pages are the specification for both clients.</b> Each Rust module names the page it implements, as each Python module does.</li>
+        <li><b>The sans-I/O core can be ported part by part:</b> the definitions and the codec first, then the procedures, then a shell (${D(24)}, ${D(27)}).</li>
+        <li><b>The tests’ data can be shared:</b> MS-TDS’s own samples, the responses captured from SQL Server, and the generated collation table. A capture (${D(12)}) recorded by either client can be replayed through the other.</li>
+        <li><b>The Python client is a reference to compare against.</b> For fixed deterministic inputs and options, both clients must encode the same protocol bodies and read the same semantic response record. Variable session fields, timestamps, nonces and TLS ciphertext require explicitly scoped comparisons.</li>
+        <li><b>The live tests run against the same SQL Server container</b>, with the same scenarios.</li>
+      </ul>
+      <p><b>Implemented baseline:</b> verified 7.4/8.0 TLS, SQL authentication, cancellation/cleanup, MARS, pooling/configuration, routing/recovery, exact scalar/large/special values, typed calls, streaming, TVPs, bulk and transactions. Native ${L('offline-replay', 'offline replay')} and connection/scalar-query ${L('rust-inspection', 'field inspection')} are implemented. The crate remains unpublished; the ${L('rust', 'Rust plan')} links to current support and acceptance evidence.</p>
+
+      <h3 id="rust-completion-sequence--agreed-2026-10-18-d-65">Rust completion sequence · agreed 2026-10-18 (${D(65)})</h3>
+      <p><b>Outcome:</b> a dependable, literate Rust client with an explicit supported scope, local-key Always Encrypted, tested Windows authentication and reproducible evidence. This is scoped completion, not full Python parity.</p>
+      ${table(['Stage', 'Work', 'Exit evidence'], [
+        ['1 · Finish locally', 'Agreed observation/replay gaps, correctness, readability/API/package review, repeatable checks and supported Rust/platform floor; local-key Always Encrypted with metadata, normalization, crypto and parameter orchestration', 'Local regressions, targeted malformed/fragmented-input checks, Docker matrices, independent .NET mutual encrypted read/write and deterministic lookups; intentional exclusions recorded'],
+        ['2 · Create transient Windows lab', 'Terraform and configuration/test/teardown tooling under infra/gcp/, alongside the historical Azure setup; create only when Windows testing is ready', 'AD domain, DNS/time, SPNs, verified TLS, SQL Server and runners ready; Python and independent Windows-client checks establish the environment'],
+        ['3 · Windows authentication', 'Agree provider contract/adapters; implement NTLM local/domain, Kerberos and negotiation; native Windows and actual Browser acceptance', 'Positive/negative cases, actual auth scheme without silent fallback, credential redaction, cancellation/failures and relevant pool/recovery; both TDS versions and plain/MARS where supported'],
+        ['4 · Retain evidence and destroy', 'Export redacted results/captures; destroy the owned lab; reconcile acceptance/support/release documentation', 'Required tests ran without unavailable-environment skips; state and cloud inventory show owned resources gone; scoped Rust phase ends, M16 follows; publication separate'],
+      ])}
+      <p><b>Infrastructure proposal:</b> two small Windows Compute Engine VMs (disposable AD controller and domain-joined SQL Server), plus a Linux Kerberos runner. Native Windows tests can run on the SQL VM. Install SQL Server Developer on a Windows base image. Use a separate VPC and restricted access; keep DNS/Kerberos/Browser traffic inside the lab where appropriate. Adapt Azure scenarios without copying cloud-specific configuration.</p>
+      <p><b>Cost/lifecycle:</b> explicit project, region, sizes, current cost estimate and maximum test window before apply; never use the default project implicitly. A fixed expiry must survive guest reboots, deleting VMs and auto-deleting test disks as a fallback. Normal and failure paths require full teardown and inventory checks for VMs, disks, addresses and other owned billable resources. Preserve state until cleanup is verified; never print or commit secrets. No lab left running between development sessions. Detailed networking, secret delivery and provider designs remain to be reviewed.</p>
+      <p><b>Deferred:</b> Entra/federated authentication; Azure Key Vault and Azure-specific features/providers; Windows certificate-store key-provider support; enclaves/attestation. A GCP Windows lab does not establish Azure SQL or genuine remote-failover behavior.</p>
+      <p><b>Feasibility checked 2026-10-18:</b> Google documents <a href="https://docs.cloud.google.com/compute/docs/instances/sql-server/creating-sql-server-instances">Windows/SQL Server VMs</a>, <a href="https://docs.cloud.google.com/compute/docs/instances/windows/best-practices">Active Directory</a> and <a href="https://docs.cloud.google.com/compute/docs/instances/limit-vm-runtime">automatic termination with Terraform</a>. Microsoft documents <a href="https://learn.microsoft.com/en-us/sql/relational-databases/security/authentication-access/microsoft-entra-authentication-sql-server-enable-without-arc?view=sql-server-ver17">Entra without Azure Arc</a>, but tenant/application permissions are still required and unavailable for this campaign. No GCP deployment, quota or IAM acceptance is established.</p>
+
+      <h2 id="2-conveniences">2 · Conveniences</h2>
       <p><b>Goal:</b> each common pattern of use takes one call, and still shows what the server did (${D(35)}).</p>
       <p><b>What it contains</b> (already agreed):</p>
       <ul>
@@ -36,25 +65,6 @@
         <li>How the synchronous shell runs. It could be a second shell around the same sans-I/O core, using blocking sockets (${D(24)}), or it could run the asynchronous shell on an event loop of its own.</li>
       </ul>
 
-      <h2 id="2-a-rust-client">2 · A Rust client</h2>
-      <p><b>Goal:</b> a second client that follows the same design in Rust. Its code teaches the protocol as the Python code does, with the same names, and links to the same reference pages.</p>
-      <p><b>How the Python client helps:</b></p>
-      <ul>
-        <li><b>The design pages are the specification for both clients.</b> Each Rust module names the page it implements, as each Python module does.</li>
-        <li><b>The sans-I/O core can be ported part by part:</b> the definitions and the codec first, then the procedures, then a shell (${D(24)}, ${D(27)}).</li>
-        <li><b>The tests’ data can be shared:</b> MS-TDS’s own samples, the responses captured from SQL Server, and the generated collation table. A capture (${D(12)}) recorded by either client can be replayed through the other.</li>
-        <li><b>The Python client is a reference to compare against.</b> For the same input, both clients must send the same bytes, and read the same response into the same record.</li>
-        <li><b>The live tests run against the same SQL Server container</b>, with the same scenarios.</li>
-      </ul>
-      <p><b>To decide before building:</b></p>
-      <ul>
-        <li>Where it lives. ${D(45)}’s layout suggests <code>clients/rust/</code>.</li>
-        <li>Its asynchronous runtime, or whether its core stays independent of any runtime, with a shell for each.</li>
-        <li>Its TLS library, which must support ALPN: TDS 8.0 offers <code>tds/8.0</code> in the TLS handshake.</li>
-        <li>Whether the shared test data moves to a format that does not depend on a language, such as JSON, read by both test suites.</li>
-        <li>The order of its milestones.</li>
-      </ul>
-
       <h2 id="3-application-drivers">3 · Application drivers</h2>
       <p><b>Goal:</b> standard interfaces that existing applications and libraries already use, built around the driver.</p>
       <ul>
@@ -65,7 +75,7 @@
       <ul>
         <li>Whether each driver lives in this repository or in a repository of its own.</li>
         <li>DB-API’s parameter style, and how its type objects map to the driver’s types.</li>
-        <li>How DB-API’s synchronous interface uses phase 1’s synchronous entry point.</li>
+        <li>How DB-API’s synchronous interface uses phase 2’s synchronous entry point.</li>
         <li>${D(25)} and ${D(26)}.</li>
       </ul>`,
   });

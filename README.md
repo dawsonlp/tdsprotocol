@@ -6,11 +6,18 @@ A client for Microsoft's **Tabular Data Stream (TDS)** protocol, versions 7.4 an
 
 **Read the design online: [dawsonlp.github.io/tdsprotocol](https://dawsonlp.github.io/tdsprotocol/)**. It is an interactive guide to TDS and to this client, with byte-by-byte packet diagrams that show details when you hover over them. Begin with *The Model*, a five-minute read.
 
-**Python release:** [v0.2.0](https://github.com/dawsonlp/tdsprotocol/releases/tag/v0.2.0). See [the release notes](clients/python/CHANGELOG.md) for lifecycle, recording, recovery and exact-value corrections found during Rust development.
+**Python release:** [v0.3.0](https://github.com/dawsonlp/tdsprotocol/releases/tag/v0.3.0). See [the release notes](clients/python/CHANGELOG.md) for key-retention policies and corrections identified during Rust development.
 
-**Status:** the Python client's milestones M1–M15, M17 and M18 are built. They cover TDS 7.4 and 8.0, every request and token, MARS, bulk load, transactions, session recovery, routing, Always Encrypted, and SQL Server, Windows and Entra ID logins. Next is M16, the convenience layer and the synchronous shell ([Done When](docs/design/5-done-when.md)).
+**Status:** the Python client's milestones M1–M15, M17 and M18 are built. They cover TDS 7.4 and 8.0, every request and token, MARS, bulk load, transactions, session recovery, routing, Always Encrypted, and SQL Server, Windows and Entra ID logins. The next priority is the Rust client. Its [development plan](docs/design/D-rust-development.md) begins with ownership and permissions; the [Python baseline](docs/design/E-python-baseline.md) records the test evidence and server setup. Python M16 remains pending ([Done When](docs/design/5-done-when.md)).
 
-**[Roadmap](docs/design/C-roadmap.md):** conveniences for the standard patterns of use, then a Rust client built with the Python code and tests as its reference, then application drivers such as DB-API.
+**[Roadmap](docs/design/C-roadmap.md):** a Rust client built with the Python code and tests as its reference, then Python conveniences, then application drivers such as DB-API.
+
+The agreed Rust completion scope includes local-key Always Encrypted and Windows
+NTLM/Kerberos acceptance using a transient Terraform GCP lab, destroyed after
+testing. Entra and Azure-specific providers are deferred. The roadmap records the
+sequence and completion gates; these additions are not yet implemented.
+
+The [Rust client and command line](clients/rust/README.md) now run verified-TLS connections, pooling/recovery, typed procedure calls, borrowed large-value readers and streamed inputs against Docker under both TDS versions. The command line demonstrates query/RPC, chunked results and binary file sources. Its `--replay` mode inspects Python/Rust recordings offline. Its optional local-key Always Encrypted adapter now has independent .NET read/write/lookup and bulk evidence across all 28 SQL type cases. Its [acceptance record](clients/rust/ACCEPTANCE.md) distinguishes tested behavior from remaining Windows-authentication/platform work.
 
 **The design's system of record** is [docs/design/](docs/design/README.md); the site presents the same content. To read the site offline, open [site/index.html](site/index.html) in a browser.
 

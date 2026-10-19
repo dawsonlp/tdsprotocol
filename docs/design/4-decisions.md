@@ -41,7 +41,7 @@ Client code is identical with or without MARS. Without MARS a connection allows 
 The serial channel already open, and the connection, are unaffected.
 
 **D-21 · Serial channels are handed out, each with one owner** · *2026-10-15*
-A serial channel is owned by the task that opened it, scoped to a block, and can be handed to another task explicitly. Use from any other task fails immediately. A synchronous wrapper checks the owning thread instead.
+A serial channel is owned by the task that opened it, scoped to a block, and can be handed to another task explicitly. Use from any other task fails immediately. A synchronous wrapper checks the owning thread instead. This remains the Python contract; D-64 records the user-selected proposal for movable Rust authority.
 *Why:* this makes misuse fail every time, not only when calls happen to overlap.
 *Rejected:*
 - a single switchable pipe, because of its hidden "current channel" mode;
@@ -325,6 +325,7 @@ Each uses only what earlier ones built, ends with its tests passing against the 
 - **The two must describe the same columns exactly:** the same columns, order, types and nullability. The documentation recommends taking the columns from `SELECT TOP 0 * FROM table`, as `result_set.columns`, and writing the statement from the same columns.
 - **The server checks the agreement,** and its refusals leave the connection usable. The driver refuses only what it can't encode (D-48). *Amended 2026-10-16:* the driver was to check, before sending, for empty names and for types that bulk data refuses. A general rule replaced this: little semantic checking before sending; let the server say what's wrong.
 - **The channel keeps the pair together.** After a successful `BulkInsert`, the channel's next request must be `BulkRows`, and `BulkRows` is refused at any other time. Bulk data out of turn makes the server close the connection.
+- **Amended 2026-10-17:** the user explicitly approved bulk continuation ordering as an exception to D-53 and a borrowed Rust `BulkWriter`. Each preparation/data/Attention message still has its own exchange; the writer owns the obligation between them. Awaited abort and channel close cancel/drain under the existing cleanup budget. Unresolved pool return, failed cleanup or Rust writer Drop discard the physical connection. Recovery refuses an unresolved continuation. No automatic transaction commit/rollback or request replay is implied.
 - **The docstrings state this contract,** for the convenience layer to follow. That layer will provide a helper that writes the statement and its options from the columns (D-39); used directly, the two requests are verbose.
 
 *Why:* each request is exactly what TDS sends, and the driver writes no SQL. The only failure that can't be recovered from, bulk data out of turn, is prevented by the channel.
@@ -465,6 +466,8 @@ Ranks arrive from version 2; under version 1 they are `None`. The labels are the
 - **Recovery opens a new connection** with the same options and logs in carrying the session's state: its initial state and its current one (database, language, collation, and the session states). The server rebuilds the session from them.
 - **A request in progress when the connection broke is never resent.** Nobody can know whether it ran. Its error says so, and the application decides.
 - **Visible:** the steps show it (`recover`), and `connection.recoveries` counts recoveries. A server that refuses, or a session it marked not recoverable, gives a literate error naming why.
+- **Continuing permissions, agreed 2026-10-17 after experiment:** the logical connection and unrevoked application channels retain their owners and connection/channel close permissions. Every physical connection allocates fresh SMP wire ids from zero and maps them back to stable application ids. Application-closed lifetimes stay closed. Old exchange read/cancel/abandonment permissions cannot act on the replacement; retained data remain inspectable. Rust retires the physical epoch before waking failed waiters, and checks that epoch when revoking from an old future or response. Python pins old response sources and running procedures to the failed core/transport. [Experiment and results](experiments/recovery-channel-identity.md).
+- **No replay or inferred rollback:** an interrupted request fails with uncertain execution. Explicit recovery restores server-reported reconstructible session state; it neither determines nor undoes the request's database effects. A new request after an observed idle break can recover first. Each physical connection owns a separate recording. Optional log failure disables the log; requested recording failure stops the connection.
 
 *Why:* applications using Microsoft's drivers expect idle connections to survive a brief network failure or a failover; the rule for requests in progress ensures that recovery never runs a request twice.
 
@@ -532,15 +535,29 @@ Python's TLS engine works entirely in memory (`ssl.MemoryBIO`), so the core driv
 
 *Why:* Windows logins need a domain and SQL Server on Windows, federated logins need Entra ID and Azure SQL, and none of it should remain after the tests.
 
-**D-63 · The roadmap after M18: conveniences, a Rust client, application drivers** · *2026-10-17* · [Roadmap](C-roadmap.md)
+**D-63 · The roadmap after M18: Rust, Python conveniences, application drivers** · *2026-10-17; order revised by the user* · [Roadmap](C-roadmap.md)
 - **Three phases, in this order:**
-  1. **Conveniences** (M16): the standard patterns of use in one call each, asynchronous and synchronous (D-37, D-38, D-50).
-  2. **A Rust client:** the same design in Rust, built with the Python code and tests as its reference.
+  1. **A Rust client:** the same design and learning intent, with the Python code and tests as a reference. Begin with local SQL Server setup, Python tests, source analysis, and a Rust development plan that establishes ownership and permissions carefully.
+  2. **Python conveniences** (M16): the standard patterns of use in one call each, asynchronous and synchronous (D-37, D-38, D-50).
   3. **Application drivers:** DB-API 2.0 for Python, and possibly other standard interfaces, built on the conveniences.
-- **Each phase's design is agreed before its code is written,** as the driver's was. Its milestones are then added to [Done When](5-done-when.md).
-- **DB-API becomes phase 3,** as a package that depends on this driver (D-39). D-25 and D-26 stay deferred until phase 3 starts.
+- **Rust does not depend on Python M16.** Phase 3 depends on phase 2.
+- **Each phase's design is agreed before its code is written.** The [Rust development plan](D-rust-development.md) is a proposal, including its runtime, APIs, ownership enforcement and exact representations; the priority and learning intent above are agreed. Accepted milestones are then added to [Done When](5-done-when.md).
+- **The [Python baseline](E-python-baseline.md) records fresh evidence and limitations.** Skipped local/remote tests are not completed interoperability checks.
+- **DB-API remains phase 3**, as a package that depends on this driver (D-39). D-25 and D-26 stay deferred until phase 3 starts.
 
-*Why:* the conveniences make the Python client complete for everyday use. A second language shows whether the design depends on Python, and the Python code and tests make the port checkable. Application drivers let existing code use the client through interfaces it already knows.
+*Why:* the user requested Rust first. A second language tests whether the design depends on Python. The existing Python implementation provides a concrete reference without requiring its convenience layer to be finished. Rust must preserve the learning purpose while making resource ownership, permission to act, exact values and cleanup explicit.
+
+---
+
+**D-65 · Finish Rust locally, validate Windows authentication on transient GCP, then destroy** · *Agreed, 2026-10-18* · [Roadmap](C-roadmap.md#rust-completion-sequence--agreed-2026-10-18-d-65)
+
+- Finish the solid local Rust implementation first, including local-key Always Encrypted and independent .NET interoperability checks. API/provider designs are agreed before affected implementation.
+- Add a parallel Terraform test setup under `infra/gcp/`. Create the Windows/domain infrastructure only when local work is ready; use it to implement and validate Windows authentication (NTLM/Kerberos), then destroy it. Preserve the historical Azure setup.
+- Entra authentication is deferred because tenant access is unavailable. Azure-specific providers/features, Windows certificate-store key-provider support and enclaves/attestation are outside this completion scope. Rust completion is explicitly scoped, not full Python parity.
+- Require an explicit target project, cost estimate, finite test window, expiry fallback and verified full teardown. Keep evidence after infrastructure is gone. No deployment is established by accepting this sequence.
+- Once local and Windows acceptance pass and teardown is verified, finish the scoped Rust phase and proceed to Python M16. Publishing Rust is a separate action.
+
+*Why:* GCP is accessible from the current development location, Windows authentication needs a real Windows/domain test environment, and the user wants cloud resources present only for the test campaign.
 
 ---
 
@@ -550,6 +567,7 @@ Python's TLS engine works entirely in memory (`ssl.MemoryBIO`), so the core driv
 - Applications can choose exchange scope or fixed maximum-age reuse across transactions/autocommit within one physical connection and exclusive pool lease. Hits do not extend the deadline. Local master and column policies are independent; strict overrides use separate scopes. Changing defaults between exchanges clears prior entries.
 - Pool return/reset, physical failure/recovery, context changes and close clear/revoke retained authority. Expired keys reload on demand rather than limiting transaction duration.
 - Implementing explicit Rust key ownership exposed the need to replace Python's earlier shared context cache (D-60). Python implements these policies in its transparent SQL facade. It overwrites owned mutable key buffers; Python/backend temporary copies and provider-owned native secrets remain outside that guarantee.
+- Rust's owned-key cleanup, bounded policy service and driver lifecycle link are recorded in [design N](N-encryption-policy-implementation.md). [Design O](O-rust-transparent-encryption.md) and its acceptance evidence cover transparent encrypted SQL and independent .NET interoperability. [Lifetimes and cost](M-rust-encryption-lifetimes.md) records the retention tradeoffs; no guarantee extends to opaque authentication-provider or OS-managed secrets.
 
 *Why:* the user requested explicit efficiency/security tradeoffs after examining the repeated key work exposed by Rust development.
 
@@ -557,7 +575,14 @@ Python's TLS engine works entirely in memory (`ssl.MemoryBIO`), so the core driv
 
 ## Proposed and open
 
-Nothing is proposed or open.
+**D-64 · Rust channels use movable authority rather than task identity** · *Proposed direction selected by the user, 2026-10-17* · [Rust ownership and permissions](D-rust-development.md#1--ownership-and-permissions-come-first)
+
+- The Rust plan proposes one non-`Clone` send/read authority. A native Rust move transfers it; an exclusive borrow lends it temporarily. Task identity does not restrict sequential use after a valid move or loan.
+- This is a deliberate language-specific variation to D-21. Python retains its opening-task check and explicit `hand_over(task)`. A mutex may permit sequential lending in Rust; it does not make an unread response available for a new exchange.
+- Separate generation-scoped cancel/close handles may be shared. Persistent busy, continuation, lease and generation checks still govern protocol use after a guard or future is dropped.
+- Active-response transfer, borrow shapes and `Send` bounds remain API choices for R0. No runtime, TLS backend or cleanup mechanism is selected by this direction.
+
+*Why:* the user chose to propose Rust ownership through moves and borrowing. It should be expressed in Rust's own terms while preserving one advancing reader, safe pool return, explicit cleanup and the shared session semantics.
 
 ---
 

@@ -1,0 +1,554 @@
+    Blocking waiting for file lock on build directory
+   Compiling tds-client v0.1.0 (/Users/dawsonlp/repos/tdsprotocol/clients/rust)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.09s
+     Running unittests src/lib.rs (target/debug/deps/tds_client-de9900cc84263afb)
+
+running 57 tests
+test browser::tests::every_short_datagram_wrong_length_tag_and_grammar_is_refused ... ok
+test browser::tests::requests_and_replies_match_the_python_mcsqlr_examples ... ok
+test browser::tests::encoded_name_limits_and_strict_codecs_preserve_the_python_values ... ok
+test capture::tests::buffered_flush_failure_is_returned_and_create_never_truncates ... ok
+test capture::tests::whole_login_redaction_preserves_every_header_and_split_boundary ... ok
+test connection::core::tests::busy_state_and_exchange_identity_survive_without_a_response_guard ... ok
+test connection::core::tests::encoding_failure_keeps_the_reset_pending_and_emits_no_request ... ok
+test connection::core::tests::a_missing_first_packet_clock_is_not_reconstructed_from_later_packets ... ok
+test connection::core::tests::ack_does_not_release_until_its_last_packet_and_unsolicited_ack_is_fatal ... ok
+test connection::core::tests::attention_waits_past_normal_done_for_ack_in_a_later_message ... ok
+test connection::core::tests::cancel_timing_waits_for_ack_and_never_invents_an_unsent_milestone ... ok
+test connection::core::tests::final_token_waits_for_last_packet_and_never_accepts_trailing_payload ... ok
+test connection::core::tests::channel_lifetimes_never_reuse_ids_and_mars_refuses_wire_id_exhaustion ... ok
+test connection::core::tests::fatal_server_error_is_retained_and_prevents_reuse ... ok
+test connection::core::tests::malformed_input_permanently_revokes_core_output_and_authority ... ok
+test connection::core::tests::session_announcements_apply_before_reuse_and_empty_count_is_not_zero ... ok
+test connection::core::tests::sibling_channels_have_independent_exchange_clocks ... ok
+test connection::core::tests::recovery_rebinds_logical_channels_and_recordings_use_logical_ids ... ok
+test connection::core::tests::feature_acknowledgements_preserve_downgrades_and_reject_invalid_or_unrequested_values ... ok
+test connection::core::tests::timing_requires_complete_packets_and_terminal_message_proof_at_every_level ... ok
+test connection::shell::interruptions::exchange_abandonment_distinguishes_unpolled_reserved_and_submitted_work ... ok
+test connection::shell::interruptions::mars_reads_a_peer_failure_while_writes_are_blocked_and_fails_both_channels ... ok
+test connection::shell::interruptions::aborting_the_driver_during_a_partial_write_keeps_execution_uncertainty ... ok
+test connection::shell::interruptions::a_partial_ignore_eom_write_failure_preserves_both_causes_and_discards ... ok
+test connection::shell::interruptions::delegated_close_finishes_the_partial_packet_then_ignores_and_drains_before_reuse ... ok
+test connection::shell::interruptions::explicit_recovery_after_a_partial_write_never_replays_the_interrupted_request ... ok
+test connection::shell::tests::cancel_bypasses_a_full_mailbox_and_repeats_do_not_extend_its_budget ... ok
+test connection::shell::tests::channel_close_bypasses_a_full_mailbox_and_shares_the_first_deadline ... ok
+test connection::shell::tests::old_epoch_abandonment_is_harmless_but_current_and_root_guards_revoke ... ok
+test login7::tests::login_options_match_the_shared_python_definition_exactly ... ok
+test connection::shell::interruptions::partial_stream_writes_preserve_ignore_eom_cleanup_and_reuse ... ok
+test connection::shell::interruptions::a_pool_replaces_an_aborted_partial_send_without_losing_capacity_or_authority ... ok
+test login7::tests::password_change_matches_python_and_masks_both_credentials ... ok
+test mars::tests::credit_is_per_consumed_frame_and_siblings_are_independent ... ok
+test login7::tests::recovery_extension_matches_python_initial_and_recovery_logins ... ok
+test mars::tests::fragmented_headers_lengths_and_flags ... ok
+test mars::tests::wraparound_and_fin_handshake ... ok
+test packet::tests::malformed_lengths_and_changed_message_type_fail ... ok
+test prelogin::tests::directory_requires_nonoverlapping_bounded_entries_and_full_encryption ... ok
+test connection::shell::interruptions::runtime_shutdown_revokes_the_current_rotated_pool_endpoint_and_closes_its_socket ... ok
+test requests::tests::autocommit_header_is_one_while_a_transaction_counts_concurrent_requests ... ok
+test session::tests::per_state_sequences_refusal_reset_and_exhaustion_follow_python ... ok
+test session::tests::recovery_snapshots_match_python_and_the_mstds_example ... ok
+test connection::shell::interruptions::abandoning_cleanup_during_a_partial_attention_discards_without_finishing_its_write ... ok
+test session::tests::reset_restores_environment_but_transaction_waits_for_its_own_announcement ... ok
+test tokens::tests::exact_text_keeps_unpaired_surrogates ... ok
+test packet::tests::every_fragment_boundary_and_one_byte_feeds ... ok
+test tokens::tests::signed_return_status_spans_each_byte_boundary ... ok
+test tokens::tests::saved_json_columns_use_the_current_sessions_encoding ... ok
+test tokens::tests::recovery_tokens_cross_each_byte_boundary_and_reject_truncated_bodies ... ok
+test connection::shell::interruptions::aborting_bulk_data_send_discards_the_prepared_continuation ... ok
+test tokens::tests::truncated_bounded_token_is_malformed_and_unknown_type_is_refused ... ok
+test tokens::tests::tokens_cross_every_boundary_without_losing_metadata ... ok
+test connection::shell::interruptions::short_writes_and_would_block_resume_at_the_exact_offset_without_replaying_sql ... ok
+test connection::shell::interruptions::aborting_the_owner_during_a_blocked_write_discards_every_selected_prefix ... ok
+test connection::shell::interruptions::zero_and_failed_partial_writes_discard_and_report_uncertain_execution ... ok
+test connection::shell::interruptions::a_cleanup_deadline_interrupts_a_partly_written_attention_without_reuse ... ok
+
+test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running unittests src/bin/tds/main.rs (target/debug/deps/tds-c18554f47c1321f9)
+
+running 3 tests
+test params::tests::keywords_are_insensitive_but_clr_type_identity_preserves_case ... ok
+test params::tests::exact_literals_preserve_sign_scale_ticks_and_the_declared_offset ... ok
+test params::tests::collated_text_and_vector_literals_refuse_substitution_or_rounding ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/browser.rs (target/debug/deps/browser-4b5f4e070dca24c5)
+
+running 5 tests
+test unicast_instance_machine_and_dac_use_the_exact_requests ... ok
+test a_broadcast_with_no_answers_returns_no_instances ... ok
+test invalid_names_send_nothing_and_an_instance_request_requires_one_instance ... ok
+test no_reply_and_malformed_reply_preserve_request_context_and_bytes ... ok
+test broadcast_collects_valid_replies_until_the_original_deadline ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/bulk_shell.rs (target/debug/deps/bulk_shell-fec6b55857a3ca12)
+
+running 3 tests
+test forgotten_writer_cannot_bypass_continuation_guard_and_delegated_close_drains ... ok
+test prepared_abort_waits_for_attention_ack_not_an_ordinary_completion ... ok
+test prepared_abort_timeout_discards_and_retains_the_cleanup_error ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/cancellation.rs (target/debug/deps/cancellation-df7967ee168c3d34)
+
+running 7 tests
+test verified_peer_cannot_silently_change_the_negotiated_tds_version ... ok
+test cleanup_failure_preserves_the_callers_original_failure ... ok
+test external_cancel_wakes_an_advancing_reader_only_after_acknowledgement ... ok
+test successful_cleanup_returns_the_original_failure_without_replacing_it ... ok
+test dropping_close_or_a_cancel_waiting_read_discards_immediately ... ok
+test close_waits_for_later_ack_and_repeated_or_stale_handles_emit_no_attention ... ok
+test missing_ack_times_out_autonomously_even_without_an_application_read ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/channel_close.rs (target/debug/deps/channel_close-1252a6ba02283af5)
+
+running 5 tests
+test dropping_a_pending_channel_close_discards ... ok
+test delegated_close_wakes_a_waiting_owner_and_all_close_waiters ... ok
+test malformed_or_fatal_drain_keeps_the_shared_cause_and_partial_record ... ok
+test failed_channel_cleanup_is_shared_and_discards_without_an_owner_read ... ok
+test busy_close_waits_for_ack_and_its_message_then_stale_controls_are_harmless ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/cli.rs (target/debug/deps/cli-9acae6dbf3a0c01d)
+
+running 6 tests
+test executable_demonstrates_explicit_transaction_state ... ignored, requires the Docker SQL Server and test CA
+test executable_demonstrates_streamed_bulk_finish_and_explicit_abort ... ignored, requires the Docker SQL Server and test CA
+test executable_reads_rows_calls_output_parameters_and_reports_sql_errors ... ignored, requires the Docker SQL Server and test CA
+test executable_streams_result_chunks_and_binary_file_parameters ... ignored, requires the Docker SQL Server and test CA
+test help_requires_no_credentials_and_invalid_arguments_fail_before_network_setup ... ok
+test offline_replay_uses_no_live_configuration_and_reports_truncated_evidence ... ok
+
+test result: ok. 2 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/collations.rs (target/debug/deps/collations-e2f984a1a09004cf)
+
+running 2 tests
+test unknown_collations_unicode_only_and_unrepresentable_text_never_guess_or_replace ... ok
+test sql_code_pages_match_python_on_every_byte_pair_and_streaming_boundary ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.60s
+
+     Running tests/config.rs (target/debug/deps/config-eeb48cde47147639)
+
+running 7 tests
+test values_compare_credentials_but_debug_never_prints_them ... ok
+test failed_read_is_redacted_and_a_later_read_can_succeed_on_the_same_pool ... ok
+test lost_password_change_completion_is_uncertain_and_is_never_retried ... ok
+test root_close_interrupts_borrowed_recovery_during_its_configuration_read ... ok
+test late_login_is_superseded_and_invalid_reads_do_not_replace_accepted_settings ... ok
+test recovery_candidate_cannot_install_after_another_opening_accepts_new_settings ... ok
+test closing_or_canceling_a_source_wait_frees_capacity_and_timeout_covers_the_gate ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/connection_failures.rs (target/debug/deps/connection_failures-bd799c6f2b77191c)
+
+running 5 tests
+test unavailable_port_fails_at_tcp_start_without_protocol_fallback ... ok
+test aborting_connect_closes_its_owned_driver ... ok
+test tds8_starts_with_tls_and_never_falls_back_after_failure ... ok
+test malformed_refused_and_wrong_instance_hellos_fail_before_login ... ok
+test one_deadline_closes_a_silent_peer_at_the_failing_step ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+
+     Running tests/decoder_robustness.rs (target/debug/deps/decoder_robustness-df3b4c3af9450ce2)
+
+running 1 test
+test seeded_malformed_messages_and_fragmented_tokens_never_panic_or_escape_bounds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/encryption_live.rs (target/debug/deps/encryption_live-950e3030d26c8c10)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/inspection.rs (target/debug/deps/inspection-98b1f415f2ebc6a6)
+
+running 5 tests
+test malformed_token_keeps_a_located_prefix_and_disabled_inspection_builds_no_tree ... ok
+test null_bitmap_cells_have_zero_byte_spans_and_keep_the_bitmap_evidence ... ok
+test field_ranges_and_bytes_match_pythons_inspection_definitions ... ok
+test replay_inspection_masks_credential_spans_and_preserves_existing_diagnostics ... ok
+test login_credentials_are_redacted_and_tree_raw_and_rendering_are_bounded ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/inspection_extended.rs (target/debug/deps/inspection_extended-7fc308f6b72aae37)
+
+running 3 tests
+test bulk_known_length_payloads_remain_raw_instead_of_fabricating_plp_headers ... ok
+test streamed_row_and_output_fields_keep_token_ranges_at_every_small_fragment ... ok
+test rpc_table_and_transaction_fields_use_the_same_checked_readers_as_replay ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/inspection_shell.rs (target/debug/deps/inspection_shell-f724322ea4dd6b62)
+
+running 2 tests
+test sql_server_login_and_scalar_query_have_equal_live_and_saved_field_trees ... ignored, requires Docker SQL Server and existing test CA
+test fragmented_live_and_replayed_fields_match_in_every_protocol_and_mars_mode ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/json.rs (target/debug/deps/json-00f921c958af9d34)
+
+running 2 tests
+test json_utf8_rejects_overlong_out_of_range_invalid_and_truncated_characters ... ok
+test json_result_encodings_and_strict_utf8_parameters_match_python_at_every_fragment ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/large_values.rs (target/debug/deps/large_values-3d07568371998985)
+
+running 6 tests
+test malformed_lengths_and_unfinished_values_are_not_complete ... ok
+test null_empty_nbc_and_legacy_pointer_have_distinct_boundaries ... ok
+test xml_schema_and_legacy_table_provenance_are_retained_separately_from_payload ... ok
+test owned_large_parameter_and_result_bytes_match_python_codec ... ok
+test plp_every_fragment_keeps_exact_unicode_and_surrogate_boundaries ... ok
+test xml_and_large_outputs_materialize_without_pending_buffer_growth ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
+
+     Running tests/live_bulk.rs (target/debug/deps/live_bulk-274e1ed437a80d5b)
+
+running 3 tests
+test borrowed_bulk_finish_abort_encoding_failures_and_row_sources_preserve_the_session ... ignored, requires Docker SQL Server and test CA
+test bulk_drop_and_unresolved_pool_return_discard_instead_of_handing_off_the_continuation ... ignored, requires Docker SQL Server and test CA
+test bulk_uses_result_fixed_codes_and_incremental_large_cells_without_rounding ... ignored, requires Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_connection.rs (target/debug/deps/live_connection-632e23eba39f96b5)
+
+running 22 tests
+test abandoned_forgotten_and_canceled_reads_cannot_reuse_the_connection ... ignored, requires the Docker SQL Server and test CA
+test aborting_the_channel_owner_revokes_its_in_flight_exchange ... ignored, requires the Docker SQL Server and test CA
+test awaited_attention_cleanup_reuses_the_channel_without_inferring_rollback ... ignored, requires the Docker SQL Server and test CA
+test broken_transport_after_transmission_reports_uncertainty_without_reconnect ... ignored, requires the Docker SQL Server and test CA
+test certificate_identity_and_login_failures_are_not_bypassed ... ignored, requires the Docker SQL Server and test CA
+test channel_moves_to_another_task_and_sql_errors_remain_ordered ... ignored, requires the Docker SQL Server and test CA
+test checked_finish_fetch_and_partial_fetch_preserve_python_reading_rules ... ignored, requires the Docker SQL Server and test CA
+test close_permission_wakes_a_waiting_reader_and_parent_drop_revokes_channels ... ignored, requires the Docker SQL Server and test CA
+test delegated_channel_close_drains_before_reopen_and_stale_authority_is_rejected ... ignored, requires the Docker SQL Server and test CA
+test login_options_choose_session_defaults_and_identify_the_connection ... ignored, requires the Docker SQL Server and test CA
+test mars_busy_channel_close_preserves_sibling_and_stale_handles_are_inert ... ignored, requires the Docker SQL Server and test CA
+test mars_external_cancel_preserves_siblings_but_abandonment_discards_them ... ignored, requires the Docker SQL Server and test CA
+test mars_interleaves_readers_and_a_stalled_reader_does_not_block_its_sibling ... ignored, requires the Docker SQL Server and test CA
+test mars_large_request_resumes_credit_and_channels_observe_one_session ... ignored, requires the Docker SQL Server and test CA
+test observation_failure_and_recording_work_in_each_transport_mode ... ignored, requires the Docker SQL Server and test CA
+test one_hop_router_reaches_docker_with_two_independent_recordings ... ignored, requires the Docker SQL Server and test CA
+test pool_capacity_waiting_and_borrowers_use_independent_sessions ... ignored, requires the Docker SQL Server and test CA
+test pool_reset_restores_session_and_revokes_surviving_authority ... ignored, requires the Docker SQL Server and test CA
+test pool_reuses_proven_cancellation_but_discards_dropped_leases ... ignored, requires the Docker SQL Server and test CA
+test restricted_database_principal_receives_denial_without_automatic_grants ... ignored, requires the Docker SQL Server and test CA
+test shared_cancel_handles_acknowledge_and_cannot_cancel_the_next_exchange ... ignored, requires the Docker SQL Server and test CA
+test verified_login_two_exchanges_and_clean_close ... ignored, requires the Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 22 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_login.rs (target/debug/deps/live_login-011fdd90b2c4367f)
+
+running 1 test
+test restricted_sql_login_has_only_its_actual_permissions_in_each_transport_mode ... ignored, requires the Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_recovery.rs (target/debug/deps/live_recovery-d2b4c9e7a043e5a6)
+
+running 5 tests
+test direct_password_change_promotes_credential_only_after_successful_login ... ignored, requires the Docker SQL Server and test CA
+test interrupted_exchange_is_not_replayed_and_old_guards_cannot_close_replacement ... ignored, requires the Docker SQL Server and test CA
+test original_channels_and_close_controls_survive_repeated_recovery ... ignored, requires the Docker SQL Server and test CA
+test pool_rotation_and_borrowed_recovery_read_current_credentials ... ignored, requires the Docker SQL Server and test CA
+test server_state_refusals_and_feature_opt_out_prevent_reconnection ... ignored, requires the Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_replay.rs (target/debug/deps/live_replay-ae225182437b205d)
+
+running 1 test
+test real_owned_and_produced_tables_replay_with_exact_inputs_outputs_and_channel_identity ... ignored, requires Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_rpc.rs (target/debug/deps/live_rpc-56ce30839b212d39)
+
+running 2 tests
+test defaults_outputs_grouped_returns_saved_metadata_and_errors_preserve_reuse ... ignored, requires the Docker SQL Server and test CA
+test typed_scalar_inputs_round_trip_exactly_and_rpc_applies_pool_reset ... ignored, requires the Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_scalars.rs (target/debug/deps/live_scalars-71ca73400a46c726)
+
+running 1 test
+test heterogeneous_scalars_keep_exact_values_nulls_and_retention ... ignored, requires the Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_special.rs (target/debug/deps/live_special-db96f5b60f8f5696)
+
+running 7 tests
+test browse_metadata_preserves_base_tables_aliases_keys_and_hidden_columns ... ignored, requires Docker SQL Server and test CA
+test clr_named_serializations_round_trip_as_owned_bytes_and_sources ... ignored, requires Docker SQL Server and test CA
+test explicit_collation_views_match_the_server_across_all_supported_pages ... ignored, requires Docker SQL Server and test CA
+test native_json_rows_outputs_and_sources_follow_negotiated_result_encoding ... ignored, requires Docker SQL Server and test CA
+test native_vectors_use_negotiated_versions_and_preserve_exact_float_bits ... ignored, requires Docker SQL Server and test CA
+test sensitivity_classification_retains_named_labels_and_negotiated_ranks ... ignored, requires Docker SQL Server and test CA
+test sql_variants_round_trip_with_declared_base_types_and_nulls ... ignored, requires Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_streaming.rs (target/debug/deps/live_streaming-0114d3c1a7ef6bff)
+
+running 7 tests
+test batched_sources_preserve_offsets_returns_and_cleanup_after_late_production_error ... ignored, requires Docker SQL Server and test CA
+test fetch_after_partial_row_does_not_reconstruct_it_and_replays_later_rows ... ignored, requires Docker SQL Server and test CA
+test large_borrowed_readers_discard_tails_fetch_and_materialize_in_all_modes ... ignored, requires Docker SQL Server and test CA
+test outgoing_sources_and_large_outputs_cross_packets_and_cleanup_failures ... ignored, requires Docker SQL Server and test CA
+test owned_large_inputs_include_legacy_xml_and_raw_collated_text ... ignored, requires Docker SQL Server and test CA
+test slow_source_lends_executor_to_mars_sibling_and_channel_close ... ignored, requires Docker SQL Server and test CA
+test stalled_large_reader_preserves_mars_sibling_progress_and_cancel_reuse ... ignored, requires Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_tables.rs (target/debug/deps/live_tables-ab2a9c9d294976ab)
+
+running 1 test
+test owned_and_produced_table_parameters_defaults_outputs_and_hints_reach_real_procedures ... ignored, requires Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/live_transactions.rs (target/debug/deps/live_transactions-3d0bf023d2c6c936)
+
+running 2 tests
+test deferred_pool_reset_applies_to_a_transaction_manager_request ... ignored, requires Docker SQL Server and test CA
+test transaction_operations_follow_announcements_savepoints_errors_and_shared_state ... ignored, requires Docker SQL Server and test CA
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mars.rs (target/debug/deps/mars-1ccf791b1597dbde)
+
+running 6 tests
+test peer_fin_revokes_only_its_channel_and_completes_the_fin_exchange ... ok
+test fatal_error_fans_out_one_cause_with_each_channels_own_partial_record ... ok
+test receive_credit_counts_frames_when_tds_packets_are_split_or_combined ... ok
+test malformed_sequence_discards_siblings_and_abandonment_never_preserves_them ... ok
+test blocked_sender_leaves_mailbox_and_sibling_reader_free ... ok
+test channel_close_deadline_applies_while_its_request_waits_for_credit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/metadata.rs (target/debug/deps/metadata-7ca0fefedb95c8f5)
+
+running 1 test
+test classification_versions_and_browse_tokens_decode_across_every_byte ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/observation.rs (target/debug/deps/observation-0f983e8302969c70)
+
+running 8 tests
+test saved_recording_failure_on_channel_open_reports_cause_and_closes_socket ... ok
+test recording_failure_before_request_write_never_sends_unrecorded_sql ... ok
+test changing_observation_or_capture_during_an_exchange_is_refused ... ok
+test recording_failure_while_reporting_fatal_sql_preserves_both_causes_and_record ... ok
+test saved_recording_failure_on_response_preserves_prefix_and_discards_connection ... ok
+test failed_channel_observer_is_disabled_without_losing_capture_or_reuse ... ok
+test pool_factory_is_per_physical_connection_and_persists_through_reuse ... ok
+test levels_preserve_records_and_lines_and_full_credentials_stay_redacted ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/pool.rs (target/debug/deps/pool-21f6a86b4608ae20)
+
+running 8 tests
+test shutdown_wakes_waiters_and_refuses_a_login_that_finishes_late ... ok
+test completed_mars_fin_allows_reuse_with_a_new_authority_endpoint ... ok
+test explicit_release_resets_once_and_revokes_old_channels_and_controls ... ok
+test canceled_opening_and_failed_login_do_not_leak_reservations ... ok
+test dirty_return_discards_instead_of_draining_an_active_exchange ... ok
+test saturation_canceled_waiters_and_drop_release_capacity_without_reuse ... ok
+test unresolved_mars_fin_times_out_or_canceled_return_discards_both_endpoints ... ok
+test failed_response_cleanup_discards_and_a_new_borrower_gets_a_new_login ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/recovery.rs (target/debug/deps/recovery-e50e642012c5f3c7)
+
+running 8 tests
+test dropping_a_submitted_recovery_future_discards_its_candidate ... ok
+test a_preexisting_root_close_permission_interrupts_a_silent_recovery_login ... ok
+test recovery_requires_a_server_acknowledgement_and_never_opens_an_application_channel_on_refusal ... ok
+test malformed_duplicate_or_unrequested_recovery_acknowledgements_fail_login ... ok
+test attaching_a_direct_recording_requires_a_factory_for_recovery ... ok
+test a_new_recording_write_failure_discards_before_sending_the_recovery_hello ... ok
+test failed_recovery_recording_factory_is_terminal_before_a_second_socket_opens ... ok
+test recovery_timeout_closes_the_candidate_and_a_later_explicit_attempt_can_succeed ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+     Running tests/replay.rs (target/debug/deps/replay-cf20b40905784c4c)
+
+running 10 tests
+test python_event_text_preserves_lone_surrogates_pairs_and_literal_escape_sequences ... ok
+test omitted_metadata_is_missing_evidence_instead_of_malformed_wire ... ok
+test truncated_packets_messages_values_and_unknown_formats_have_distinct_diagnostics ... ok
+test invalid_or_duplicate_negotiation_retires_later_decoding_instead_of_guessing ... ok
+test python_rpc_and_transaction_bodies_decode_with_exact_flags_and_values ... ok
+test sql_bytes_are_decoded_without_using_recorded_human_text ... ok
+test interleaved_logical_channels_wait_for_real_attention_ack_and_keep_recorded_events ... ok
+test feature_context_is_shared_but_metadata_readers_are_per_channel ... ok
+test python_large_input_layouts_and_table_rows_are_read_without_result_framing ... ok
+test malformed_recordings_preserve_prefix_and_never_echo_json_or_credentials ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/responses.rs (target/debug/deps/responses-9fc21965dc3ac654)
+
+running 10 tests
+test fatal_server_error_keeps_its_record_and_discards_the_connection ... ok
+test procedure_return_statuses_remain_ordered_and_survive_fetch ... ok
+test cancel_keeps_drained_metadata_and_the_actual_acknowledgement ... ok
+test external_cancellation_during_fetch_preserves_kept_rows_and_the_live_tail ... ok
+test truncated_message_attaches_an_honest_incomplete_record ... ok
+test finish_discards_rows_retains_the_record_and_never_sends_attention ... ok
+test streaming_reports_sql_errors_after_the_final_record_once ... ok
+test fetch_after_streaming_keeps_the_live_tail_but_does_not_invent_complete_rows ... ok
+test an_error_read_past_is_reported_once_by_finish_with_the_whole_record ... ok
+test captures_keep_the_same_record_with_one_byte_or_whole_packet_bodies ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/routing.rs (target/debug/deps/routing-987393849d860730)
+
+running 5 tests
+test recording_failure_while_reporting_a_route_prevents_following_it ... ok
+test second_route_is_refused_and_reports_the_chain ... ok
+test one_hop_verifies_destination_and_changes_login_server_name ... ok
+test route_can_be_reported_without_following_and_invalid_targets_are_refused ... ok
+test redirect_does_not_restart_the_connection_timer ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.00s
+
+     Running tests/rpc.rs (target/debug/deps/rpc-4f86d94858d5bf5b)
+
+running 3 tests
+test invalid_declarations_values_and_rounding_are_refused_without_exposing_values ... ok
+test rpc_bodies_match_python_names_numbers_flags_default_null_and_batch_separator ... ok
+test output_values_decode_transactionally_across_every_boundary ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rpc_shell.rs (target/debug/deps/rpc_shell-9eb86b1f699b8160)
+
+running 4 tests
+test rejected_parameter_is_not_sent_even_when_a_mars_sibling_is_executing ... ok
+test canceling_rpc_retains_completed_returns_and_the_actual_acknowledgement ... ok
+test structured_iteration_streams_rows_and_advancing_sets_discards_unread_rows ... ok
+test returns_refuse_or_keep_or_discard_without_inventing_lost_rows ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/scalars.rs (target/debug/deps/scalars-e9551a26c5ffe734)
+
+running 5 tests
+test exact_conversions_reject_rounding_and_calendar_overflow ... ok
+test declared_integer_identity_is_independent_of_wire_code ... ok
+test malformed_scalar_metadata_and_payloads_fail_without_committing_a_row ... ok
+test scalar_parameter_writers_match_the_python_wire_bytes ... ok
+test python_scalar_limits_decode_across_fragments_and_both_null_forms ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/streaming_shell.rs (target/debug/deps/streaming_shell-51ef29f07fcda43d)
+
+running 5 tests
+test source_bindings_validate_before_poll_or_send_and_leave_channel_reusable ... ok
+test channel_close_interrupts_a_partly_sent_waiting_source_then_releases_lifetime ... ok
+test partial_source_failure_uses_ignore_eom_drains_and_preserves_reuse ... ok
+test abandoned_chunk_read_revokes_transport_without_advancing_hidden_state ... ok
+test source_cleanup_timeout_retains_both_causes_and_discards_transport ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/tables.rs (target/debug/deps/tables-1e4b12c3d9426930)
+
+running 1 test
+test input_only_table_requests_match_pythons_null_defaults_hints_and_value_layouts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tables_shell.rs (target/debug/deps/tables_shell-db7f66ea7289f777)
+
+running 1 test
+test produced_tables_preserve_following_parameters_and_batched_call_offsets ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/timing.rs (target/debug/deps/timing-2c06544d14115425)
+
+running 1 test
+test response_snapshots_observers_and_replay_preserve_timing_in_all_modes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/transactions.rs (target/debug/deps/transactions-9ad770abc7db9654)
+
+running 1 test
+test transaction_messages_match_python_exactly_and_refuse_unencodable_inputs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/variant.rs (target/debug/deps/variant-af05b2292ae1b963)
+
+running 2 tests
+test bounded_variant_corruption_fails_instead_of_waiting_for_more_bytes ... ok
+test variant_base_types_and_parameter_bytes_match_python_across_fragments ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/vector.rs (target/debug/deps/vector-2a581aa1337907a3)
+
+running 2 tests
+test malformed_vector_layout_count_element_and_width_are_refused ... ok
+test exact_vector_round_trips_match_python_and_binary16_conversion_is_exhaustive ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tds_client
+
+running 6 tests
+test src/connection/shell.rs - connection::shell::Response<'_>::fetch (line 1011) - compile ... ok
+test src/pool.rs - pool::Pool (line 28) - compile ... ok
+test src/replay.rs - replay::replay (line 560) - compile ... ok
+test src/requests/rows.rs - requests::rows (line 5) - compile ... ok
+test src/requests/rpc.rs - requests::rpc (line 5) - compile ... ok
+test src/text.rs - text (line 8) ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 5 tests
+test src/connection/shell/reading.rs - connection::shell::reading::StreamedRow (line 150) - compile fail ... ok
+test src/connection/shell/reading.rs - connection::shell::reading::LiveResultSet (line 13) - compile fail ... ok
+test src/connection/shell.rs - connection::shell::SerialChannel (line 807) - compile fail ... ok
+test src/connection/shell/bulk.rs - connection::shell::bulk::BulkWriter (line 13) - compile fail ... ok
+test src/connection/shell.rs - connection::shell::SerialChannel (line 799) - compile fail ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+
+all doctests ran in 2.67s; merged doctests compilation took 1.40s

@@ -17,8 +17,28 @@ Read in order. Each part builds on the one before it.
 | 5 | [Done When](5-done-when.md) | How to tell that each slice and milestone is finished | 5 min |
 | A | [The Client](A-the-client.md) | How the code is built and what the running client shows | 10 min |
 | B | [Building the Client](B-building-the-client.md) | Where the code lives, the milestones, and how each is tested | 10 min |
-| C | [Roadmap](C-roadmap.md) | What comes after the milestones: conveniences, a Rust client, application drivers | 5 min |
-| Check | [Python Key Retention](experiments/python-encryption-retention.md) | Policy API, lifecycle boundaries, test scenarios and evidence | as needed |
+| C | [Roadmap](C-roadmap.md) | What comes after the milestones: Rust, Python conveniences, application drivers | 5 min |
+| D | [Building the Rust Client](D-rust-development.md) | Proposed ownership/permissions, exact representations, coding practices and milestones | as needed |
+| E | [Python Baseline](E-python-baseline.md) | Source analysis, current test results and server setup | 10 min |
+| F | [Rust Type and Value API](F-rust-value-api.md) | Approved heterogeneous rows, exact values and declared SQL types; scalar reads implemented | as needed |
+| G | [Credential Lifetime](G-login-credential-lifetime.md) | Server password changes, observed recovery/reset failures and the distinct pool configuration responsibility | as needed |
+| H | [Pool Configuration Snapshots](H-pool-configuration.md) | Implemented Python/Rust snapshot APIs, lifetime rules, failure boundaries and acceptance evidence | as needed |
+| I | [Typed Calls and Streaming](I-rust-rpc-and-streaming.md) | Typed RPC, forward results, runnable Rust CLI and the proposed large-value ownership surface | as needed |
+| J | [Rust Completion and Decisions](J-rust-completion.md) | Implemented transactions, batched sources, special types and metadata; table-valued/bulk input decisions | as needed |
+| K | [Offline Rust Replay](K-offline-replay.md) | Existing capture compatibility, exact input reading and located incomplete-evidence diagnostics | as needed |
+| L | [Rust Field Inspection](L-rust-field-inspection.md) | Shared live/replay field trees, byte ranges, bounded raw evidence and protocol references | as needed |
+| M | [Rust Encryption Lifetimes and Cost](M-rust-encryption-lifetimes.md) | Implemented transaction/exchange/time foundation and measured cost/security tradeoffs; transparent SQL encryption remains separate | as needed |
+| N | [Encryption Policy Implementation](N-encryption-policy-implementation.md) | Implemented key service, ownership, deadlines, worker cancellation and driver lifecycle link | as needed |
+| O | [Rust Transparent Always Encrypted](O-rust-transparent-encryption.md) | Implemented wire/value/parameter/result adapter and finite local SQL acceptance | as needed |
+| P | [Windows Authentication Campaign](P-windows-authentication-campaign.md) | Provider proposal, missing deployment constraints and transient GCP acceptance/teardown gates | as needed |
+| Plan | [GCP Authentication Corrections](experiments/gcp-authentication-development-plan.md) | Six iterations for Python fixes, shared authentication parity, remaining Rust acceptance and verified cleanup; dependency changes remain deferred | as needed |
+| Check | [GCP Follow-up Evidence](experiments/gcp-authentication-follow-up-evidence.md) | Implemented corrections, Windows runtime results, retained failures and remaining API/worker choices | as needed |
+| Check | [Rust SQL Encryption Evidence](experiments/rust-transparent-encryption.md) | Independent .NET, lifecycle, fault and capture boundaries; repeatable regression results | as needed |
+| Check | [Encryption Policy Scenarios](experiments/encryption-policy-scenarios.md) | Named synthetic, controlled-peer and live SQL lifecycle acceptance scenarios and their evidence limits | as needed |
+| Check | [Encryption Policy Evidence](experiments/encryption-policy-evidence.md) | Retained counters, regression results, native cleanup review, driver observations and actual service cost | as needed |
+| Check | [Python Key Retention](experiments/python-encryption-retention.md) | Python policy API, transparent SQL lifecycle integration, scenarios and evidence limits | as needed |
+| Experiment | [Recovery Channel Identity](experiments/recovery-channel-identity.md) | Failure reproduction, intervention, shared lifetime contract and Python/Rust results | as needed |
+| Experiment | [Bulk Continuation](experiments/bulk-continuation.md) | Server behavior after preparation, explicit abort versus physical close, and the Python pool-release defect | as needed |
 
 ## How every page is built
 
@@ -72,4 +92,4 @@ What the client cannot do yet, or what has not been confirmed. Each is described
 
 ## Next
 
-The milestones M1–M15, M17 and M18 in [Building the Client](B-building-the-client.md#4--milestones--agreed-d-46) are built. As D-62 decided, the logins and Azure's features were built before M16. M16, the convenience layer and the synchronous shell, is next. It is the first phase of the [Roadmap](C-roadmap.md), followed by a Rust client and application drivers such as DB-API (D-63).
+The milestones M1–M15, M17 and M18 in [Building the Client](B-building-the-client.md#4--milestones--agreed-d-46) are built. As D-62 decided, the logins and Azure's features were built before M16. The Rust client is next, before M16, following the user's revised priority (D-63). Its [development proposal](D-rust-development.md) begins with ownership and permissions. The [Python baseline](E-python-baseline.md) records 589 passes, no failures and 13 remote-environment skips after fixing captured-server portability and automatic test database initialization. SQL Server runs under Rosetta, and local TLS and .NET interoperability checks passed. Python conveniences and application drivers follow in the [Roadmap](C-roadmap.md).

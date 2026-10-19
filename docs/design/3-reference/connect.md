@@ -51,10 +51,21 @@ any step fails ─────────────────────�
 **When the driver recovers:**
 - **By itself,** when an exchange finds the connection broken and no request in progress. The driver recovers once, then sends the request.
 - **When asked:** `await connection.recover()`.
-- **A request in progress when the connection broke is never sent again.** Whether it ran is unknown. The request's own error says so, and the next exchange doesn't recover by itself. `connection.recover()` recovers the session as the server last reported it, without any effect of that request.
+- **A request in progress when the connection broke is never sent again.** Whether it ran is unknown. The request's own error says so, and the next exchange doesn't recover by itself. `connection.recover()` recovers the session as the server last reported it; it neither determines nor undoes the interrupted request's effects.
 - **The steps show the recovery:** *recover* (`● recover · session 81, on a new connection to …`), then the usual hello, secure and log in, then *recovered* (`● recovered · session 81 → 81 · database tempdb`: SQL Server can give the new session the old one's id, once the old one has ended). `connection.recoveries` counts the recoveries.
-- **Serial channels continue:** each one that was open before is open again, with the same id and owner, under MARS too.
+- **Serial channels continue:** each one that was open before is open again, with the same application id and owner, under MARS too. MARS wire ids are allocated afresh on the new physical connection; incoming frames map back to application ids. Connection/channel close permissions remain valid. Old responses belong to the failed exchange and cannot read or cancel new requests. Channels closed by the application stay closed.
 - **It can't happen** when the login didn't ask for session recovery, the server didn't agree to it, the server marked the session not recoverable, or the recovery login failed. `SessionNotRecovered` then says why. It names the session and what broke the connection, and for a session marked not recoverable, the request after which the server marked it.
+
+The same contract is implemented in Rust for its supported SQL/token subset:
+`connection.recover().await`, `connection.recoveries()` and
+`ErrorKind::SessionNotRecovered`. `ConnectOptions.session_recovery` defaults on.
+Its persistent driver retires the physical epoch before waking failed waiters;
+old request/read/cleanup guards check that epoch before revocation. Current-epoch
+abandonment still discards. Python pins response sources and running procedures
+to the failed core and transport. Already retained old data stay inspectable;
+neither client may advance an old exchange through the replacement. The
+[experiment record](../experiments/recovery-channel-identity.md) distinguishes
+the original failure, the intervention and the local Python/Rust evidence.
 
 ## Options
 
@@ -71,6 +82,7 @@ This table lists every option of `tds.connect(host, port, *, user, password, …
 | `ssl_context` | `--ca-file` | the system's trusted authorities, checking the host name | How the server's certificate is checked: Python's `ssl.SSLContext`. | D-10 |
 | `server_hostname` | `--server-hostname` | the host connected to | The name the certificate must carry. | D-10 |
 | `timeout` | `--timeout` | 15 s | The connection timer, from opening TCP to ready (routing included). | — |
+| `cleanup_timeout` | — | 5 s | Total channel-close cleanup budget, separate from connection/query time. Finite and nonnegative. Failure/cancellation discards the connection. | — |
 | `mars` | `--mars` | off | Serial channels are MARS sessions, so several can run at once. | D-18 |
 | `odbc` | `--no-odbc` | on | LOGIN7's ODBC flag: the session starts with ODBC's defaults (ANSI options on, TEXTSIZE unlimited). When off, the session starts with the server's own defaults (TEXTSIZE 4,096 bytes). | D-9 |
 | `features` | one switch per feature, below | `tds.DEFAULT_FEATURES` | What the login asks for. `connection.features` shows what the server accepted. | D-8 |
@@ -78,9 +90,10 @@ This table lists every option of `tds.connect(host, port, *, user, password, …
 | `host_name` | `--host-name` | this machine's name | The session's `host_name`. The process ID is always the real one. | D-9 |
 | `language` | `--language` | the login's default | The session's language, and so the language of its messages. | D-9 |
 | `read_only_intent` | `--read-only-intent` | off | Tells an availability group the connection only reads, so it can be routed to a readable secondary. It is only a routing hint; writes still work. | D-9 |
-| `follow_routing` | — | on | A login reply that routes the connection is followed once. When off, `tds.Routed` is raised instead. | D-11 |
-| `observe` | `--observe` | off | Shows the running client: an observer called with each event, at its level (off, outline, full). | D-12 |
-| `capture` | — | none | Records the conversation, so that it can be replayed offline into the identical view. | D-12 |
+| `follow_routing` | — | on | A valid TCP routing reply is followed once under the original deadline, verifying the destination's name. Non-TCP/invalid targets are rejected. When off, `tds.Routed` reports a valid target instead. | D-11 |
+| `observe` | `--observe` | off | Shows the running client at off/outline/full. A failed callback is disabled; its exception is available as `connection.observation_error` until replaced. | D-12 |
+| `capture` | — | none | Saves one physical connection for replay; cannot move to another. Write/flush failure raises `CaptureError` and discards the connection. Mutually exclusive with `capture_factory`. | D-12 |
+| `capture_factory` | — | none | Callable creating a fresh capture with a distinct output for each physical connection, including routing/recovery. Required for pool recording; loans of the same transport keep its capture. The application owns/closes Python capture resources. | D-12 |
 
 **Login features.** `features` is a list of `tds.Feature`. The command-line switches turn each feature on or off, overriding its default.
 

@@ -16,6 +16,8 @@ header carries the physical SMP wire id; after recovery these numbers can differ
 Each physical connection has its own recording, including each recovery login.
 
 The password is removed from the login, unless keep_password=True. Its bytes are zeroed and its length is kept.
+Incoming Windows-login packet payloads are also omitted by default and marked
+as redacted. Replay reports that authentication evidence as unavailable.
 LOGIN7's scrambling is reversible, so otherwise a capture would hold the password. Query text and data stay, because
 a capture exists to record them. Protect a capture as carefully as the data that it holds.
 
@@ -33,7 +35,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
-from . import login7, prelogin
+from . import login7, logins, prelogin
 from .connection.core import Event, Level, level_of
 from .login7 import LOGIN7
 from .packet import HEADER, HEADER_SIZE, PacketType, Status
@@ -124,6 +126,8 @@ class Capture:
             line["took"] = event.took
         if event.kind == "mars" and event.node is not None:  # a MARS frame's header: replay decodes it
             line["bytes"] = base64.b64encode(event.node.raw).decode()
+        if event.safe_login_tokens is not None:
+            line['safe_login_tokens'] = base64.b64encode(event.safe_login_tokens).decode()
         self._write(line)
 
     def packet(self, direction: str, channel: int | None, data: bytes) -> None:
@@ -141,9 +145,16 @@ class Capture:
             return
         self._write_packet(direction, channel, data)
 
-    def _write_packet(self, direction: str, channel: int | None, data: bytes) -> None:
-        self._write({"t": self._when(time.perf_counter()), "packet": direction, "channel": channel,
-                     "bytes": base64.b64encode(data).decode()})
+    def redacted_authentication_packet(self, direction: str, channel: int | None, data: bytes) -> None:
+        """The core has omitted a Windows-login reply's raw payload before saving."""
+        self._write_packet(direction, channel, data, redacted=True)
+
+    def _write_packet(self, direction: str, channel: int | None, data: bytes, *, redacted: bool = False) -> None:
+        line = {"t": self._when(time.perf_counter()), "packet": direction, "channel": channel,
+                "bytes": base64.b64encode(data).decode()}
+        if redacted:
+            line['redacted'] = 'windows-login'
+        self._write(line)
 
     def close(self) -> None:
         self._out.flush()
@@ -154,15 +165,21 @@ class Capture:
 # --------------------------------------------------------------------------- replay
 
 
+class _SavedPackets(list):
+    redacted = False
+
+
 def _messages(lines: list[dict]) -> dict[tuple, deque]:
     """Every message, rebuilt from its packets, per direction and channel, in order. A message ends at a packet
     marked LAST."""
     messages: dict[tuple, deque] = defaultdict(deque)
-    partial: dict[tuple, list[bytes]] = defaultdict(list)
+    partial: dict[tuple, _SavedPackets] = defaultdict(_SavedPackets)
     for line in lines:
         if "packet" in line:
             key, data = (line["packet"], line["channel"]), base64.b64decode(line["bytes"])
             partial[key].append(data)
+            if line.get('redacted') == 'windows-login':
+                partial[key].redacted = True
             if Status.LAST in Status(data[1]):
                 messages[key].append(partial.pop(key))
     return messages
@@ -176,14 +193,28 @@ def _body(packets: list[bytes]) -> bytes:
     return b"".join(p[HEADER_SIZE:] for p in packets)
 
 
-def _decoded(what: str, packets: list[bytes], definition) -> Node:
+def _decoded(what: str, packets: list[bytes], definition, safe_login_tokens: str | None = None) -> Node:
     """A message as the live client shows it: its packets' headers, then its definition's fields."""
     body = _body(packets)
+    if getattr(packets, 'redacted', False):
+        if safe_login_tokens is not None:
+            safe = base64.b64decode(safe_login_tokens, validate=True)
+            if len(safe) != len(body):
+                raise ValueError('saved login evidence length differs from its packets')
+            node = logins._redact_authentication(definition(safe))
+            return Node(what, 0, len(body), children=[*_headers(packets), node,
+                        Node('authentication', 0, len(body), shown='authentication payload omitted from capture')])
+        return Node(what, 0, len(body), children=[*_headers(packets),
+                    Node('authentication', 0, len(body), shown='authentication payload omitted from capture')])
     try:
         node = definition(body)
     except Exception as e:  # say what failed, rather than show nothing
+        if what == 'login reply':
+            return Node(what, 0, len(body), children=[*_headers(packets),
+                        Node('authentication', 0, len(body), shown='malformed login payload hidden on replay')])
         node = Node(what, 0, len(body), body[:64], shown=f"can't be decoded on replay: {e}")
-    return Node(what, 0, len(body), body[:8192], children=[*_headers(packets), node])
+    whole = Node(what, 0, len(body), body[:8192], children=[*_headers(packets), node])
+    return logins._redact_authentication(whole) if what == 'login reply' else whole
 
 
 def _tokens(what: str, negotiated: dict):
@@ -251,7 +282,7 @@ def replay(file: str | Path | TextIO, observe: Callable[[Event], None]) -> None:
                                     HEADER.decode(packet[:HEADER_SIZE], True).node)
                 node = Node(what, 0, reader.size, b"", children=reader.nodes)
             elif what == "login reply":
-                node = _decoded(what, queue.popleft(), _tokens(what, negotiated))
+                node = _decoded(what, queue.popleft(), _tokens(what, negotiated), line.get('safe_login_tokens'))
             elif what in REQUESTS:
                 node = _decoded(what, queue.popleft(), REQUESTS[what])
         elif kind == "mars" and "bytes" in line:

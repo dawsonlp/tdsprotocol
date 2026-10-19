@@ -87,6 +87,17 @@ A failure is a `BrowserError` that names the request, the machine and the port, 
 
 Every call takes `port=` (default 1434), `timeout_ms=` (default 1000) and `encoding=` (default `"ascii"`).
 
+Rust follows the same separation in `tds_client::browser`. Its pure
+`request(Request, Encoding)` and `read_reply(bytes, Message, Encoding)` functions
+also build without Tokio. The optional async functions take an explicit
+`browser::Options` with the same port/timer defaults. `instance`, `machine`,
+`dac_port` and IPv4 `broadcast` are implemented with strict ASCII, UTF-8 and
+Windows-1252 text. Other code pages remain open. A `BrowserError` retains its
+request/target/cause and any malformed reply bytes; broadcast ignores unreadable
+answers and collects until the original deadline. Controlled tests use loopback
+UDP and the unchanged Python/specification examples; actual Windows Browser
+acceptance remains separate.
+
 **Then connect.** The Browser gives a port, and connecting to it is the application's next step: `tds.connect(host, instance.tcp_port, …)`. The driver doesn't combine the two steps. A connector that combines them is a convenience, in a layer around the driver (D-39, D-59).
 
 ### Another code page

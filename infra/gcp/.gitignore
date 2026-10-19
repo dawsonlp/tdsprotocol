@@ -1,0 +1,13 @@
+# Keep the provider lockfile tracked when Terraform is implemented.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+secrets/
+artifacts/
+gcp.json
+known_hosts

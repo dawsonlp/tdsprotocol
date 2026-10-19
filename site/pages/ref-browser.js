@@ -49,6 +49,9 @@
         <li><b>Limits:</b> an instance name sent is at most 32 bytes; a longer one is refused. A reply’s text is at most 1,024 bytes per instance; MC-SQLR says a client <i>should</i> reject an endpoint value over 255 bytes. The driver doesn’t reject it, and shows what arrived.</li>
       </ul>
 
+      <h2>Rust implementation</h2>
+      <p>The Rust client exposes pure request/reply codecs and Tokio helpers for instance, machine, DAC and IPv4 broadcast discovery. It supports explicit ASCII, UTF-8 and Windows-1252 encodings; other code pages remain open. Names are checked in encoded bytes, invalid text fails without replacement, and discovery leaves the TDS connection to the caller. Five controlled UDP tests and unchanged Python/MC-SQLR examples verify this implementation; a Windows Browser service has not been exercised by the Rust tests. See the repository’s <code>clients/rust/SUPPORT.md</code> for the current feature boundary.</p>
+
       <h2>Example</h2>
       <p>Asking a machine for its instance YUKONSTD, and the reply:</p>
       ${grid('sqlr-instance-request')}

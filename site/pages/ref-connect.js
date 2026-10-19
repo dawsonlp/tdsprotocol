@@ -54,11 +54,13 @@
       <ul>
         <li><b>By itself,</b> when an exchange finds the connection broken and no request in progress. The driver recovers once, then sends the request.</li>
         <li><b>When asked:</b> <code>await connection.recover()</code>.</li>
-        <li><b>A request in progress when the connection broke is never sent again.</b> Whether it ran is unknown. The request’s own error says so, and the next exchange doesn’t recover by itself. <code>connection.recover()</code> recovers the session as the server last reported it, without any effect of that request.</li>
+        <li><b>A request in progress when the connection broke is never sent again.</b> Whether it ran is unknown. The request’s own error says so, and the next exchange doesn’t recover by itself. <code>connection.recover()</code> recovers the session as the server last reported it; it neither determines nor undoes the interrupted request’s effects.</li>
         <li><b>The steps show the recovery:</b> <i>recover</i> (<code>● recover · session 81, on a new connection to …</code>), then the usual hello, secure and log in, then <i>recovered</i> (<code>● recovered · session 81 → 81 · database tempdb</code>: SQL Server can give the new session the old one’s id, once the old one has ended). <code>connection.recoveries</code> counts the recoveries.</li>
-        <li><b>Serial channels continue:</b> each one that was open before is open again, with the same id and owner, under MARS too.</li>
+        <li><b>Serial channels continue:</b> each one that was open before is open again, with the same application id and owner, under MARS too. MARS wire ids are allocated afresh on the new physical connection and incoming frames map back to application ids. Connection/channel close permissions remain valid. Old responses cannot read or cancel new requests. Channels closed by the application stay closed.</li>
         <li><b>It can’t happen</b> when the login didn’t ask for session recovery, the server didn’t agree to it, the server marked the session not recoverable, or the recovery login failed. <code>SessionNotRecovered</code> then says why. It names the session and what broke the connection, and for a session marked not recoverable, the request after which the server marked it.</li>
       </ul>
+
+      <p>The same recovery contract is implemented in Rust for its supported SQL/token subset: <code>connection.recover().await</code>, <code>connection.recoveries()</code> and <code>ErrorKind::SessionNotRecovered</code>. The driver retires the physical epoch before waking failed waiters; old request/read/cleanup guards cannot revoke the replacement. Python pins old response sources and running procedures to the failed core/transport. Retained data remain inspectable. See the ${L('recovery-experiment', 'experiment and Python/Rust results')}.</p>
 
       <h2>Options</h2>
       <p>This table lists every option of <code>tds.connect(host, port, *, user, password, …)</code>, with its default. The command line (<code>python -m tds --help</code>) offers the same, under the names shown.</p>
@@ -72,6 +74,7 @@
         ['<code>ssl_context</code>', '<code>--ca-file</code>', 'the system’s trusted authorities, checking the host name', 'How the server’s certificate is checked: Python’s <code>ssl.SSLContext</code>.', D(10)],
         ['<code>server_hostname</code>', '<code>--server-hostname</code>', 'the host connected to', 'The name the certificate must carry.', D(10)],
         ['<code>timeout</code>', '<code>--timeout</code>', '15 s', 'The connection timer, from opening TCP to ready (routing included).', '—'],
+        ['<code>cleanup_timeout</code>', '—', '5 s', 'Total channel-close cleanup budget, separate from connection/query time. Finite and nonnegative; failure/cancellation discards.', '—'],
         ['<code>mars</code>', '<code>--mars</code>', 'off', 'Serial channels are MARS sessions, so several can run at once.', D(18)],
         ['<code>odbc</code>', '<code>--no-odbc</code>', 'on', 'LOGIN7’s ODBC flag: the session starts with ODBC’s defaults (ANSI options on, TEXTSIZE unlimited). When off, the session starts with the server’s own defaults (TEXTSIZE 4,096 bytes).', D(9)],
         ['<code>features</code>', 'one switch per feature, below', '<code>tds.DEFAULT_FEATURES</code>', 'What the login asks for. <code>connection.features</code> shows what the server accepted.', D(8)],
@@ -79,9 +82,10 @@
         ['<code>host_name</code>', '<code>--host-name</code>', 'this machine’s name', 'The session’s <code>host_name</code>. The process ID is always the real one.', D(9)],
         ['<code>language</code>', '<code>--language</code>', 'the login’s default', 'The session’s language, and so the language of its messages.', D(9)],
         ['<code>read_only_intent</code>', '<code>--read-only-intent</code>', 'off', 'Tells an availability group the connection only reads, so it can be routed to a readable secondary. It is only a routing hint; writes still work.', D(9)],
-        ['<code>follow_routing</code>', '—', 'on', 'A login reply that routes the connection is followed once. When off, <code>tds.Routed</code> is raised instead.', D(11)],
-        ['<code>observe</code>', '<code>--observe</code>', 'off', 'Shows the running client: an observer called with each event, at its level (off, outline, full).', D(12)],
-        ['<code>capture</code>', '—', 'none', 'Records the conversation, so that it can be replayed offline into the identical view.', D(12)],
+        ['<code>follow_routing</code>', '—', 'on', 'A valid TCP routing reply is followed once under the original deadline, verifying the destination’s name. Non-TCP/invalid targets are rejected. When off, <code>tds.Routed</code> reports a valid target instead.', D(11)],
+        ['<code>observe</code>', '<code>--observe</code>', 'off', 'Shows the running client at off/outline/full. A failed callback is disabled; its exception is available as <code>connection.observation_error</code> until replaced.', D(12)],
+        ['<code>capture</code>', '—', 'none', 'Saves one physical connection for replay; cannot move to another. Write/flush failure raises <code>CaptureError</code> and discards the connection. Mutually exclusive with <code>capture_factory</code>.', D(12)],
+        ['<code>capture_factory</code>', '—', 'none', 'Callable creating a fresh capture with a distinct output for each physical connection, including routing/recovery. Required for pool recording; loans of the same transport keep its capture. The application owns/closes Python capture resources.', D(12)],
       ], 'compact')}
       <p><b>Login features.</b> <code>features</code> is a list of <code>tds.Feature</code>. The command-line switches turn each feature on or off, overriding its default.</p>
       ${table(['Feature', 'Command line', 'Default', 'Version sent', 'What it changes'], [
