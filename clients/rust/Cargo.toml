@@ -9,7 +9,7 @@ repository = "https://github.com/dawsonlp/tdsprotocol"
 description = "A literate TDS client: explicit protocol definitions and connection procedures"
 
 [workspace]
-members = ["native-sspi"]
+members = ["native-sspi", "native-certstore", "native-gssapi"]
 resolver = "3"
 
 [features]
@@ -17,8 +17,18 @@ default = ["tokio"]
 tokio = ["dep:tokio", "dep:hostname"]
 encryption = ["tokio", "dep:aws-lc-rs"]
 integrated-auth = ["tokio", "dep:sspi", "dep:sha2", "dep:x509-parser", "dep:tds-native-sspi"]
+system-gssapi = ["integrated-auth", "dep:tds-native-gssapi"]
+azure-identity = ["tokio", "dep:azure_core", "dep:azure_identity", "dep:async-trait"]
+azure-keyvault = ["encryption", "azure-identity", "dep:azure_security_keyvault_keys"]
+certificate-store = ["encryption", "dep:x509-parser", "dep:tds-native-certstore"]
 
 [dependencies]
+tds-native-gssapi = { version = "=0.1.0", path = "native-gssapi", optional = true }
+tds-native-certstore = { version = "=0.1.0", path = "native-certstore", optional = true }
+azure_security_keyvault_keys = { version = "=1.0.1", default-features = false, optional = true }
+azure_core = { version = "=1.0.0", default-features = false, features = ["reqwest_rustls", "tokio"], optional = true }
+azure_identity = { version = "=1.0.0", default-features = false, features = ["tokio"], optional = true }
+async-trait = { version = "0.1", optional = true }
 hostname = { version = "0.4", optional = true }
 aws-lc-rs = { version = "=1.18.2", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"], optional = true }
 zeroize = "=1.9.1"
@@ -58,3 +68,7 @@ required-features = ["encryption"]
 [[example]]
 name = "login_probe"
 required-features = ["integrated-auth"]
+
+[[example]]
+name = "azure_encrypted"
+required-features = ["azure-keyvault"]

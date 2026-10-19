@@ -55,7 +55,14 @@ async fn authentication_refusal_rereads_once_and_only_reopens_for_changed_settin
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             let (mut peer, _) = Peer::await_login(socket, false).await;
-            update.value.lock().unwrap().password = "rotated-test-password".into();
+            update
+                .value
+                .lock()
+                .unwrap()
+                .authentication
+                .sql_credentials_mut()
+                .unwrap()
+                .password = "rotated-test-password".to_string().into();
             peer.reply(&rejected_login(rejection)).await;
             peer.expect_eof().await;
             Peer::login_next(&listener, 0x74000004, false)
@@ -139,13 +146,13 @@ async fn late_login_is_superseded_and_invalid_reads_do_not_replace_accepted_sett
         let pool = Arc::new(Pool::from_config(source.clone(), 2, services, PoolPolicy::default()).unwrap());
         let opener = { let pool = pool.clone(); tokio::spawn(async move {pool.acquire().await}) };
         waiting.await.unwrap();
-        source.value.lock().unwrap().password = "artificial-B".into();
+        source.value.lock().unwrap().authentication.sql_credentials_mut().unwrap().password = "artificial-B".to_string().into();
         let newer = pool.acquire().await.unwrap();
         finish.send(()).unwrap();
         let error = opener.await.unwrap().err().unwrap();
         assert!(matches!(error.kind, ErrorKind::Configuration(ref e) if e.phase == ConfigPhase::Superseded));
         assert_eq!(pool.in_use(), 1);
-        source.value.lock().unwrap().password = "artificial-C".into();
+        source.value.lock().unwrap().authentication.sql_credentials_mut().unwrap().password = "artificial-C".to_string().into();
         // Reading a valid new value accepts it before a network/login failure.
         source.value.lock().unwrap().port = 0;
         assert!(pool.acquire().await.is_err()); // invalid values do not supersede B
@@ -213,12 +220,40 @@ async fn closing_or_canceling_a_source_wait_frees_capacity_and_timeout_covers_th
 fn values_compare_credentials_but_debug_never_prints_them() {
     let a = ConnectionConfig::new("host", 1433, "user", "SECRET");
     let mut b = a.clone();
-    b.password = "different".into();
+    b.authentication.sql_credentials_mut().unwrap().password = "different".to_string().into();
     assert_ne!(a, b);
     assert!(b.compatible_with(&a));
     b.database = "elsewhere".into();
     assert!(!b.compatible_with(&a));
     assert!(!format!("{a:?}").contains("SECRET"));
+}
+
+#[test]
+fn system_cache_principal_provider_and_service_are_pool_identity() {
+    use tds_client::auth::{Credentials, Method, WindowsAuth};
+    let mut a = ConnectionConfig::new("host", 1433, "user", "");
+    let mut auth = WindowsAuth::system_cache(Method::Negotiate);
+    auth.credentials = Credentials::SystemCache {
+        principal: Some("canary@TDS.TEST".into()),
+    };
+    a.authentication = tds_client::Authentication::Windows(auth.clone());
+    let mut b = a.clone();
+    assert!(b.compatible_with(&a));
+    assert!(!format!("{a:?}").contains("canary"));
+    auth.credentials = Credentials::SystemCache {
+        principal: Some("other@TDS.TEST".into()),
+    };
+    b.authentication = tds_client::Authentication::Windows(auth.clone());
+    assert!(!b.compatible_with(&a));
+    auth.credentials = Credentials::SystemCache {
+        principal: Some("canary@TDS.TEST".into()),
+    };
+    auth.service_principal = Some("MSSQLSvc/other:1433".into());
+    b.authentication = tds_client::Authentication::Windows(auth);
+    assert!(!b.compatible_with(&a));
+    b.authentication =
+        tds_client::Authentication::Windows(WindowsAuth::signed_in(Method::Negotiate));
+    assert!(!b.compatible_with(&a));
 }
 
 struct WaitOnRecovery {

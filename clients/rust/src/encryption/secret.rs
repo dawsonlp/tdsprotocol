@@ -59,6 +59,16 @@ pub struct Plaintext {
     pub(super) length: usize,
 }
 impl Plaintext {
+    /// Copy application-owned bytes into a fixed erasing allocation.
+    pub fn copy(bytes: &[u8]) -> super::Result<Self> {
+        if bytes.len() > super::cell::MAX_VALUE {
+            return Err(super::Error::ValueTooLarge);
+        }
+        Ok(Self {
+            storage: Secret::copy(bytes),
+            length: bytes.len(),
+        })
+    }
     pub fn as_bytes(&self) -> &[u8] {
         &self.storage.bytes[..self.length]
     }

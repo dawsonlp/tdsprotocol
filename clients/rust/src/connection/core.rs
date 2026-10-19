@@ -111,7 +111,7 @@ impl ResponseStream {
                     return Ok(self.terminal.take());
                 }
             } else if let Some(record) = self.decoded(observations, channel)? {
-                self.continuation = matches!(record, Record::Sspi(_));
+                self.continuation = matches!(record, Record::Sspi(_) | Record::FedAuthInfo(_));
                 if matches!(&record,Record::Done(done) if
                     if canceling { done.acknowledges_cancel() } else { done.is_final() })
                 {
@@ -152,8 +152,11 @@ impl ResponseStream {
         }
     }
     fn configure_features(&mut self, features: &BTreeMap<u8, Vec<u8>>) -> Result<()> {
-        self.decoder
-            .set_column_encryption(features.get(&4).is_some_and(|v| v == &[1]));
+        self.decoder.set_column_encryption(
+            features
+                .get(&4)
+                .is_some_and(|v| matches!(v.first(), Some(1 | 2))),
+        );
         self.decoder
             .set_utf8_support(features.get(&10).is_some_and(|v| v == &[1]));
         self.decoder
@@ -181,6 +184,12 @@ struct ChannelState {
 
 pub struct ConnectionCore {
     integrated_security: bool,
+    federated: Option<crate::entra::EntraMode>,
+    federated_request: Option<crate::fedauth::Challenge>,
+    federated_pending: bool,
+    federated_rounds: u8,
+    federated_echo: bool,
+    federated_nonce: Option<[u8; 32]>,
     authentication_request: Option<Option<crate::auth::Token>>,
     authentication_pending: bool,
     authentication_complete: bool,
@@ -234,6 +243,7 @@ impl ConnectionCore {
         version: ProtocolVersion,
         mars: bool,
     ) -> Result<Self> {
+        let federated = login.federated.clone();
         let time = Arc::new(SuppliedTime(AtomicU64::new(now)));
         // Use rustls's standard aws-lc provider explicitly, without mutating the
         // application's global provider. TDS 7.4 on SQL Server uses TLS <= 1.2.
@@ -260,13 +270,14 @@ impl ConnectionCore {
         } else {
             output = packet::split(
                 packet::HELLO,
-                &prelogin::encode_with_mars(mars),
+                &prelogin::encode_options(mars, federated.is_some()),
                 packet::DEFAULT_SIZE,
             )?;
         }
         let feature_requests = login.requested_features()?;
         let recovery_requested = login.session_recovery;
         let integrated_security = login.integrated_security;
+        let feature_warnings = login.azure_feature_probes.warnings();
         Ok(Self {
             version,
             phase: if version == ProtocolVersion::V8_0 {
@@ -276,6 +287,12 @@ impl ConnectionCore {
             },
             login: Some(login),
             integrated_security,
+            federated,
+            federated_request: None,
+            federated_pending: false,
+            federated_rounds: 0,
+            federated_echo: false,
+            federated_nonce: None,
             authentication_request: None,
             authentication_pending: false,
             authentication_complete: !integrated_security,
@@ -297,7 +314,10 @@ impl ConnectionCore {
             initial_states: None,
             recovery: None,
             failure: None,
-            session: Session::default(),
+            session: Session {
+                feature_warnings,
+                ..Session::default()
+            },
             login_session: None,
             reset_pending: false,
             login_route: None,
@@ -425,11 +445,19 @@ impl ConnectionCore {
         if !self.observations.enabled() {
             return Ok(());
         }
+        for warning in &self.session.feature_warnings {
+            self.observations.event(
+                "warning",
+                || warning.to_string(),
+                None,
+                Some(crate::observe::Inspection::FeatureWarning(*warning)),
+            );
+        }
         let step = self.step();
         self.observations
             .event("step", || format!("{step:?}"), None, None);
         if self.version == ProtocolVersion::V7_4 {
-            let body = prelogin::encode_with_mars(self.mars);
+            let body = prelogin::encode_options(self.mars, self.federated.is_some());
             self.observations.sent(
                 packet::HELLO,
                 &body,
@@ -496,7 +524,10 @@ impl ConnectionCore {
                     self.drain_tls(&mut records)?;
                     self.output.extend(records);
                     self.phase = Phase::Hello;
-                    self.send(packet::HELLO, &prelogin::encode_with_mars(self.mars))?;
+                    self.send(
+                        packet::HELLO,
+                        &prelogin::encode_options(self.mars, self.federated.is_some()),
+                    )?;
                 }
                 Phase::SecureFirst => {
                     let mut records = Vec::new();
@@ -511,11 +542,8 @@ impl ConnectionCore {
                         wire::append(&mut self.hello_body, &packet.body)?;
                         if packet.last {
                             self.observations.message("receive", "hello reply", None);
-                            prelogin::check_reply_with_mars(
-                                &std::mem::take(&mut self.hello_body),
-                                true,
-                                self.mars,
-                            )?;
+                            let message = std::mem::take(&mut self.hello_body);
+                            self.accept_hello(&message, true)?;
                             self.begin_login()?;
                             break;
                         }
@@ -551,7 +579,7 @@ impl ConnectionCore {
                     let message = std::mem::take(&mut self.hello_body);
                     if self.phase == Phase::Hello {
                         self.observations.message("receive", "hello reply", None);
-                        prelogin::check_reply_with_mars(&message, false, self.mars)?;
+                        self.accept_hello(&message, false)?;
                         self.phase = Phase::Handshake;
                     } else {
                         self.observations.message(
@@ -600,9 +628,43 @@ impl ConnectionCore {
         Ok(())
     }
 
+    fn accept_hello(&mut self, bytes: &[u8], strict: bool) -> Result<()> {
+        if self.federated.is_some() {
+            (self.federated_echo, self.federated_nonce) =
+                prelogin::federation_reply(bytes, strict, self.mars)?;
+            Ok(())
+        } else {
+            prelogin::check_reply_with_mars(bytes, strict, self.mars)
+        }
+    }
+
     fn begin_login(&mut self) -> Result<()> {
         self.phase = Phase::Login;
         self.session.tls_version = self.tls.protocol_version();
+        if let Some(mode) = &self.federated {
+            self.observations.mask_login = true;
+            match mode {
+                crate::entra::EntraMode::Upfront { resource } => {
+                    self.federated_request = Some(crate::fedauth::Challenge {
+                        resource: resource.clone(),
+                        sts_url: None,
+                        workflow: None,
+                    });
+                    self.federated_pending = true;
+                    return Ok(());
+                }
+                crate::entra::EntraMode::Deferred { workflow } => {
+                    self.login
+                        .as_mut()
+                        .expect("unconsumed login")
+                        .federated_data = Some(
+                        crate::fedauth::deferred_feature(*workflow, self.federated_echo)
+                            .to_vec()
+                            .into(),
+                    );
+                }
+            }
+        }
         if self.integrated_security {
             self.observations.mask_login = true;
             self.authentication_request = Some(None);
@@ -613,7 +675,42 @@ impl ConnectionCore {
             .login
             .take()
             .ok_or_else(|| Error::new(ErrorKind::State("login already consumed")))?;
-        self.send(packet::LOGIN, &login.encode()?)
+        self.send(packet::LOGIN, &zeroize::Zeroizing::new(login.encode()?))
+    }
+
+    pub fn take_federated_request(&mut self) -> Option<crate::fedauth::Challenge> {
+        self.federated_request.take()
+    }
+    pub fn provide_federated_token(&mut self, token: crate::entra::AccessToken) -> Result<()> {
+        let result = (|| {
+            if token.as_str().encode_utf16().count() > crate::auth::MAX_TOKEN / 2 {
+                return Err(Error::new(ErrorKind::Limit("federated token")));
+            }
+            if self.failure.is_some()
+                || self.phase != Phase::Login
+                || !self.federated_pending
+                || self.federated_request.is_some()
+            {
+                return Err(Error::new(ErrorKind::State("unexpected federated token")));
+            }
+            self.federated_pending = false;
+            self.federated_rounds += 1;
+            if let Some(mut login) = self.login.take() {
+                login.federated_data = Some(crate::fedauth::upfront_feature(
+                    token.as_str(),
+                    self.federated_echo,
+                    self.federated_nonce.as_ref(),
+                )?);
+                let encoded = zeroize::Zeroizing::new(login.encode()?);
+                self.send(packet::LOGIN, &encoded)?;
+            } else {
+                let encoded =
+                    crate::fedauth::token_message(token.as_str(), self.federated_nonce.as_ref())?;
+                self.send(0x08, &encoded)?;
+            }
+            self.read_login()
+        })();
+        result.map_err(|error| self.fail(error))
     }
 
     /// Some(None) starts a fresh context; Some(Some(token)) continues it.
@@ -640,6 +737,15 @@ impl ConnectionCore {
         }
         self.provide_authentication_token_inner(token, complete)
             .map_err(|error| self.fail(error))
+    }
+    #[cfg(feature = "system-gssapi")]
+    pub(crate) fn record_gssapi_evidence(&mut self, evidence: crate::auth::GssapiEvidence) {
+        self.observations.event(
+            "authentication",
+            || format!("system GSSAPI: {evidence:?}"),
+            None,
+            Some(crate::observe::Inspection::Gssapi(evidence)),
+        );
     }
     fn provide_authentication_token_inner(
         &mut self,
@@ -834,7 +940,7 @@ impl ConnectionCore {
         Ok(())
     }
     fn read_login(&mut self) -> Result<()> {
-        if self.authentication_pending {
+        if self.authentication_pending || self.federated_pending {
             return Ok(());
         }
         while let Some(record) =
@@ -852,6 +958,22 @@ impl ConnectionCore {
                 self.apply(&record)?;
             }
             match record {
+                Record::FedAuthInfo(info) => {
+                    let Some(crate::entra::EntraMode::Deferred { workflow }) = self.federated
+                    else {
+                        return Err(Error::malformed(0, "unexpected FEDAUTHINFO"));
+                    };
+                    if self.login_ack || self.federated_rounds >= crate::auth::MAX_ROUNDS {
+                        return Err(Error::malformed(0, "late or excessive FEDAUTHINFO"));
+                    }
+                    self.federated_request = Some(crate::fedauth::Challenge {
+                        resource: info.resource,
+                        sts_url: Some(info.sts_url),
+                        workflow: Some(workflow),
+                    });
+                    self.federated_pending = true;
+                    return Ok(());
+                }
                 Record::Sspi(token) => {
                     if !self.integrated_security || self.login_ack || token.is_empty() {
                         return Err(Error::malformed(0, "unexpected SSPI continuation"));
@@ -874,14 +996,22 @@ impl ConnectionCore {
                             self.initial_states = Some(data.clone());
                         } else {
                             let valid = match id {
-                                4 => data == [1],
+                                2 => data.is_empty(),
+                                4 => {
+                                    matches!(data.first(), Some(1 | 2))
+                                        && data[0] <= self.feature_requests[&id][0]
+                                        && (data.len() == 1
+                                            || (data[0] == 2
+                                                && data.len() >= 2
+                                                && data.len() == 2 + usize::from(data[1]) * 2))
+                                }
                                 9 => {
                                     data.len() == 2
                                         && [1, 2].contains(&data[0])
                                         && data[0] <= self.feature_requests[&id][0]
                                         && data[1] <= 1
                                 }
-                                10 => data.len() == 1 && data[0] <= 1,
+                                5 | 8 | 10 | 11 | 15 => data.len() == 1 && data[0] <= 1,
                                 13 => data == [1],
                                 14 => {
                                     data.len() == 1
@@ -899,8 +1029,14 @@ impl ConnectionCore {
                         }
                         if id == 4 {
                             self.observations.column_encryption = true;
+                            self.observations.enclaves = data.first() == Some(&2);
                         }
                         self.session.features.insert(id, data);
+                        if let Some(feature) = crate::azure_features::AzureFeature::from_id(id)
+                            && self.session.features[&id] == [1]
+                        {
+                            return Err(Error::new(ErrorKind::UnsupportedFeatureEnabled(feature)));
+                        }
                     }
                 }
                 Record::LoginAck {
@@ -914,7 +1050,10 @@ impl ConnectionCore {
                     if self.login_ack {
                         return Err(Error::malformed(0, "duplicate LOGINACK"));
                     }
-                    if !self.authentication_complete || self.authentication_pending {
+                    if !self.authentication_complete
+                        || self.authentication_pending
+                        || self.federated_pending
+                    {
                         return Err(Error::malformed(0, "LOGINACK before provider completion"));
                     }
                     self.login_ack = true;
@@ -1152,7 +1291,16 @@ impl ConnectionCore {
             .count()
             + 1;
         Ok(crate::requests::Context {
-            column_encryption: self.session.features.get(&4).is_some_and(|v| v == &[1]),
+            column_encryption: self
+                .session
+                .features
+                .get(&4)
+                .is_some_and(|v| matches!(v.first(), Some(1 | 2))),
+            enclaves: self
+                .session
+                .features
+                .get(&4)
+                .is_some_and(|v| v.first() == Some(&2)),
             transaction: self.session.transaction,
             outstanding: outstanding as u32,
         })
@@ -1266,8 +1414,8 @@ impl ConnectionCore {
                 self.mars,
                 self.elapsed,
             )? {
-                if matches!(record, Record::Sspi(_)) {
-                    return Err(Error::malformed(0, "SSPI token after login"));
+                if matches!(record, Record::Sspi(_) | Record::FedAuthInfo(_)) {
+                    return Err(Error::malformed(0, "authentication token after login"));
                 }
                 self.observations.record(Some(id), &record);
                 self.session.session_id = channel.stream.session_id;

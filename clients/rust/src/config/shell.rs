@@ -17,6 +17,7 @@ use tokio::{
 #[derive(Clone)]
 pub struct ConnectionServices {
     pub roots: RootCertStore,
+    pub token_providers: crate::entra::TokenProviders,
     pub server_name: Option<String>,
     pub observe: Option<Observer>,
     pub capture_factory: Option<Arc<dyn Fn() -> std::io::Result<Capture> + Send + Sync>>,
@@ -25,6 +26,7 @@ impl ConnectionServices {
     pub fn new(roots: RootCertStore) -> Self {
         Self {
             roots,
+            token_providers: Default::default(),
             server_name: None,
             observe: None,
             capture_factory: None,
@@ -32,11 +34,10 @@ impl ConnectionServices {
     }
     pub(crate) fn options(&self, c: &ConnectionConfig, p: PoolPolicy) -> ConnectOptions {
         ConnectOptions {
-            windows_auth: c.windows_auth.clone(),
+            authentication: c.authentication.clone(),
+            token_providers: self.token_providers.clone(),
             host: c.host.clone(),
             port: c.port,
-            user: c.user.clone(),
-            password: c.password.clone(),
             new_password: String::new(),
             database: c.database.clone(),
             version: c.version,
@@ -53,6 +54,8 @@ impl ConnectionServices {
             data_classification: c.data_classification,
             utf8_support: c.utf8_support,
             column_encryption: c.column_encryption,
+            enclave_attestation: c.enclave_attestation,
+            azure_feature_probes: c.azure_feature_probes,
             roots: self.roots.clone(),
             server_name: self.server_name.clone(),
             observe: self.observe.clone(),
@@ -79,10 +82,8 @@ impl ConnectionConfig {
     pub fn from_options(o: &ConnectOptions) -> Self {
         Self {
             host: o.host.clone(),
-            windows_auth: o.windows_auth.clone(),
+            authentication: o.authentication.clone(),
             port: o.port,
-            user: o.user.clone(),
-            password: o.password.clone(),
             database: o.database.clone(),
             version: o.version,
             mars: o.mars,
@@ -98,6 +99,8 @@ impl ConnectionConfig {
             data_classification: o.data_classification,
             utf8_support: o.utf8_support,
             column_encryption: o.column_encryption,
+            enclave_attestation: o.enclave_attestation,
+            azure_feature_probes: o.azure_feature_probes,
         }
     }
 }

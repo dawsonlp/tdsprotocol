@@ -107,17 +107,24 @@ impl Peer {
         (peer, login)
     }
     pub async fn secure_protocol(
-        mut socket: TcpStream,
+        socket: TcpStream,
         mars: bool,
         pem: &[u8],
         protocol: ProtocolVersion,
     ) -> Self {
+        Self::secure_protocol_using_hello(socket, pem, protocol, &prelogin::encode_with_mars(mars))
+            .await
+    }
+    pub async fn secure_protocol_using_hello(
+        mut socket: TcpStream,
+        pem: &[u8],
+        protocol: ProtocolVersion,
+        hello: &[u8],
+    ) -> Self {
         if protocol == ProtocolVersion::V7_4 {
             assert_eq!(raw_message(&mut socket).await.0, packet::HELLO);
             socket
-                .write_all(
-                    &packet::split(packet::REPLY, &prelogin::encode_with_mars(mars), 4096).unwrap(),
-                )
+                .write_all(&packet::split(packet::REPLY, hello, 4096).unwrap())
                 .await
                 .unwrap();
         }
@@ -175,7 +182,7 @@ impl Peer {
         }
         if protocol == ProtocolVersion::V8_0 {
             assert_eq!(peer.message().await.0, packet::HELLO);
-            peer.reply(&prelogin::encode_with_mars(mars)).await;
+            peer.reply(hello).await;
         }
         peer
     }

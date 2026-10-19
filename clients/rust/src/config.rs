@@ -4,6 +4,13 @@
 use crate::ProtocolVersion;
 use std::{fmt, future::Future, pin::Pin};
 
+/// Explicit trust choice: the server is trusted to run an enclave. No
+/// attestation service is consulted. Other attestation protocols are unsupported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnclaveAttestation {
+    None,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfigPhase {
     Read,
@@ -59,11 +66,9 @@ pub trait ConfigService: Send + Sync {
 /// an application's separate clone cannot change an accepted or opening value.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConnectionConfig {
-    pub windows_auth: Option<crate::auth::WindowsAuth>,
+    pub authentication: crate::Authentication,
     pub host: String,
     pub port: u16,
-    pub user: String,
-    pub password: String,
     pub database: String,
     pub version: ProtocolVersion,
     pub mars: bool,
@@ -84,6 +89,10 @@ pub struct ConnectionConfig {
     pub utf8_support: bool,
     /// Request Always Encrypted version one (without enclaves).
     pub column_encryption: bool,
+    /// Request version two with the explicit no-attestation trust mode.
+    pub enclave_attestation: Option<crate::config::EnclaveAttestation>,
+    /// Diagnostic requests: warn on request, fail login if the server enables one.
+    pub azure_feature_probes: crate::azure_features::AzureFeatureProbes,
 }
 impl ConnectionConfig {
     pub fn new(
@@ -94,10 +103,8 @@ impl ConnectionConfig {
     ) -> Self {
         Self {
             host: host.into(),
-            windows_auth: None,
+            authentication: crate::Authentication::sql(user, password),
             port,
-            user: user.into(),
-            password: password.into(),
             database: String::new(),
             version: ProtocolVersion::V7_4,
             mars: false,
@@ -113,25 +120,18 @@ impl ConnectionConfig {
             data_classification: 2,
             utf8_support: true,
             column_encryption: false,
+            enclave_attestation: None,
+            azure_feature_probes: Default::default(),
         }
     }
     pub fn validate(&self) -> ConfigResult<()> {
-        if self.windows_auth.is_some() && (!self.user.is_empty() || !self.password.is_empty()) {
-            return Err(ConfigError::new(
-                ConfigPhase::Validation,
-                "SQL credentials with integrated login",
-            ));
-        }
         if self.vector_support > 2 || self.data_classification > 2 {
             return Err(ConfigError::new(
                 ConfigPhase::Validation,
                 "unsupported requested feature version",
             ));
         }
-        if self.host.is_empty()
-            || self.port == 0
-            || (self.user.is_empty() && self.windows_auth.is_none())
-        {
+        if self.host.is_empty() || self.port == 0 || !self.authentication.valid() {
             return Err(ConfigError::new(
                 ConfigPhase::Validation,
                 "host/user must be nonempty and port nonzero",
@@ -141,12 +141,13 @@ impl ConnectionConfig {
     }
     pub fn compatible_with(&self, previous: &Self) -> bool {
         let mut refreshed = self.clone();
-        refreshed.password.clone_from(&previous.password);
-        match (&self.windows_auth, &previous.windows_auth) {
-            (Some(current), Some(old)) if current.compatible_with(old) => {
-                refreshed.windows_auth.clone_from(&previous.windows_auth)
-            }
-            _ => {}
+        if self
+            .authentication
+            .compatible_with(&previous.authentication)
+        {
+            refreshed
+                .authentication
+                .clone_from(&previous.authentication);
         }
         refreshed == *previous
     }

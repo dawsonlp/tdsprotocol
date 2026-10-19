@@ -200,8 +200,12 @@ async fn pool_rotation_and_borrowed_recovery_read_current_credentials() {
                 let mut options = live_options();
                 let relay = Relay::new(options.port).await;
                 options.port = relay.port;
-                options.user = name.clone();
-                options.password = a;
+                options.authentication.sql_credentials_mut().unwrap().user = name.clone();
+                options
+                    .authentication
+                    .sql_credentials_mut()
+                    .unwrap()
+                    .password = a.into();
                 options.database.clear();
                 options.version = version;
                 options.mars = mars;
@@ -229,7 +233,14 @@ async fn pool_rotation_and_borrowed_recovery_read_current_credentials() {
                     pool.acquire().await.is_err(),
                     "stale credential must fail loudly"
                 );
-                source.0.lock().unwrap().password = b.clone();
+                source
+                    .0
+                    .lock()
+                    .unwrap()
+                    .authentication
+                    .sql_credentials_mut()
+                    .unwrap()
+                    .password = b.clone().into();
                 let second = pool.acquire().await?;
                 assert_eq!(
                     rows(&mut original, "SELECT 12").await,
@@ -252,7 +263,14 @@ async fn pool_rotation_and_borrowed_recovery_read_current_credentials() {
                     format!("ALTER LOGIN [{name}] WITH PASSWORD='{c}'"),
                 )
                 .await;
-                source.0.lock().unwrap().password = c;
+                source
+                    .0
+                    .lock()
+                    .unwrap()
+                    .authentication
+                    .sql_credentials_mut()
+                    .unwrap()
+                    .password = c.into();
                 relay.break_connection(&second).await;
                 pool.close().await?;
                 // Refuse a changed identity before dialing; a corrected source
@@ -294,8 +312,12 @@ async fn direct_password_change_promotes_credential_only_after_successful_login(
             let mut options = live_options();
             let relay = Relay::new(options.port).await;
             options.port = relay.port;
-            options.user = name.clone();
-            options.password = a;
+            options.authentication.sql_credentials_mut().unwrap().user = name.clone();
+            options
+                .authentication
+                .sql_credentials_mut()
+                .unwrap()
+                .password = a.into();
             options.new_password = b;
             options.database.clear();
             options.version = version;

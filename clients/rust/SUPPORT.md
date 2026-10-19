@@ -1,9 +1,24 @@
 # Rust client support and remaining work
 
-Working state on `rust-client`, 2026-10-19. This is an unpublished implementation,
+Working state on `rust-azure-integration`, 2026-10-19. This is an unpublished implementation,
 not Python feature parity. The design pages define intended behavior for both
 languages; this matrix says what Rust currently implements and what still needs
 code, agreement or independent runtime evidence.
+
+**Active Azure phase:** the new [full-parity plan](../../docs/design/experiments/rust-azure-integration-plan.md)
+supersedes the following phase's deferrals as a work list. Both Entra paths,
+SDK-independent async providers, optional official Azure Identity adapter,
+routing/recovery token requests and masking are implemented with local paired
+and controlled-peer evidence. The approved async key-provider/enclave contract
+now has a common service, optional official Key Vault adapter, Windows CNG
+companion, and transparent version-two explicit-none enclave execution. Actual
+Azure/CNG acceptance and remaining cross-feature coverage remain open.
+The approved unsupported-feature policy warns on explicit diagnostic requests
+and stops opening on enabled ACKs; absent/disabled ACKs may complete login. The approved optional
+[system ticket-cache provider](../../docs/design/experiments/rust-azure-ticket-cache-contract.md)
+implements Kerberos/Negotiate on Linux/macOS; actual Azure ticket login remains
+unverified. See the [current key/enclave evidence](../../docs/design/experiments/rust-azure-key-enclave-evidence.md).
+The historical scoped completion below describes the preceding phase.
 
 **Completion scope agreed 2026-10-18:** finish local work including local-key Always
 Encrypted; create a transient Terraform GCP Windows/domain lab; implement and
@@ -26,11 +41,11 @@ it is not an instruction to finish every item before M16. See the
 | Large/special data | PLP max/XML/CLR/native JSON; legacy text/ntext/image reads and whole inputs; borrowed typed chunks, owned values, unique async sources; sql_variant; float32/float16 vector codecs; whole-cell TVP/bulk row sources | Binary XML; live float16 acceptance when the server offers it |
 | Responses | Ordered records, retained call groups/outputs, browse and sensitivity metadata/ranks, fetch/finish, forward result-set/row/value views, explicit read-ahead, once-only SQL errors, partial failure snapshots | Alternate compute tokens and provider extensions |
 | Observation/capture | Steps/messages/packets/tokens, optional-observer failure isolation, credential masking, physical-connection capture, native replay; exchange timing at every level; connection/RPC/TVP/bulk/transaction trees and incremental row/output fragments with ranges/raw/reference links | Complete metadata-extension fields; reconstruction of unrecorded NO_METADATA context; unsupported wire extensions |
-| Authentication | SQL; optional portable NTLM/Kerberos/Negotiate and native signed-in Windows SSPI; 64 real SQL Server login/transport combinations passed with verified TLS, plus controlled-peer scenarios | Required Extended Protection is unsupported: SQL expects tls-unique, unavailable through the pinned rustls API. Owner chose documented limitations and upstream drafts, without dependency forks/patch sets or TLS backend changes. Portable NTLM retained-key erasure is not guaranteed; wider lifecycle acceptance remains; Entra is deferred |
+| Authentication | SQL; optional portable NTLM/Kerberos/Negotiate, native signed-in Windows SSPI, and system-cache Kerberos/Negotiate via Linux/macOS GSSAPI; 64 earlier real SQL Server login/transport combinations passed with verified TLS, plus controlled-peer scenarios | Actual Azure system-cache login remains unverified. Required Extended Protection is unsupported: SQL expects tls-unique, unavailable through the pinned rustls API. Owner chose documented limitations and upstream drafts, without dependency forks/patch sets or TLS backend changes. Portable NTLM retained-key erasure is not guaranteed; wider lifecycle acceptance remains; Entra now has controlled local evidence, with actual Azure/provider environments and remaining scenario acceptance open |
 | Direct password change | LOGIN7 encoding/redaction, final-success credential promotion, recovery, uncertain lost completion; pools reject one-time change requests | Broader server/platform acceptance |
 | Pool configuration | Comparable SQL snapshots, application source/static adapter, bounded opening/recovery reads, stale retirement and explicit failures | Built-in file providers, dynamic TLS/provider bindings and capacity; native platform acceptance |
-| Always Encrypted | Local PKCS#8 RSA/AES/HMAC; transaction/exchange/fixed-age policies; wire version one, exact normalization, fresh named-parameter preparation, results/outputs, owned bulk and independent .NET interoperability; explicit failure values and ciphertext-only core capture/replay | Owned AE values (16 MiB bound); encrypted source producers/borrowed plaintext chunks are not provided. Deferred: Windows certificate-store/Azure providers and enclaves/attestation |
-| Packaging/platforms | Safe protocol crate plus an isolated native Windows SSPI FFI crate; Rust 1.99.1 on macOS ARM64 and native MSVC Windows, optional Tokio/crypto, examples and MIT notices; four live native cancellation profiles retired their workers | Broader cancellation/security/platform evidence; companion-crate dependency requires a package/release strategy before publication; historical single-crate package evidence does not cover this workspace |
+| Always Encrypted | Local PKCS#8 RSA/AES/HMAC; transaction/exchange/fixed-age policies; wire versions one/two, explicit-none P-384 enclave sessions/packages and signed key release, async opaque providers with optional Key Vault/CNG adapters, exact normalization, fresh named-parameter preparation, results/outputs, owned bulk and independent .NET interoperability; explicit failure values and ciphertext-only core capture/replay | Owned AE values (16 MiB bound); encrypted source producers/borrowed plaintext chunks are not provided. Actual Azure/Windows CNG execution and other attestation modes remain unproved/unimplemented; only explicit no-attestation mode is implemented |
+| Packaging/platforms | Safe protocol crate plus isolated native Windows SSPI, CNG certificate and system GSSAPI FFI crates; Rust 1.99.1 on macOS ARM64 and earlier native MSVC Windows, optional Tokio/crypto, examples and MIT notices; four earlier live Windows cancellation profiles retired their workers | Broader cancellation/security/platform evidence; companion-crate dependency requires a package/release strategy before publication; historical single-crate package evidence does not cover this workspace |
 
 Authentication upstream tracking: [rustls #995](https://github.com/rustls/rustls/issues/995)
 is closed as not planned by its original requester; no implementation is

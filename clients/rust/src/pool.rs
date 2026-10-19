@@ -86,6 +86,7 @@ impl Pool {
             .validate()
             .map_err(|e| Error::new(ErrorKind::Configuration(e)))?;
         let services = ConnectionServices {
+            token_providers: options.token_providers.clone(),
             roots: options.roots,
             server_name: options.server_name,
             observe: options.observe,

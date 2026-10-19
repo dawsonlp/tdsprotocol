@@ -13,8 +13,45 @@ use std::collections::BTreeMap;
 pub struct EncryptedConnection<'a> {
     connection: &'a Connection,
     keys: KeySession,
+    enclaves: bool,
+    enclave_gate: tokio::sync::Mutex<()>,
 }
 impl Connection {
+    /// The common key service accepts local, remote and native capabilities.
+    pub async fn encrypted_with_providers(
+        &self,
+        providers: Vec<std::sync::Arc<dyn super::KeyProvider>>,
+        policies: Policies,
+        provider_timeout: std::time::Duration,
+    ) -> crate::Result<EncryptedConnection<'_>> {
+        let version = self
+            .session()
+            .await?
+            .features
+            .get(&4)
+            .and_then(|v| v.first())
+            .copied();
+        if !matches!(version, Some(1 | 2)) {
+            return Err(crate::Error::new(ErrorKind::Unsupported(
+                "server did not agree Always Encrypted",
+            )));
+        }
+        let keys = self
+            .key_session_with_providers(providers, policies, provider_timeout)
+            .await?;
+        if version == Some(2) {
+            keys.enable_enclaves();
+        }
+        let mut channel = self.serial_channel().await?;
+        channel.exchange(Batch::new("")).await?.finish().await?;
+        channel.close().await?;
+        Ok(EncryptedConnection {
+            connection: self,
+            keys,
+            enclaves: version == Some(2),
+            enclave_gate: tokio::sync::Mutex::new(()),
+        })
+    }
     /// Attach local-key encryption to a connection opened with
     /// `ConnectOptions::column_encryption = true`. The empty bootstrap exchange
     /// completes a deferred pool reset before any parameter discovery or key use.
@@ -23,18 +60,30 @@ impl Connection {
         providers: Vec<LocalKeyStore>,
         policies: Policies,
     ) -> crate::Result<EncryptedConnection<'_>> {
-        if self.session().await?.features.get(&4) != Some(&vec![1]) {
+        let version = self
+            .session()
+            .await?
+            .features
+            .get(&4)
+            .and_then(|v| v.first())
+            .copied();
+        if !matches!(version, Some(1 | 2)) {
             return Err(crate::Error::new(ErrorKind::Unsupported(
-                "server did not agree Always Encrypted version one",
+                "server did not agree Always Encrypted",
             )));
         }
         let keys = self.key_session(providers, policies).await?;
+        if version == Some(2) {
+            keys.enable_enclaves();
+        }
         let mut channel = self.serial_channel().await?;
         channel.exchange(Batch::new("")).await?.finish().await?;
         channel.close().await?;
         Ok(EncryptedConnection {
             connection: self,
             keys,
+            enclaves: version == Some(2),
+            enclave_gate: tokio::sync::Mutex::new(()),
         })
     }
 }
@@ -52,6 +101,8 @@ impl EncryptedConnection<'_> {
             channel: self.connection.serial_channel().await?,
             keys: &self.keys,
             collation,
+            enclaves: self.enclaves,
+            enclave_gate: &self.enclave_gate,
         })
     }
     /// Retire keys and current guards after an application-controlled provider,
@@ -76,6 +127,8 @@ pub struct EncryptedChannel<'a> {
     channel: SerialChannel,
     keys: &'a KeySession,
     collation: crate::Collation,
+    enclaves: bool,
+    enclave_gate: &'a tokio::sync::Mutex<()>,
 }
 impl EncryptedChannel<'_> {
     /// Read encrypted columns for any request. Parameters passed to this method
@@ -116,129 +169,24 @@ impl EncryptedChannel<'_> {
         &mut self,
         statement: &str,
         declarations: &str,
-        mut params: Vec<Param>,
+        params: Vec<Param>,
         policies: Option<Policies>,
     ) -> crate::Result<EncryptedResponse<'_>> {
-        // Validate every original value before discovery or any crypto work.
-        let mut names = std::collections::BTreeSet::new();
-        for param in &params {
-            if param.use_default
-                || param.cipher.is_some()
-                || matches!(param.value, ParamValue::Table(_))
-            {
-                return Err(crate::Error::new(ErrorKind::Parameter(
-                    "encrypted execute requires ordinary named scalar parameters",
-                )));
-            }
-            let _validated =
-                zeroize::Zeroizing::new(param.sql_type.encode_parameter(param.value.as_ref())?);
-            let name = param
-                .name
-                .to_string()
-                .map_err(|_| crate::Error::new(ErrorKind::Parameter("parameter name UTF-16")))?;
-            if name.is_empty() || !names.insert(name.to_lowercase()) {
-                return Err(crate::Error::new(ErrorKind::Parameter(
-                    "encrypted execute requires named parameters",
-                )));
-            }
-        }
-        let guard = match policies {
-            Some(p) => self.keys.exchange_with(p)?,
-            None => self.keys.exchange()?,
-        };
-        let text_type = SqlType::CharacterMax {
-            unicode: true,
-            collation: self.collation,
-        };
-        let describe = Call::new(
-            "sp_describe_parameter_encryption",
-            vec![
-                Param::new(
-                    "",
-                    text_type.clone(),
-                    Some(Value::Unicode(statement.into())),
-                ),
-                Param::new(
-                    "",
-                    text_type.clone(),
-                    Some(Value::Unicode(declarations.into())),
-                ),
-            ],
-        );
-        // A describing exchange can fail after its own bytes were sent, but
-        // the application's SQL has not been submitted at this point.
-        let fetched = match self.channel.exchange(describe).await {
-            Ok(mut response) => response.fetch().await,
-            Err(error) => Err(error),
-        }
-        .map_err(|error| error.at(crate::Step::Exchange, crate::Execution::NotSent))?;
-        let plan = parse_plan(&fetched)?;
-        let mut outputs = BTreeMap::new();
-        for (index, param) in params.iter_mut().enumerate() {
-            let name = param
-                .name
-                .to_string()
-                .map_err(|_| Error::InvalidMetadata)?
-                .to_lowercase();
-            if let Some(how) = plan.get(&name) {
-                let cipher = CipherInfo {
-                    base: param.sql_type.clone(),
-                    key: how.key.clone().ok_or(Error::InvalidMetadata)?,
-                    encryption_type: how.encryption_type,
-                    algorithm: how.algorithm,
-                    normalization: how.normalization,
-                };
-                check(how)?;
-                param.value = ParamValue::Scalar(match param.value.as_ref() {
-                    None => None,
-                    Some(value) => {
-                        let plain = normalize::normalize(&param.sql_type, value)?;
-                        Some(Value::Binary(
-                            guard
-                                .encrypt(&cipher.key, plain.as_bytes(), how.encryption_type == 2)
-                                .await?,
-                        ))
-                    }
-                });
-                if param.output {
-                    outputs.insert(name.clone(), how.clone());
-                    outputs.insert(format!("#{}", index + 2), how.clone());
-                }
-                // SQL uses varbinary(max) for ciphertext whose length can exceed 8000.
-                param.sql_type = match param.value.as_ref() {
-                    Some(Value::Binary(bytes)) if !param.output && bytes.len() <= 8000 => {
-                        SqlType::Binary {
-                            length: u16::try_from(bytes.len().max(1)).expect("bounded"),
-                            varying: true,
-                        }
-                    }
-                    None => SqlType::Binary {
-                        length: 8000,
-                        varying: true,
-                    },
-                    _ => SqlType::BinaryMax,
-                };
-                param.cipher = Some(cipher);
-            }
-        }
-        let mut all = vec![
-            Param::new(
-                "@stmt",
-                text_type.clone(),
-                Some(Value::Unicode(statement.into())),
-            ),
-            Param::new(
-                "@params",
-                text_type,
-                Some(Value::Unicode(declarations.into())),
-            ),
-        ];
-        all.extend(params);
-        let raw = self
-            .channel
-            .exchange(Call::new(Builtin::SpExecuteSql, all))
-            .await?;
-        Ok(EncryptedResponse::new(raw, guard, outputs))
+        execute_attempt(
+            &mut self.channel,
+            Execute {
+                keys: self.keys,
+                collation: self.collation,
+                enclaves: self.enclaves,
+                enclave_gate: self.enclave_gate,
+            },
+            statement,
+            declarations,
+            params,
+            policies,
+            1,
+        )
+        .await
     }
     /// Encrypt owned rows before preparing the borrowed raw bulk continuation.
     /// Column metadata comes from SELECT TOP 0 on this encrypted connection.
@@ -282,6 +230,202 @@ impl EncryptedChannel<'_> {
         self.channel.close().await
     }
 }
+#[derive(Clone, Copy)]
+struct Execute<'a> {
+    keys: &'a KeySession,
+    collation: crate::Collation,
+    enclaves: bool,
+    enclave_gate: &'a tokio::sync::Mutex<()>,
+}
+async fn execute_attempt<'a>(
+    channel: &'a mut SerialChannel,
+    context: Execute<'_>,
+    statement: &str,
+    declarations: &str,
+    mut params: Vec<Param>,
+    policies: Option<Policies>,
+    attempt: u8,
+) -> crate::Result<EncryptedResponse<'a>> {
+    // Validate every original value before discovery or any crypto work.
+    let mut names = std::collections::BTreeSet::new();
+    for param in &params {
+        if param.use_default
+            || param.cipher.is_some()
+            || matches!(param.value, ParamValue::Table(_))
+        {
+            return Err(crate::Error::new(ErrorKind::Parameter(
+                "encrypted execute requires ordinary named scalar parameters",
+            )));
+        }
+        let _validated =
+            zeroize::Zeroizing::new(param.sql_type.encode_parameter(param.value.as_ref())?);
+        let name = param
+            .name
+            .to_string()
+            .map_err(|_| crate::Error::new(ErrorKind::Parameter("parameter name UTF-16")))?;
+        if name.is_empty() || !names.insert(name.to_lowercase()) {
+            return Err(crate::Error::new(ErrorKind::Parameter(
+                "encrypted execute requires named parameters",
+            )));
+        }
+    }
+    let guard = match policies {
+        Some(p) => context.keys.exchange_with(p)?,
+        None => context.keys.exchange()?,
+    };
+    let text_type = SqlType::CharacterMax {
+        unicode: true,
+        collation: context.collation,
+    };
+    let describe_gate = if context.enclaves {
+        Some(context.enclave_gate.lock().await)
+    } else {
+        None
+    };
+    let attestation = if context.enclaves && !guard.has_enclave()? {
+        Some(enclave::Attestation::new()?)
+    } else {
+        None
+    };
+    let mut describe = Call::new(
+        "sp_describe_parameter_encryption",
+        vec![
+            Param::new(
+                "",
+                text_type.clone(),
+                Some(Value::Unicode(statement.into())),
+            ),
+            Param::new(
+                "",
+                text_type.clone(),
+                Some(Value::Unicode(declarations.into())),
+            ),
+        ],
+    );
+    if let Some(attestation) = &attestation {
+        describe.params.push(Param::new(
+            "",
+            SqlType::Binary {
+                length: 116,
+                varying: true,
+            },
+            Some(Value::Binary(attestation.parameters().to_vec())),
+        ));
+    }
+    // A describing exchange can fail after its own bytes were sent, but
+    // the application's SQL has not been submitted at this point.
+    let fetched = match channel.exchange(describe).await {
+        Ok(mut response) => response.fetch().await,
+        Err(error) => Err(error),
+    }
+    .map_err(|error| error.at(crate::Step::Exchange, crate::Execution::NotSent))?;
+    let plan = parse_plan(&fetched, context.enclaves)?;
+    if let Some(attestation) = attestation
+        && let Some(info) = &plan.session
+    {
+        guard.establish_enclave(attestation, info.clone()).await?;
+    }
+    drop(describe_gate);
+    let enclave_package = if plan.enclave.is_empty() {
+        Vec::new()
+    } else {
+        guard.enclave_package(statement, &plan.enclave).await?
+    };
+    let retry_params = (!plan.enclave.is_empty() && attempt == 1).then(|| params.clone());
+    let mut outputs = BTreeMap::new();
+    for (index, param) in params.iter_mut().enumerate() {
+        let name = param
+            .name
+            .to_string()
+            .map_err(|_| Error::InvalidMetadata)?
+            .to_lowercase();
+        if let Some(how) = plan.params.get(&name) {
+            let cipher = CipherInfo {
+                base: param.sql_type.clone(),
+                key: how.key.clone().ok_or(Error::InvalidMetadata)?,
+                encryption_type: how.encryption_type,
+                algorithm: how.algorithm,
+                normalization: how.normalization,
+            };
+            check(how)?;
+            param.value = ParamValue::Scalar(match param.value.as_ref() {
+                None => None,
+                Some(value) => {
+                    let plain = normalize::normalize(&param.sql_type, value)?;
+                    Some(Value::Binary(
+                        guard
+                            .encrypt(&cipher.key, plain.as_bytes(), how.encryption_type == 2)
+                            .await?,
+                    ))
+                }
+            });
+            if param.output {
+                outputs.insert(name.clone(), how.clone());
+                outputs.insert(format!("#{}", index + 2), how.clone());
+            }
+            // SQL uses varbinary(max) for ciphertext whose length can exceed 8000.
+            param.sql_type = match param.value.as_ref() {
+                Some(Value::Binary(bytes)) if !param.output && bytes.len() <= 8000 => {
+                    SqlType::Binary {
+                        length: u16::try_from(bytes.len().max(1)).expect("bounded"),
+                        varying: true,
+                    }
+                }
+                None => SqlType::Binary {
+                    length: 8000,
+                    varying: true,
+                },
+                _ => SqlType::BinaryMax,
+            };
+            param.cipher = Some(cipher);
+        }
+    }
+    let mut all = vec![
+        Param::new(
+            "@stmt",
+            text_type.clone(),
+            Some(Value::Unicode(statement.into())),
+        ),
+        Param::new(
+            "@params",
+            text_type,
+            Some(Value::Unicode(declarations.into())),
+        ),
+    ];
+    all.extend(params);
+    let mut call = Call::new(Builtin::SpExecuteSql, all);
+    call.enclave_package = enclave_package;
+    let mut raw = channel.exchange(call).await?;
+    let first = if retry_params.is_some() {
+        raw.next().await?
+    } else {
+        None
+    };
+    if matches!(&first,Some(Record::Error(message)) if [206,33514,33195].contains(&message.number))
+    {
+        match raw.finish().await {
+            Ok(()) => {}
+            Err(error) if matches!(error.kind, ErrorKind::ServerErrors(_)) => {}
+            Err(error) => return Err(error),
+        }
+        let channel = raw.into_finished_channel()?;
+        drop(guard);
+        context.keys.forget_enclave();
+        return Box::pin(execute_attempt(
+            channel,
+            context,
+            statement,
+            declarations,
+            retry_params.expect("eligible stale refusal"),
+            policies,
+            2,
+        ))
+        .await;
+    }
+    let mut response = EncryptedResponse::new(raw, guard, outputs);
+    response.prefetched = first;
+    Ok(response)
+}
 fn check(how: &CryptoMetadata) -> Result<()> {
     if how.algorithm != 2 || how.normalization != 1 || ![1, 2].contains(&how.encryption_type) {
         return Err(Error::InvalidMetadata);
@@ -306,12 +450,22 @@ fn binary(v: &Option<Value>) -> Result<Vec<u8>> {
         _ => Err(Error::InvalidMetadata),
     }
 }
-fn parse_plan(fetched: &FetchedResponse) -> Result<BTreeMap<String, CryptoMetadata>> {
+pub(super) struct EnclaveColumn {
+    pub key: ColumnKey,
+    pub signatures: Vec<(WrappedKey, Vec<u8>)>,
+}
+struct Plan {
+    params: BTreeMap<String, CryptoMetadata>,
+    enclave: Vec<EnclaveColumn>,
+    session: Option<Vec<u8>>,
+}
+fn parse_plan(fetched: &FetchedResponse, enclaves: bool) -> Result<Plan> {
     let sets = fetched.result_sets();
-    if sets.len() != 2 {
+    if sets.len() < 2 || (!enclaves && sets.len() != 2) {
         return Err(Error::InvalidMetadata);
     }
     let mut keys = BTreeMap::<u32, ColumnKey>::new();
+    let mut signed = BTreeMap::<u32, Vec<(WrappedKey, Vec<u8>)>>::new();
     for row in sets[0].rows().map_err(|_| Error::InvalidMetadata)? {
         if row.len() < 9 {
             return Err(Error::InvalidMetadata);
@@ -334,12 +488,27 @@ fn parse_plan(fetched: &FetchedResponse) -> Result<BTreeMap<String, CryptoMetada
         {
             return Err(Error::InvalidMetadata);
         }
-        key.values.push(WrappedKey {
+        let wrapped = WrappedKey {
             encrypted: binary(&row[5])?,
             provider: string(&row[6])?,
             path: string(&row[7])?,
             algorithm: string(&row[8])?,
-        });
+        };
+        if enclaves
+            && row.len() > 10
+            && matches!(&row[9], Some(Value::Bit(true)) | Some(Value::Integer(1)))
+        {
+            let signature = if row[10].is_none() {
+                Vec::new()
+            } else {
+                binary(&row[10])?
+            };
+            signed
+                .entry(ordinal)
+                .or_default()
+                .push((wrapped.clone(), signature));
+        }
+        key.values.push(wrapped);
     }
     let mut plan = BTreeMap::new();
     for row in sets[1].rows().map_err(|_| Error::InvalidMetadata)? {
@@ -375,7 +544,26 @@ fn parse_plan(fetched: &FetchedResponse) -> Result<BTreeMap<String, CryptoMetada
             return Err(Error::InvalidMetadata);
         }
     }
-    Ok(plan)
+    let session = if sets.len() > 2 {
+        let rows = sets[2].rows().map_err(|_| Error::InvalidMetadata)?;
+        rows.first()
+            .map(|row| binary(row.first().ok_or(Error::InvalidMetadata)?))
+            .transpose()?
+    } else {
+        None
+    };
+    let enclave = signed
+        .into_iter()
+        .map(|(ordinal, signatures)| EnclaveColumn {
+            key: keys[&ordinal].clone(),
+            signatures,
+        })
+        .collect();
+    Ok(Plan {
+        params: plan,
+        enclave,
+        session,
+    })
 }
 
 #[must_use = "consume or close the encrypted response"]
@@ -386,6 +574,7 @@ pub struct EncryptedResponse<'a> {
     outputs: BTreeMap<String, CryptoMetadata>,
     retained: Retention,
     discarding: bool,
+    prefetched: Option<Record>,
 }
 impl<'a> EncryptedResponse<'a> {
     fn new(
@@ -400,6 +589,7 @@ impl<'a> EncryptedResponse<'a> {
             outputs,
             retained: Retention::default(),
             discarding: false,
+            prefetched: None,
         }
     }
     pub fn snapshot(&self) -> FetchedResponse {
@@ -432,7 +622,11 @@ impl<'a> EncryptedResponse<'a> {
         result.map_err(|e| e.with_response(self.snapshot()))
     }
     async fn read_inner(&mut self) -> crate::Result<Option<Record>> {
-        let Some(mut record) = self.raw.next().await? else {
+        let next = match self.prefetched.take() {
+            Some(record) => Some(record),
+            None => self.raw.next().await?,
+        };
+        let Some(mut record) = next else {
             self.guard.take();
             self.retained.end(self.raw.snapshot().canceled);
             self.retained.record.timing = self.raw.timing();

@@ -24,11 +24,17 @@ pub enum Inspection {
         body: Vec<u8>,
     },
     Record(Record),
+    FeatureWarning(crate::azure_features::FeatureRequestWarning),
+    #[cfg(feature = "system-gssapi")]
+    Gssapi(crate::auth::GssapiEvidence),
 }
 impl Inspection {
     pub fn render(&self) -> String {
         match self {
             Self::Record(record) => crate::inspection::shown(record),
+            Self::FeatureWarning(warning) => warning.to_string(),
+            #[cfg(feature = "system-gssapi")]
+            Self::Gssapi(evidence) => format!("system GSSAPI: {evidence:?}"),
             Self::Packet { header, body } => format!(
                 "header {header:02x?}; body {} bytes: {:02x?}{}",
                 body.len(),
@@ -86,6 +92,7 @@ pub(crate) struct Observations {
     pub capture: bool,
     pub keep_password: bool,
     pub column_encryption: bool,
+    pub enclaves: bool,
     pending: Vec<Trace>,
     incoming: packet::Unpacker,
     bodies: std::collections::BTreeMap<(bool, Option<u64>), Body>,
@@ -186,10 +193,11 @@ impl Observations {
                 channel,
                 crate::inspection::omitted_message(body.length),
             );
-        } else if let Some(node) = crate::inspection::message_with_encryption(
+        } else if let Some(node) = crate::inspection::message_with_enclaves(
             if prelogin_reply { packet::HELLO } else { kind },
             &body.bytes,
             self.column_encryption,
+            self.enclaves,
         ) {
             if send && kind == packet::HELLO {
                 self.expect_prelogin = true;
@@ -255,6 +263,7 @@ impl Observations {
                 Record::Environment(_) => "ENVCHANGE".into(),
                 Record::LoginAck { .. } => "LOGINACK".into(),
                 Record::Sspi(_) => "SSPI · [redacted]".into(),
+                Record::FedAuthInfo(_) => "FEDAUTHINFO".into(),
                 Record::Classification(_) => "DATACLASSIFICATION".into(),
                 Record::Tables(_) => "TABNAME".into(),
                 Record::ColumnInfo(_) => "COLINFO".into(),
@@ -361,7 +370,7 @@ impl Observations {
             return Ok(());
         }
         let redacted;
-        let view = if matches!(kind, packet::LOGIN | packet::SSPI) {
+        let view = if matches!(kind, packet::LOGIN | packet::SSPI | 0x08) {
             redacted = packet::split(kind, &crate::capture::without_password(kind, body), size)?;
             redacted.as_slice()
         } else {

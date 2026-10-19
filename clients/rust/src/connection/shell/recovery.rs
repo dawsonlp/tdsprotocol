@@ -35,20 +35,23 @@ pub(super) fn protocol_core(
     login_name: Option<&str>,
     data: Option<Vec<u8>>,
 ) -> Result<ConnectionCore> {
-    if options.windows_auth.is_some() {
+    if options.authentication.windows().is_some() {
         #[cfg(not(feature = "integrated-auth"))]
         return Err(Error::new(ErrorKind::Unsupported(
             "integrated-auth feature is disabled",
         )));
-        #[cfg(feature = "integrated-auth")]
-        if !options.user.is_empty()
-            || !options.password.is_empty()
-            || !options.new_password.is_empty()
-        {
-            return Err(Error::new(ErrorKind::Parameter(
-                "SQL credentials with integrated login",
-            )));
-        }
+    }
+    if !options.new_password.is_empty() && options.authentication.sql_credentials().is_none() {
+        return Err(Error::new(ErrorKind::Parameter(
+            "password change requires SQL authentication",
+        )));
+    }
+    if let crate::Authentication::Entra(login) = &options.authentication
+        && (!login.valid() || options.token_providers.get(&login.source).is_none())
+    {
+        return Err(Error::new(ErrorKind::Parameter(
+            "invalid or unbound Entra credential source",
+        )));
     }
     let name = ServerName::try_from(
         options
@@ -66,10 +69,21 @@ pub(super) fn protocol_core(
         })?,
     };
     let login = Login {
-        integrated_security: options.windows_auth.is_some(),
+        federated: match &options.authentication {
+            crate::Authentication::Entra(login) => Some(login.mode.clone()),
+            _ => None,
+        },
+        federated_data: None,
+        integrated_security: options.authentication.windows().is_some(),
         sspi: Default::default(),
-        user: options.user.clone(),
-        password: options.password.clone(),
+        user: options
+            .authentication
+            .sql_credentials()
+            .map_or_else(String::new, |c| c.user.clone()),
+        password: options
+            .authentication
+            .sql_credentials()
+            .map_or_else(String::new, |c| c.password.to_string()),
         new_password: options.new_password.clone(),
         database: options.database.clone(),
         host_name,
@@ -85,6 +99,8 @@ pub(super) fn protocol_core(
         data_classification: options.data_classification,
         utf8_support: options.utf8_support,
         column_encryption: options.column_encryption,
+        enclave_attestation: options.enclave_attestation,
+        azure_feature_probes: options.azure_feature_probes,
         recovery_data: data,
     };
     ConnectionCore::new_with_mars(
@@ -124,8 +140,7 @@ async fn physical_recovery(
             )))
             .at(Step::Configuration, Execution::NotSent));
         }
-        options.password.clone_from(&candidate.password);
-        options.windows_auth.clone_from(&candidate.windows_auth);
+        options.authentication.clone_from(&candidate.authentication);
         options.new_password.clear();
         Some(candidate)
     } else {
@@ -155,11 +170,12 @@ async fn physical_recovery(
         socket.set_nodelay(true)?;
         let mut input = [0; 16384];
         loop {
+            supply_federated(&mut core, &options, deadline).await?;
             #[cfg(feature = "integrated-auth")]
             if let Some(challenge) = core.take_authentication_request() {
                 if authentication.is_none() {
                     authentication = Some(crate::auth::Context::new(
-                        options.windows_auth.as_ref().ok_or_else(|| {
+                        options.authentication.windows().ok_or_else(|| {
                             Error::new(ErrorKind::State("missing authentication provider"))
                         })?,
                         &options.host,
@@ -216,6 +232,51 @@ async fn physical_recovery(
         began,
         configuration,
     })
+}
+
+/// The same source boundary applies to initial, routed and recovery attempts.
+/// Deadline cancellation drops the provider future and candidate; no SQL exists
+/// here to replay and no result can install itself in another physical epoch.
+pub(super) async fn supply_federated(
+    core: &mut ConnectionCore,
+    options: &ConnectOptions,
+    deadline: Instant,
+) -> Result<()> {
+    while let Some(challenge) = core.take_federated_request() {
+        let crate::Authentication::Entra(login) = &options.authentication else {
+            return Err(Error::new(ErrorKind::State("missing Entra selection")));
+        };
+        let provider = options
+            .token_providers
+            .get(&login.source)
+            .ok_or_else(|| Error::new(ErrorKind::Parameter("unbound Entra credential source")))?;
+        let token = timeout_at(
+            deadline,
+            provider.acquire(crate::entra::TokenRequest {
+                resource: &challenge.resource,
+                sts_url: challenge.sts_url.as_deref(),
+                host: &options.host,
+                port: options.port,
+                workflow: challenge.workflow,
+            }),
+        )
+        .await
+        .map_err(|_| Error::new(ErrorKind::Timeout))?
+        .map_err(|cause| Error::new(ErrorKind::TokenProvider(cause)))?;
+        if token.as_str().encode_utf16().count() > crate::auth::MAX_TOKEN / 2 {
+            return Err(Error::new(ErrorKind::Limit("federated token")));
+        }
+        if token
+            .expires_at
+            .is_some_and(|expiry| expiry <= std::time::SystemTime::now())
+        {
+            return Err(Error::new(ErrorKind::Authentication(
+                "provider supplied an expired token",
+            )));
+        }
+        core.provide_federated_token(token)?;
+    }
+    Ok(())
 }
 impl Driver {
     pub(super) fn can_suspend(&self, error: &Error) -> bool {
@@ -331,8 +392,8 @@ impl Driver {
             })?;
             self.reconnect
                 .options
-                .password
-                .clone_from(&configuration.password);
+                .authentication
+                .clone_from(&configuration.authentication);
             self.reconnect.options.new_password.clear();
         }
         // All of these writes are synchronous. Logical close and channel close

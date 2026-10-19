@@ -115,6 +115,7 @@ impl StreamedCall {
         self,
         body: &mut Vec<u8>,
         streams: &mut Vec<SourceAt>,
+        enclaves: bool,
     ) -> Result<Vec<Vec<crate::tokens::Column>>> {
         let Self {
             call,
@@ -126,7 +127,7 @@ impl StreamedCall {
                 "duplicate or out-of-range source binding",
             )));
         }
-        call.encode_header(body)?;
+        call.encode_header(body, enclaves)?;
         for (index, param) in call.params.iter().enumerate() {
             if let Some(source) = sources.remove(&index) {
                 if param.value.is_some() || param.use_default {
@@ -180,7 +181,7 @@ impl StreamedCalls {
             if index != 0 {
                 body.push(0xff);
             }
-            metadata.extend(call.append(&mut body, &mut streams)?);
+            metadata.extend(call.append(&mut body, &mut streams, context.enclaves)?);
         }
         Ok(Prepared {
             encoded: Encoded {

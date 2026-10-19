@@ -87,7 +87,12 @@ async fn rust_and_sqlclient_mutually_read_write_lookup_and_bulk_every_encrypted_
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let db = format!("tds_rust_ae_{}", std::process::id());
     let options = support::docker_options();
-    let password = options.password.clone();
+    let password = options
+        .authentication
+        .sql_credentials()
+        .unwrap()
+        .password
+        .to_string();
     let admin = Connection::connect(options.clone()).await.unwrap();
     let mut ch = admin.serial_channel().await.unwrap();
     ch.exchange(Batch::new(format!("CREATE DATABASE {db}")))

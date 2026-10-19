@@ -150,6 +150,7 @@ fn call(parameter: &[u8]) -> Vec<u8> {
     let mut b = tds_client::Batch::new("")
         .encode_request(&Context {
             column_encryption: false,
+            enclaves: false,
             transaction: 0,
             outstanding: 1,
         })
@@ -198,6 +199,7 @@ fn python_rpc_and_transaction_bodies_decode_with_exact_flags_and_values() {
         let encoded = operation
             .encode_request(&Context {
                 column_encryption: false,
+                enclaves: false,
                 transaction: case["transaction"].as_u64().unwrap(),
                 outstanding: case["outstanding"].as_u64().unwrap() as u32,
             })
@@ -280,6 +282,7 @@ fn interleaved_logical_channels_wait_for_real_attention_ack_and_keep_recorded_ev
     let batch = tds_client::Batch::new("SELECT 1")
         .encode_request(&Context {
             column_encryption: false,
+            enclaves: false,
             transaction: 0,
             outstanding: 1,
         })
@@ -481,6 +484,7 @@ fn sql_bytes_are_decoded_without_using_recorded_human_text() {
     let body = tds_client::Batch::new("SELECT N'é🦀'")
         .encode_request(&Context {
             column_encryption: false,
+            enclaves: false,
             transaction: 0,
             outstanding: 1,
         })

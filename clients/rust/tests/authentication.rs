@@ -125,9 +125,7 @@ mod live_peer {
         }
     }
     fn windows(options: &mut tds_client::ConnectOptions) {
-        options.user.clear();
-        options.password.clear();
-        options.windows_auth = Some(WindowsAuth::explicit(
+        options.authentication = tds_client::Authentication::Windows(WindowsAuth::explicit(
             Method::Ntlm,
             "TDS\\fixture",
             "test-only-password",
@@ -202,8 +200,7 @@ mod live_peer {
         use tokio::{io::AsyncReadExt, net::TcpListener};
         let kdc = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (listener, mut options) = support::listener().await;
-        options.user.clear();
-        options.password.clear();
+
         options.timeout = Duration::from_millis(600);
         let mut auth =
             WindowsAuth::explicit(Method::Kerberos, "fixture@tds.test", "test-only-password");
@@ -211,7 +208,7 @@ mod live_peer {
             "tcp://127.0.0.1:{}",
             kdc.local_addr().unwrap().port()
         ));
-        options.windows_auth = Some(auth);
+        options.authentication = tds_client::Authentication::Windows(auth);
         let kdc_peer = tokio::spawn(async move {
             let (mut socket, _) = kdc.accept().await.unwrap();
             let length = socket.read_u32().await.unwrap();

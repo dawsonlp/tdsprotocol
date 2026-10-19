@@ -81,6 +81,210 @@ async fn roundtrip(exchange: &KeyExchange, key: &ColumnKey) {
     let plaintext = exchange.decrypt(key, &ciphertext).await.unwrap();
     assert!(plaintext.as_bytes() == b"synthetic sensitive input");
 }
+
+#[tokio::test]
+async fn enclave_session_authority_retires_with_each_physical_and_security_boundary() {
+    use base64::Engine;
+    let fixture = Fixture::new();
+    let json: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/azure/enclave.json")).unwrap();
+    let info = base64::engine::general_purpose::STANDARD
+        .decode(json["info"].as_str().unwrap())
+        .unwrap();
+    for boundary in 0..7 {
+        let session = fixture.session(Policies::default());
+        session.enable_enclaves();
+        let guard = session.exchange().unwrap();
+        guard
+            .establish_enclave(
+                super::super::enclave::Attestation::new().unwrap(),
+                info.clone(),
+            )
+            .await
+            .unwrap();
+        let weak = Arc::downgrade(session.inner.bank().enclave.as_ref().unwrap());
+        assert!(guard.has_enclave().unwrap());
+        match boundary {
+            0 => session.revoke(Revocation::PoolReturn),
+            1 => session.revoke(Revocation::Recovery),
+            2 => session.revoke(Revocation::Close),
+            3 => session
+                .link()
+                .observe(&crate::Record::Environment(
+                    crate::tokens::EnvironmentChange::Bytes {
+                        kind: 18,
+                        new: vec![],
+                        old: vec![],
+                    },
+                ))
+                .unwrap(),
+            4 => session
+                .link()
+                .observe(&crate::Record::Environment(
+                    crate::tokens::EnvironmentChange::Text {
+                        kind: 1,
+                        new: "other".into(),
+                        old: "old".into(),
+                    },
+                ))
+                .unwrap(),
+            5 => session
+                .link()
+                .observe(&crate::Record::Environment(
+                    crate::tokens::EnvironmentChange::Bytes {
+                        kind: 7,
+                        new: vec![0; 5],
+                        old: vec![0; 5],
+                    },
+                ))
+                .unwrap(),
+            _ => session.invalidate(),
+        }
+        assert!(weak.upgrade().is_none(), "boundary {boundary}");
+        assert!(matches!(
+            guard.has_enclave(),
+            Err(Error::Closed | Error::Expired)
+        ));
+        drop(guard);
+        session.close().await;
+    }
+}
+
+#[tokio::test]
+async fn a_queued_acquisition_cannot_rebind_after_its_transaction_ends() {
+    let fixture = Fixture::new();
+    let session = fixture.session(Policies::default());
+    session.transaction_begin(1).unwrap();
+    let guard = session.exchange().unwrap();
+    let scopes = session.inner.bank().scopes(&guard.token);
+    // Reproduce the exact boundary after a controller has accepted its work
+    // but before its gate/provider await completes. A notification race must
+    // not permit fallback to a newly calculated exchange scope.
+    session.transaction_end();
+    let (send, _receive) = oneshot::channel();
+    let result = session
+        .inner
+        .load(
+            &guard.token,
+            &fixture.key(0),
+            Input::Encrypt(Secret::copy(b"data"), false),
+            &send,
+            scopes,
+        )
+        .await;
+    assert!(matches!(result, Err(Error::Expired)));
+    assert_eq!(session.statistics().master_load_attempts, 0);
+    assert_eq!(session.statistics().live_columns, 0);
+    // A separately started operation from the old streaming guard may still
+    // use its own exchange scope, as the original policy contract requires.
+    roundtrip(&guard, &fixture.key(0)).await;
+    drop(guard);
+    session.close().await;
+}
+
+#[tokio::test]
+async fn enclave_collection_cannot_extend_an_earlier_column_keys_fixed_age() {
+    use super::super::{KeyFuture, KeyOperation, KeyProvider, MasterKey, Plaintext};
+    struct Delayed {
+        local: LocalKeyStore,
+        verifications: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    struct Handle {
+        local: Arc<dyn MasterKey>,
+        verifications: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl KeyProvider for Delayed {
+        fn name(&self) -> &str {
+            "TDS_TEST"
+        }
+        fn open<'a>(
+            &'a self,
+            path: &'a str,
+            operation: KeyOperation,
+        ) -> KeyFuture<'a, Arc<dyn MasterKey>> {
+            Box::pin(async move {
+                Ok(Arc::new(Handle {
+                    local: self.local.open(path, operation).await?,
+                    verifications: self.verifications.clone(),
+                }) as Arc<dyn MasterKey>)
+            })
+        }
+    }
+    impl MasterKey for Handle {
+        fn wrap<'a>(&'a self, root: &'a Plaintext, op: KeyOperation) -> KeyFuture<'a, Vec<u8>> {
+            self.local.wrap(root, op)
+        }
+        fn unwrap<'a>(
+            &'a self,
+            key: &'a super::super::WrappedKey,
+            op: KeyOperation,
+        ) -> KeyFuture<'a, Plaintext> {
+            self.local.unwrap(key, op)
+        }
+        fn sign_metadata(&self, enclaves: bool, op: KeyOperation) -> KeyFuture<'_, Vec<u8>> {
+            self.local.sign_metadata(enclaves, op)
+        }
+        fn verify_metadata<'a>(
+            &'a self,
+            enclaves: bool,
+            signature: &'a [u8],
+            op: KeyOperation,
+        ) -> KeyFuture<'a, bool> {
+            Box::pin(async move {
+                if self.verifications.fetch_add(1, Ordering::SeqCst) == 1 {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+                self.local.verify_metadata(enclaves, signature, op).await
+            })
+        }
+    }
+    let fixture = Fixture::new();
+    let verifications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider = Delayed {
+        local: LocalKeyStore::new("TDS_TEST", &fixture.path).unwrap(),
+        verifications: verifications.clone(),
+    };
+    let session = KeySession::with_providers(
+        vec![Arc::new(provider)],
+        policies(
+            Policy::Time(Duration::from_secs(10)),
+            Policy::Time(Duration::from_millis(500)),
+        ),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    session.enable_enclaves();
+    let guard = session.exchange().unwrap();
+    let f: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/azure/enclave.json")).unwrap();
+    guard
+        .establish_enclave(
+            super::super::enclave::Attestation::new().unwrap(),
+            bytes(&f["info"]),
+        )
+        .await
+        .unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/azure/key_providers.json"
+    ))
+    .unwrap();
+    let signature = bytes(&metadata["local_signature"]);
+    let keys = (0..2)
+        .map(|index| {
+            let key = fixture.key(index);
+            let signatures = vec![(key.values[0].clone(), signature.clone())];
+            super::super::context::EnclaveColumn { key, signatures }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        guard.enclave_package("SQL", &keys).await,
+        Err(Error::AcquisitionExpired)
+    );
+    assert_eq!(verifications.load(Ordering::SeqCst), 2);
+    assert_eq!(session.statistics().enclave_packages, 0);
+    drop(guard);
+    session.close().await;
+}
 async fn twenty(policies: Policies, transaction: bool) -> Statistics {
     let fixture = Fixture::new();
     let session = fixture.session(policies);

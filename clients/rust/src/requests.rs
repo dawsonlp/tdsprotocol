@@ -8,6 +8,7 @@ pub struct Context {
     pub transaction: u64,
     pub outstanding: u32,
     pub column_encryption: bool,
+    pub enclaves: bool,
 }
 /// Bulk is the one approved multi-exchange sequencing exception (D-50).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -49,10 +50,17 @@ impl Request for Batch {
         "SQL batch"
     }
     fn encode_request(&self, context: &Context) -> Result<Encoded> {
+        let mut body = self.encode(context.transaction, context.outstanding)?;
+        if context.enclaves {
+            if body.len() > wire::MAX_PENDING - 2 {
+                return Err(Error::new(ErrorKind::Limit("SQL batch")));
+            }
+            body.splice(22..22, [0, 0]);
+        }
         Ok(Encoded {
             continuation: Continuation::None,
             kind: crate::packet::BATCH,
-            body: self.encode(context.transaction, context.outstanding)?,
+            body,
             metadata: Vec::new(),
         })
     }
@@ -63,6 +71,12 @@ impl Batch {
     pub fn new(sql: impl Into<String>) -> Self {
         Self(sql.into())
     }
+    pub fn with_enclave(self, package: Vec<u8>) -> EnclaveBatch {
+        EnclaveBatch {
+            batch: self,
+            package,
+        }
+    }
     pub(crate) fn encode(&self, transaction: u64, outstanding: u32) -> Result<Vec<u8>> {
         if self.0.len() > (wire::MAX_PENDING - 22) / 2 {
             return Err(Error::new(ErrorKind::Limit("SQL batch")));
@@ -70,6 +84,32 @@ impl Batch {
         let mut out = headers(transaction, outstanding);
         out.extend(wire::utf16(&self.0));
         Ok(out)
+    }
+}
+
+pub struct EnclaveBatch {
+    batch: Batch,
+    package: Vec<u8>,
+}
+impl Request for EnclaveBatch {
+    fn label(&self) -> &'static str {
+        "SQL batch"
+    }
+    fn encode_request(&self, context: &Context) -> Result<Encoded> {
+        if !context.enclaves {
+            return Err(Error::new(ErrorKind::Parameter(
+                "enclave package requires version two",
+            )));
+        }
+        let mut request = self.batch.encode_request(context)?;
+        let length = u16::try_from(self.package.len())
+            .map_err(|_| Error::new(ErrorKind::Limit("enclave package")))?;
+        request.body[22..24].copy_from_slice(&length.to_le_bytes());
+        request.body.splice(24..24, self.package.iter().copied());
+        if request.body.len() > wire::MAX_PENDING {
+            return Err(Error::new(ErrorKind::Limit("SQL batch")));
+        }
+        Ok(request)
     }
 }
 

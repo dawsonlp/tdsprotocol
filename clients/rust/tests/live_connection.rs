@@ -787,7 +787,11 @@ async fn certificate_identity_and_login_failures_are_not_bypassed() {
         assert!(matches!(error.kind, ErrorKind::Tls(_)));
         let mut config = options();
         config.version = version;
-        config.password = "deliberately incorrect test password".into();
+        config
+            .authentication
+            .sql_credentials_mut()
+            .unwrap()
+            .password = "deliberately incorrect test password".to_string().into();
         let error = match Connection::connect(config).await {
             Ok(_) => panic!("wrong password accepted"),
             Err(e) => e,

@@ -136,6 +136,14 @@ pub fn message(kind: u8, bytes: &[u8]) -> Option<Node> {
 }
 /// Negotiated version-one context is required to inspect encrypted bulk data.
 pub fn message_with_encryption(kind: u8, bytes: &[u8], encrypted: bool) -> Option<Node> {
+    message_with_enclaves(kind, bytes, encrypted, false)
+}
+pub fn message_with_enclaves(
+    kind: u8,
+    bytes: &[u8],
+    encrypted: bool,
+    enclaves: bool,
+) -> Option<Node> {
     use crate::{packet, wire::Reader};
     if matches!(
         kind,
@@ -176,7 +184,8 @@ pub fn message_with_encryption(kind: u8, bytes: &[u8], encrypted: bool) -> Optio
         packet::HELLO => crate::prelogin::read(&mut r).map(|_| ()),
         packet::LOGIN => crate::login7::read(&mut r).map(|_| ()),
         packet::BULK => crate::requests::decode::bulk_reader(&mut r, encrypted).map(|_| ()),
-        _ => crate::requests::decode::request_reader(kind, &mut r).map(|_| ()),
+        _ => crate::requests::decode::request_reader_with_enclaves(kind, &mut r, enclaves)
+            .map(|_| ()),
     };
     let mut node = r.node(name, Basis::Message, source).unwrap();
     if let Err(error) = result {

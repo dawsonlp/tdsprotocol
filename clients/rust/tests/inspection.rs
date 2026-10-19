@@ -128,6 +128,7 @@ fn login_credentials_are_redacted_and_tree_raw_and_rendering_are_bounded() {
     let body = tds_client::Batch::new("🦀".repeat(10000))
         .encode_request(&tds_client::requests::Context {
             column_encryption: false,
+            enclaves: false,
             transaction: 0,
             outstanding: 1,
         })

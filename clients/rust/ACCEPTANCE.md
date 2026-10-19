@@ -1,5 +1,29 @@
 # Rust client development: evidence
 
+The active `rust-azure-integration` branch now has an initial
+[Azure authentication evidence record](../../docs/design/experiments/rust-azure-authentication-evidence.md):
+the approved unified API, both Entra paths, paired Python wire/decoding vectors,
+controlled transport/routing/recovery, privacy and the optional official SDK
+adapter. This does not establish complete Azure parity or live Azure acceptance.
+The checkpoints below retain the preceding Rust/GCP campaign's evidence.
+
+The owner-approved [unsupported-feature policy](../../docs/design/experiments/rust-azure-feature-probe-contract.md)
+now warns on explicit diagnostic requests and refuses enabled server ACKs before
+SQL or pool admission, with no downgrade/retry. Python request-byte comparisons
+and the controlled 48-case feature/ACK/TDS/MARS matrix pass; Python's matching
+production correction remains backlogged as PY-AZ-06. See the current
+[feature-policy check report](../../docs/design/experiments/rust-azure-feature-policy-checks.json).
+Its final all-feature workspace regression passes **304 tests, 62 ignored**;
+all 15 paired comparisons and strict lint/docs pass against the retained source
+snapshot. Ignored environment-dependent tests are not live acceptance.
+
+The approved optional [system ticket-cache provider](../../docs/design/experiments/rust-azure-ticket-cache-contract.md)
+now has controlled native/adapter evidence, Linux/macOS companion tests, a
+Windows unavailable-platform compile check, and an updated source-hashed paired
+runner. The current all-feature workspace run passes **299 tests, 62 ignored**;
+strict workspace lint/docs pass. These results do not establish a successful
+cached-credential SQL login or live Azure interoperability.
+
 Observed locally through 2026-10-19, branch `rust-client`. This is a development slice,
 not a release or a claim of Python connection-package parity.
 
@@ -1242,3 +1266,22 @@ plaintext chunks are not provided; physical recovery requires a fresh adapter.
 Windows NTLM/Kerberos, native Windows builds/Browser, GCP deployment and teardown
 remain pending the [provider/campaign decision](../../docs/design/P-windows-authentication-campaign.md).
 No Rust publication or cloud deployment is implied by these local results.
+
+
+## Azure provider/enclave development checkpoint — 2026-10-19
+
+The owner-approved async key-provider and enclave boundary is implemented. The
+[development evidence](../../docs/design/experiments/rust-azure-key-enclave-evidence.md)
+and [source/check report](../../docs/design/experiments/rust-azure-key-enclave-checks.json)
+record core/default/all-feature checks (102 / 231 / 289 passed), Python/Rust
+cryptographic comparisons, controlled TLS enclave execution, native compilation,
+and strict lint/documentation checks. The final all-feature run ignored 62
+explicit environment-dependent tests, including the prepared Windows/Python CNG
+interoperability test. Ignored tests are not runtime acceptance.
+
+Actual Azure/CNG acceptance remains deferred. System ticket-cache authentication
+is implemented, and experimental feature handling has an owner-approved
+warning/refusal policy (see the current feature-policy contract). This is not
+full Azure code completion, publication, or resource deployment. Python
+production behavior and the independently added enclave-completion backlog remain
+unchanged.
