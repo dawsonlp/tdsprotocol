@@ -23,7 +23,7 @@ extra provider output after server acceptance and duplicate challenges are
 refused. Requiring explicit provider completion still awaits the custom-adapter
 compatibility decision. Windows configuration snapshots
 await their API decision. Synchronous pyspnego startup can block the event loop
-past the opening deadline; worker isolation is also awaiting an owner decision.
+past the opening deadline; the owner deferred worker isolation to the roadmap backlog.
 See the
 [cross-client findings](../../docs/design/experiments/rust-python-authentication-limitations.md)
 and [follow-up evidence](../../docs/design/experiments/gcp-authentication-follow-up-evidence.md)

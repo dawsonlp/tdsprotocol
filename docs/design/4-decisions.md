@@ -561,15 +561,15 @@ Python's TLS engine works entirely in memory (`ssl.MemoryBIO`), so the core driv
 
 ---
 
-**D-66 · Encryption key reuse defaults to the transaction; applications choose the tradeoff** · *Agreed direction, 2026-10-18* · [Lifetimes and cost](M-rust-encryption-lifetimes.md)
+**D-66 · Encryption key reuse defaults to the transaction; applications choose the tradeoff** · *Agreed 2026-10-18* · [Python implementation and evidence](experiments/python-encryption-retention.md)
 
-- Transaction scope is the default for retained encryption key material. Preserve the proposed exchange fallback outside explicit transactions; never create or extend a SQL transaction to retain keys.
-- Applications can select exchange scope or time-based handling to trade repeated key work against secret retention. The user clarified that time-based handling is the broader-retention option: it may reuse keys across transactions and autocommit exchanges within the same physical connection and exclusive pool lease, until a fixed application-selected maximum age. Reuse does not refresh that deadline. Pool return, reset, recovery, close and explicit invalidation still revoke the owner; it is not an application-global cache.
-- RAII cleanup erases owned plaintext keys and backend-owned secret copies when their permitted lifetime ends. Key expiry requires reloading on later use, rather than imposing a SQL transaction-duration limit.
-- Implementation checkpoint: [design N](N-encryption-policy-implementation.md) records the optional key-policy/local-crypto service, independent settings, bounded entries and actual driver lifecycle link. [Acceptance evidence](experiments/encryption-policy-evidence.md) distinguishes those results from the remaining transparent encrypted SQL and Rust/.NET work.
-- This changes D-60's long-lived shared-cache direction. Python implements the same retention choices in its existing transparent SQL facade ([Python design and evidence](experiments/python-encryption-retention.md)); it clears owned mutable key buffers without claiming Rust's stronger guarantees for Python/library copies. Rust's implemented foundation remains distinct from its pending transparent encrypted SQL support.
+- Transaction scope is the default, with exchange fallback outside an explicit transaction. Retention never creates or extends a SQL transaction.
+- Applications can choose exchange scope or fixed maximum-age reuse across transactions/autocommit within one physical connection and exclusive pool lease. Hits do not extend the deadline. Local master and column policies are independent; strict overrides use separate scopes. Changing defaults between exchanges clears prior entries.
+- Pool return/reset, physical failure/recovery, context changes and close clear/revoke retained authority. Expired keys reload on demand rather than limiting transaction duration.
+- Implementing explicit Rust key ownership exposed the need to replace Python's earlier shared context cache (D-60). Python implements these policies in its transparent SQL facade. It overwrites owned mutable key buffers; Python/backend temporary copies and provider-owned native secrets remain outside that guarantee.
+- Rust's owned-key cleanup, bounded policy service and driver lifecycle link are recorded in [design N](N-encryption-policy-implementation.md). [Design O](O-rust-transparent-encryption.md) and its acceptance evidence cover transparent encrypted SQL and independent .NET interoperability. [Lifetimes and cost](M-rust-encryption-lifetimes.md) records the retention tradeoffs; no guarantee extends to opaque authentication-provider or OS-managed secrets.
 
-*Why:* the user accepted transaction scope as the default and explicitly requested application control over exchange and time-based handling after reviewing measured setup and value costs.
+*Why:* the user requested explicit efficiency/security tradeoffs after examining the repeated key work exposed by Rust development.
 
 ---
 
