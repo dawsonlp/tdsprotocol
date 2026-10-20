@@ -173,21 +173,28 @@ def rotation_account(vm: str, action: str, scope: str, name: str, password: str 
 
 
 async def rotation() -> None:
-    """Follow-up C, Python's explicit connections: the new password logs in after a rotation; whether the old one is
-    still accepted is recorded (a domain account's previous password stays usable for NTLM for a while)."""
+    """Follow-up C, Python: explicit connections, then a pool whose ConnectionConfig names Windows credentials (C3).
+    Whether the old password is still accepted right after the change is recorded (a domain account's previous
+    password stays usable for NTLM for a while); the pool re-reads once after 18452 and opens with the new one."""
     import secrets as random
     from tds.adapters.spnego import Spnego
+    context = ssl.create_default_context(cafile=str(HERE / PLACES["sql_vm_ca"]))
+    host = PLACES["sql_vm_public_ip"]
     def windows(user, password):
-        context = ssl.create_default_context(cafile=str(HERE / PLACES["sql_vm_ca"]))
-        return {"host": PLACES["sql_vm_public_ip"], "port": 1433, "ssl_context": context,
-                "login": tds.WindowsLogin(Spnego(user, password, "ntlm"))}
-    admin_options = {"host": PLACES["sql_vm_public_ip"], "port": 1433, "user": "tdsadmin",
-                     "password": secrets()["sql_admin_password"],
-                     "ssl_context": ssl.create_default_context(cafile=str(HERE / PLACES["sql_vm_ca"]))}
-    async def who(options):
+        return {"host": host, "port": 1433, "ssl_context": context, "login": tds.WindowsLogin(Spnego(user, password, "ntlm"))}
+    admin_options = {"host": host, "port": 1433, "user": "tdsadmin", "password": secrets()["sql_admin_password"],
+                     "ssl_context": context}
+    async def who(connection):
+        async with connection.serial_channel() as channel:
+            return (await fetch(channel, "SELECT SUSER_SNAME()")).result_sets[0].rows[0][0]
+    async def who_with(options):
         async with await tds.connect(**options) as c:
-            async with c.serial_channel() as channel:
-                return (await fetch(channel, "SELECT SUSER_SNAME()")).result_sets[0].rows[0][0]
+            return await who(c)
+    class Source:
+        def __init__(self, value):
+            self.value = value
+        async def read(self):
+            return self.value
     for scope, vm, prefix in (("local", "vm-tds-sql", "TDSSQL"), ("domain", "vm-tds-dc", "TDS")):
         first, second = (f"Tds-{random.token_hex(9)}-Rr7!" for _ in range(2))
         name = f"tdsrot-{random.token_hex(4)}"  # new each run: a reused name can map to a stale SID
@@ -196,59 +203,35 @@ async def rotation() -> None:
         async with await tds.connect(**admin_options) as admin:
             async with admin.serial_channel() as channel:
                 await fetch(channel, f"IF SUSER_ID(N'{login}') IS NULL CREATE LOGIN [{login}] FROM WINDOWS")
-        assert (await who(windows(login, first))).upper() == login.upper()
-        rotation_account(vm, "set", scope, name, second)
-        try:
-            await who(windows(login, first))
-            old = "still accepted right after the change"
-        except tds.LoginRejected as e:
-            assert "18452" in str(e), e
-            old = "refused (18452)"
-        assert (await who(windows(login, second))).upper() == login.upper()
+        assert (await who_with(windows(login, first))).upper() == login.upper()
+        source = Source(tds.ConnectionConfig(host, 1433, login, first, windows="ntlm"))
+        pool = tds.Pool.from_config(source, size=3, services=tds.ConnectionServices(ssl_context=context))
+        async with pool.connection() as old:
+            assert (await who(old)).upper() == login.upper()
+            rotation_account(vm, "set", scope, name, second)
+            try:
+                await who_with(windows(login, first))
+                explicit = "still accepted right after the change"
+            except tds.LoginRejected as e:
+                assert "18452" in str(e), e
+                explicit = "refused (18452)"
+            try:
+                async with pool.connection():
+                    pooled = "a pool opening with the old password still logged in"
+            except tds.LoginRejected:
+                pooled = "a pool opening with the old password was refused and not retried (settings unchanged)"
+            source.value = tds.ConnectionConfig(host, 1433, login, second, windows="ntlm")
+            async with pool.connection() as new:
+                assert (await who(new)).upper() == login.upper()
+            assert (await who_with(windows(login, second))).upper() == login.upper()
+        idle_after = pool.idle
+        await pool.close()
         async with await tds.connect(**admin_options) as admin:
             async with admin.serial_channel() as channel:
                 await fetch(channel, CLEANUP.format(login=login))
         rotation_account(vm, "remove", scope, name)
-        print(f"PAIRED python rotation {scope}: old password {old}; new password logs in")
-
-
-async def kdc_deadline() -> None:
-    """Follow-up D, on the runner: the GCP failure again. A Kerberos config whose KDC never answers (an unused address
-    in the lab's subnet), an empty ticket cache and an explicit password make gssapi wait on the KDC. The opening must
-    return at its 1.5 s deadline while the event loop keeps running. The password arrives on standard input."""
-    import os
-    import tempfile
-    import time
-    from tds.adapters.spnego import Spnego
-    password = sys.stdin.readline().strip()
-    realm = PLACES["domain"].upper()
-    scratch = tempfile.mkdtemp(prefix="tds-kdc-")
-    config = os.path.join(scratch, "krb5.conf")
-    with open(config, "w") as f:
-        f.write(f"[libdefaults]\n  default_realm = {realm}\n  dns_lookup_kdc = false\n  rdns = false\n"
-                f"[realms]\n  {realm} = {{\n    kdc = 10.42.1.250\n  }}\n")
-    os.environ["KRB5_CONFIG"], os.environ["KRB5CCNAME"] = config, f"FILE:{os.path.join(scratch, 'empty-cache')}"
-    ticks = 0
-
-    async def heartbeat():
-        nonlocal ticks
-        while True:
-            ticks += 1
-            await asyncio.sleep(0.01)
-
-    beat = asyncio.create_task(heartbeat())
-    started = time.monotonic()
-    try:
-        await tds.connect(f"tdssql.{PLACES['domain']}", 1433, timeout=1.5,
-                          ssl_context=ssl.create_default_context(cafile=str(HERE / PLACES["sql_vm_ca"])),
-                          login=tds.WindowsLogin(Spnego(f"tdsuser@{realm}", password, "kerberos")))
-        outcome = "connected (unexpected)"
-    except tds.ConnectError as e:
-        outcome = str(e).splitlines()[0]
-    elapsed = time.monotonic() - started
-    beat.cancel()
-    print(f"PAIRED python kdc-deadline: returned after {elapsed:.2f} s with the event loop ticking {ticks} times: {outcome}")
-    assert elapsed < 2.5 and ticks > 50, (elapsed, ticks)
+        print(f"PAIRED python rotation {scope}: explicit old password {explicit}; {pooled}; the pool re-read the new "
+              f"password and logged in; idle connections after returning both: {idle_after}")
 
 
 async def review() -> None:

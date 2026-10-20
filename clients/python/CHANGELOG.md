@@ -18,6 +18,12 @@ Live testing on the Azure campaign's deployment (see the
   acknowledgement raises `UnsupportedFeatureEnabled` before any SQL, with no
   retry; unrequested, malformed and duplicate acknowledgements are protocol
   errors. A feature appearing twice in any feature list is refused.
+- `ConnectionConfig` can name explicit Windows credentials (`windows="ntlm"`,
+  `"kerberos"` or `"negotiate"`); each opening makes its own Spnego provider, so
+  a pool picks up a rotated Windows password after one 18452 refusal, as Rust's
+  does. Live: local and domain accounts rotated during a pool's life.
+- FEDAUTHINFO is parsed strictly (PY-AZ-01): options outside the token, odd
+  lengths, invalid UTF-16, duplicates and a missing SPN are refused, as in Rust.
 - The Key Vault key store refuses lengths that point past an encrypted column
   key before any vault call, raises `KeyNotDecrypted` for a path that is not a
   vault key URL, and refuses an unwrapped root that is not 32 bytes (PY-AZ-05).

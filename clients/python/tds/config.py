@@ -24,7 +24,11 @@ class ConfigurationError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ConnectionConfig:
-    """Immutable effective SQL-login settings. Equality includes the password.
+    """Immutable effective login settings. Equality includes the password.
+
+    `windows` names a Windows login's protocol ("ntlm", "kerberos" or "negotiate"); `user` and `password` are then the
+    Windows identity, and each opening makes its own Spnego provider (C3: a pool re-reads a rotated password after
+    18452, as Rust's does). Without it, they are a SQL Server login.
 
     A file format and secret resolution belong to ConfigService's implementation.
     An equivalent newly allocated value is unchanged. Features are normalized to
@@ -45,6 +49,7 @@ class ConnectionConfig:
     read_only_intent: bool = False
     follow_routing: bool = True
     features: tuple = field(default=login7.DEFAULT_FEATURES, repr=False)
+    windows: str | None = None
 
     def __post_init__(self):
         texts = (self.host, self.user, self.password, self.database, self.app_name, self.language)
@@ -56,6 +61,8 @@ class ConnectionConfig:
             raise ConfigurationError("validation", "TDS version must be 7.4 or 8.0")
         if self.host_name is not None and not isinstance(self.host_name, str):
             raise ConfigurationError("validation", "host_name must be text or None")
+        if self.windows not in (None, "ntlm", "kerberos", "negotiate"):
+            raise ConfigurationError("validation", "windows must be None, \"ntlm\", \"kerberos\" or \"negotiate\"")
         for name in ("mars", "odbc", "read_only_intent", "follow_routing"):
             if type(getattr(self, name)) is not bool:
                 raise ConfigurationError("validation", f"{name} must be a boolean")
@@ -72,7 +79,13 @@ class ConnectionConfig:
         return replace(self, password=previous.password) == previous
 
     def _options(self) -> dict[str, Any]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+        options = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "windows"}
+        if self.windows is not None:  # a new provider for each opening, from the current values
+            from .adapters.spnego import Spnego
+            from .logins import WindowsLogin
+            options["login"] = WindowsLogin(Spnego(self.user, self.password, self.windows))
+            options["user"] = options["password"] = ""
+        return options
 
 
 class ConfigService(Protocol):

@@ -321,3 +321,50 @@ def test_a_source_deadline_fails_loudly_and_frees_its_gate():
 def test_pool_rejects_a_one_time_server_password_change():
     with pytest.raises(ValueError, match="cannot change the server password"):
         tds.Pool("unused", 1433, user="fixture-user", password="A", new_password="B")
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_a_windows_configuration_rereads_a_rotated_password_after_18452(monkeypatch, changed):
+    """C3: explicit Windows credentials are comparable values; each opening makes its own Spnego provider from the
+    current values, so a pool picks up a rotated password after one refusal, as Rust's does."""
+    from tds.adapters.spnego import Spnego
+    from tds.connection.core import LoginRejected
+    from tds.logins import WindowsLogin
+    from tds.wire import Record
+
+    async def go():
+        source, attempts = Source(config("old-password", user="TDS\\fixture", windows="ntlm")), []
+        refusal = LoginRejected([Record(number=18452, severity=14, state=1, procedure="", line=1,
+                                        message="Artificial refusal", server_name="fixture")])
+
+        async def connect(*args, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                if changed:
+                    source.value = config("new-password", user="TDS\\fixture", windows="ntlm")
+                raise refusal
+            return Session()
+
+        monkeypatch.setattr(shell, "connect", connect)
+        pool = tds.Pool.from_config(source, size=1)
+        if changed:
+            await pool._give_back(await pool._borrow())
+        else:
+            with pytest.raises(LoginRejected):
+                await pool._borrow()
+        providers = [a["login"].provider for a in attempts]
+        assert all(isinstance(a["login"], WindowsLogin) and a["user"] == a["password"] == "" for a in attempts)
+        assert providers[0] == Spnego("TDS\\fixture", "old-password", "ntlm")
+        assert [p.password for p in providers] == (["old-password", "new-password"] if changed else ["old-password"])
+        await pool.close()
+    asyncio.run(go())
+
+
+def test_windows_settings_compare_like_sql_ones():
+    old = config("old-password", user="TDS\\fixture", windows="ntlm")
+    assert config("new-password", user="TDS\\fixture", windows="ntlm").compatible_with(old)  # a credential refresh
+    assert not config("old-password", user="TDS\\fixture", windows="kerberos").compatible_with(old)
+    assert not config("old-password", user="TDS\\fixture").compatible_with(old)  # SQL instead of Windows
+    with pytest.raises(tds.ConfigurationError, match="windows must be"):
+        config(windows="digest")
+    assert "old-password" not in repr(old)
