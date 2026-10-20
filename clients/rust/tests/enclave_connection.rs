@@ -412,3 +412,59 @@ async fn certificate_store_named_keys_are_verified_and_released_to_the_enclave()
     connection.close().await.unwrap();
     peer.await.unwrap();
 }
+
+/// A call without parameters is sent without a description (as Python does):
+/// Azure SQL answered a description of one, with attestation parameters, with
+/// no result sets. Encrypted results are still decrypted from COLMETADATA.
+#[tokio::test]
+async fn a_call_without_parameters_is_sent_without_a_description() {
+    let (listener, mut options) = support::listener().await;
+    options.enclave_attestation = Some(EnclaveAttestation::None);
+    let peer = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let (mut peer, _) = support::Peer::await_login(socket, false).await;
+        peer.accept_login(0x74000004, false, &acknowledgement())
+            .await;
+        assert_eq!(peer.message().await.0, packet::BATCH);
+        peer.reply(&support::done(0)).await;
+        let (kind, body) = peer.message().await;
+        assert_eq!(kind, packet::RPC);
+        let call = read_call(&body);
+        assert_eq!(
+            call.procedure,
+            decode::Procedure::Number(10),
+            "sp_executesql, not a description"
+        );
+        assert!(call.enclave_package.is_empty());
+        assert_eq!(call.parameters.len(), 2);
+        peer.reply(&support::done(0)).await;
+        peer.expect_eof().await;
+    });
+    let connection = Connection::connect(options).await.unwrap();
+    let encrypted = connection
+        .encrypted(
+            vec![
+                encryption::LocalKeyStore::new(
+                    "TDS_TEST",
+                    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/encryption"),
+                )
+                .unwrap(),
+            ],
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let mut channel = encrypted.serial_channel().await.unwrap();
+    channel
+        .execute("SELECT v FROM dbo.t", "", vec![])
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    channel.close().await.unwrap();
+    assert_eq!(encrypted.statistics().unwrap_attempts, 0);
+    encrypted.close().await;
+    connection.close().await.unwrap();
+    peer.await.unwrap();
+}

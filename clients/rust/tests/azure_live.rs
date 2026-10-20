@@ -850,7 +850,8 @@ async fn mac_b4_key_vault_missing_key_tampered_envelope_and_rotation() {
     println!("B-4 tampered envelope signature: Authentication");
 
     // A dedicated key, so rotation leaves the campaign's tables intact.
-    let name = "tds-rotation";
+    // A new name per run: a deleted key keeps its name while soft-deleted.
+    let name = &format!("tds-rotation-{}", std::process::id());
     az(&[
         "keyvault",
         "key",
@@ -932,12 +933,27 @@ async fn mac_b4_key_vault_missing_key_tampered_envelope_and_rotation() {
         "-o",
         "none",
     ]);
+    // Purging can lag the deletion; the resource group's deletion is the backstop.
+    let purged = std::process::Command::new("az")
+        .args([
+            "keyvault",
+            "key",
+            "purge",
+            "--vault-name",
+            &vault_name,
+            "--name",
+            name,
+        ])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    println!("B-4 rotation key {name} deleted; purged={purged}");
 }
 
 /// B-6: after pool return the session resets; a new wrapper re-authorizes
-/// keys and establishes a new enclave session (Rust's agreed scope).
+/// keys and establishes a new enclave session (Rust's agreed scope). Reads
+/// `python_enclave` (vault key), written by `paired.py write` before Rust's run.
 #[tokio::test]
-#[ignore = "live Azure campaign: Part B (after the paired Key Vault test)"]
+#[ignore = "live Azure campaign: Part B (after paired.py write)"]
 async fn mac_b6_enclave_queries_work_again_after_pool_return() {
     let lab = lab();
     let mut options = azure_sql(
@@ -959,7 +975,7 @@ async fn mac_b6_enclave_queries_work_again_after_pool_return() {
         let mut channel = encrypted.serial_channel().await.unwrap();
         let like = channel
             .execute(
-                "SELECT name FROM dbo.rust_enclave WHERE name LIKE @p ORDER BY id",
+                "SELECT name FROM dbo.python_enclave WHERE name LIKE @p ORDER BY id",
                 "@p nvarchar(50)",
                 vec![Param::new(
                     "@p",

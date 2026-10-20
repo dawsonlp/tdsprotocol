@@ -277,6 +277,28 @@ async fn execute_attempt<'a>(
         unicode: true,
         collation: context.collation,
     };
+    if params.is_empty() {
+        // Like Python, a call without parameters is not described: nothing needs
+        // encrypting. Azure SQL answered such a description, sent with enclave
+        // attestation parameters, with no result sets (observed 2026-10-20).
+        let call = Call::new(
+            Builtin::SpExecuteSql,
+            vec![
+                Param::new(
+                    "@stmt",
+                    text_type.clone(),
+                    Some(Value::Unicode(statement.into())),
+                ),
+                Param::new(
+                    "@params",
+                    text_type,
+                    Some(Value::Unicode(declarations.into())),
+                ),
+            ],
+        );
+        let raw = channel.exchange(call).await?;
+        return Ok(EncryptedResponse::new(raw, guard, BTreeMap::new()));
+    }
     let describe_gate = if context.enclaves {
         Some(context.enclave_gate.lock().await)
     } else {

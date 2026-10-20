@@ -95,12 +95,31 @@ async fn certificate_store_keys_read_python_values_and_round_trip_rust_values() 
     let admin = Connection::connect(options("master")).await.unwrap();
     run(&admin, "IF DB_ID('tds_rust_certstore') IS NOT NULL BEGIN ALTER DATABASE tds_rust_certstore SET SINGLE_USER \
         WITH ROLLBACK IMMEDIATE; DROP DATABASE tds_rust_certstore END; CREATE DATABASE tds_rust_certstore").await;
-    run(&admin, &format!("USE tds_rust_certstore; CREATE COLUMN MASTER KEY cmk WITH \
-        (KEY_STORE_PROVIDER_NAME = N'MSSQL_CERTIFICATE_STORE', KEY_PATH = N'{path}'); \
-        CREATE COLUMN ENCRYPTION KEY cek WITH VALUES (COLUMN_MASTER_KEY = cmk, ALGORITHM = 'RSA_OAEP', ENCRYPTED_VALUE = 0x{hex}); \
-        CREATE TABLE dbo.t (v int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = cek, ENCRYPTION_TYPE = RANDOMIZED, \
-        ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256'))")).await;
     admin.close().await.unwrap();
+    // Separate batches, as Python does: SQL Server compiles a whole batch before
+    // running it, so a table cannot name a key created earlier in the same batch.
+    let setup = Connection::connect(options("tds_rust_certstore"))
+        .await
+        .unwrap();
+    run(
+        &setup,
+        &format!(
+            "CREATE COLUMN MASTER KEY cmk WITH \
+        (KEY_STORE_PROVIDER_NAME = N'MSSQL_CERTIFICATE_STORE', KEY_PATH = N'{path}')"
+        ),
+    )
+    .await;
+    run(
+        &setup,
+        &format!(
+            "CREATE COLUMN ENCRYPTION KEY cek WITH VALUES \
+        (COLUMN_MASTER_KEY = cmk, ALGORITHM = 'RSA_OAEP', ENCRYPTED_VALUE = 0x{hex})"
+        ),
+    )
+    .await;
+    run(&setup, "CREATE TABLE dbo.t (v int ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = cek, ENCRYPTION_TYPE = RANDOMIZED, \
+        ALGORITHM = 'AEAD_AES_256_CBC_HMAC_SHA_256'))").await;
+    setup.close().await.unwrap();
 
     let connection = Connection::connect(options("tds_rust_certstore"))
         .await
