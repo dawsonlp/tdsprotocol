@@ -61,7 +61,7 @@ pub(crate) fn read_info(bytes: &[u8]) -> Result<Info> {
                     .is_some_and(|end| end <= data.len())
             })
             .ok_or_else(|| Error::malformed(at, "FEDAUTHINFO option bounds"))?;
-        if length % 2 != 0 {
+        if !length.is_multiple_of(2) {
             return Err(Error::malformed(at, "FEDAUTHINFO option length"));
         }
         let units: Vec<u16> = data[begin..begin + length]

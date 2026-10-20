@@ -8,6 +8,7 @@
     ../../clients/python/.venv/bin/python paired.py rotation     Windows password rotation, explicit connections
     python paired.py kdc-deadline < password                     on the runner: an unreachable KDC meets the deadline
     ../../clients/python/.venv/bin/python paired.py review       evidence for PY-AZ-02, 03 and 04 (no changes made)
+    ../../clients/python/.venv/bin/python paired.py assertion    client assertion: certificate, signed JWT, logins
 
 The order is: write, Rust's mac_key_vault_and_enclave_values_round_trip_and_read_python_values with
 TDS_AZURE_PAIRED=1, then read. Both clients use the same Key Vault key, values and expected rows; each creates its own
@@ -353,6 +354,65 @@ async def review() -> None:
     print(f"REVIEW PY-AZ-04 four concurrent MARS channels on one connection: {results}")
 
 
+def assertion_jwt() -> str:
+    """A client assertion (RFC 7523) for the campaign's app registration, signed with the disposable certificate's key
+    and valid for ten minutes. Signing is the application's part; the credentials only exchange it for a token."""
+    import base64
+    import hashlib
+    import time
+    import uuid
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    key = serialization.load_pem_private_key((HERE / "secrets" / "assertion-key.pem").read_bytes(), None)
+    cert = x509.load_pem_x509_certificate((HERE / "secrets" / "assertion-cert.pem").read_bytes())
+    b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    header = {"alg": "RS256", "typ": "JWT",
+              "x5t": b64(hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).digest())}
+    now = int(time.time())
+    claims = {"aud": f"https://login.microsoftonline.com/{PLACES['tenant_id']}/oauth2/v2.0/token",
+              "iss": PLACES["service_principal_client_id"], "sub": PLACES["service_principal_client_id"],
+              "jti": str(uuid.uuid4()), "nbf": now - 60, "iat": now, "exp": now + 600}
+    signing_input = f"{b64(json.dumps(header).encode())}.{b64(json.dumps(claims).encode())}"
+    signature = key.sign(signing_input.encode(), padding.PKCS1v15(), hashes.SHA256())
+    return f"{signing_input}.{b64(signature)}"
+
+
+async def assertion() -> None:
+    """Follow-up F1: a disposable certificate on the campaign's app registration (its secret kept), a signed
+    assertion in secrets/assertion.jwt for Rust's mac_client_assertion test, and Python's logins with it."""
+    import datetime as dt
+    import subprocess
+    import time
+    from azure.identity import ClientAssertionCredential
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    if not (HERE / "secrets" / "assertion-cert.pem").exists():
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "tds campaign client assertion")])
+        now = dt.datetime.now(dt.timezone.utc)
+        cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(minutes=5))
+                .not_valid_after(now + dt.timedelta(days=2)).sign(key, hashes.SHA256()))
+        write_secret = lambda path, data: (path.write_bytes(data), path.chmod(0o600))
+        write_secret(HERE / "secrets" / "assertion-key.pem", key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        (HERE / "secrets" / "assertion-cert.pem").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        subprocess.run(["az", "ad", "app", "credential", "reset", "--id", PLACES["service_principal_client_id"],
+                        "--cert", f"@{HERE / 'secrets' / 'assertion-cert.pem'}", "--append", "-o", "none"],
+                       check=True, capture_output=True)
+        print("added a disposable certificate to the app registration; waiting for it to propagate")
+        time.sleep(60)
+    jwt = assertion_jwt()
+    path = HERE / "secrets" / "assertion.jwt"
+    path.write_text(jwt)
+    path.chmod(0o600)
+    credential = ClientAssertionCredential(PLACES["tenant_id"], PLACES["service_principal_client_id"], lambda: jwt)
+    await logins(credential, PLACES["service_principal_name"], "client assertion")
+
+
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "write":
@@ -364,6 +424,8 @@ def main() -> None:
         credential = ClientSecretCredential(PLACES["tenant_id"], PLACES["service_principal_client_id"],
                                             secrets()["service_principal_secret"])
         asyncio.run(logins(credential, PLACES["service_principal_name"], "service principal"))
+    elif mode == "assertion":
+        asyncio.run(assertion())
     elif mode == "review":
         asyncio.run(review())
     elif mode == "kdc-deadline":

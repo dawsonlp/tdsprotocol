@@ -1300,3 +1300,47 @@ async fn mac_windows_password_rotation_during_a_pool() {
         println!("ROTATION {scope}: done (old password accepted after the change: {old_accepted})");
     }
 }
+
+/// The application-signed assertion that `infra/azure/paired.py assertion`
+/// wrote (valid for ten minutes): signing belongs to the application.
+#[derive(Debug)]
+struct SignedAssertion(String);
+#[async_trait::async_trait]
+impl azure_identity::ClientAssertion for SignedAssertion {
+    async fn secret(
+        &self,
+        _: Option<azure_core::http::ClientMethodOptions<'_>>,
+    ) -> azure_core::Result<String> {
+        Ok(self.0.clone())
+    }
+}
+
+/// Follow-up F1: a certificate-based service principal without OpenSSL, through
+/// `ClientAssertionCredential` (owner decision F3, exception E-CRED-1).
+#[tokio::test]
+#[ignore = "live Azure campaign: follow-ups (after paired.py assertion)"]
+async fn mac_client_assertion_logs_in_with_both_flows() {
+    let lab = lab();
+    let jwt = std::fs::read_to_string(lab.dir.join("secrets/assertion.jwt"))
+        .expect("run infra/azure/paired.py assertion first");
+    let credential: Arc<dyn TokenCredential> = azure_identity::ClientAssertionCredential::new(
+        lab.get("tenant_id").to_owned(),
+        lab.get("service_principal_client_id").to_owned(),
+        SignedAssertion(jwt),
+        None,
+    )
+    .unwrap();
+    for deferred in [false, true] {
+        let provider = Counting::new(Arc::new(AzureTokenProvider::new(credential.clone())));
+        let options = azure_sql(
+            &lab,
+            entra("assertion", deferred),
+            TokenProviders::new().with("assertion", provider.clone()),
+        );
+        let connection = connect(options).await;
+        let (login, user, _) = who(&connection).await;
+        assert_eq!(user, lab.get("service_principal_name"));
+        println!("ENTRA client assertion deferred={deferred} login={login} user={user}");
+        connection.close().await.unwrap();
+    }
+}
