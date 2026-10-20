@@ -10,6 +10,17 @@ Live testing on the Azure campaign's deployment (see the
   opening past its deadline or stall the event loop. Live: an unreachable KDC
   returned at the 1.5 s deadline (it previously blocked for more than 4 s). A
   canceled call finishes in its worker and its result is released.
+- The azure-identity adapter runs synchronous credentials in a worker thread
+  (PY-AZ-03): the Azure CLI credential stalled the event loop for 0.42 s per
+  login; live, the stall is now 0.015 s, the same as the asynchronous credential.
+- Unimplemented Azure features follow the owner-approved policy (PY-AZ-06): an
+  explicit request warns (`UnsupportedFeatureWarning`); an enabled
+  acknowledgement raises `UnsupportedFeatureEnabled` before any SQL, with no
+  retry; unrequested, malformed and duplicate acknowledgements are protocol
+  errors. A feature appearing twice in any feature list is refused.
+- The Key Vault key store refuses lengths that point past an encrypted column
+  key before any vault call, raises `KeyNotDecrypted` for a path that is not a
+  vault key URL, and refuses an unwrapped root that is not 32 bytes (PY-AZ-05).
 
 ## Unreleased — GCP authentication follow-up
 

@@ -45,6 +45,20 @@ The independently reproduced Python Kerberos deadline defect remains in the
 It is not newly classified as speculative by this document; implementation of its
 proposed remedy is still deferred.
 
+## Live results, 2026-10-20
+
+The owner lifted the Python freeze; each item's evidence was collected on the
+Azure campaign's deployment (`infra/azure/paired.py review` and a capture).
+
+| ID | Evidence | Outcome |
+|---|---|---|
+| PY-AZ-01 | Azure's FEDAUTHINFO, sent only by the routed destination, is fully well-formed | Owner decision: strict parsing in both clients |
+| PY-AZ-02 | Real refusals (wrong secret, managed identity off the VM, vault refusal) carry descriptive Azure codes, no secret and nothing token-like | No change: the messages are useful and safe |
+| PY-AZ-03 | The synchronous Azure CLI credential stalled the event loop 0.42 s per login | Fixed: synchronous credentials run in a worker thread; live stall 0.015 s |
+| PY-AZ-04 | Each encrypted connection already starts with fresh sessions; sequential connections and four concurrent MARS channels return correct enclave results | No change |
+| PY-AZ-05 | Valid vault and enclave values pass (live, with SqlClient) | Fixed: length bounds before any vault call, a typed error for a bad key path, a 32-byte root check |
+| PY-AZ-06 | Azure enables three of the four features | Implemented (below) |
+
 ## PY-AZ-06 — owner-directed unsupported-feature negotiation policy
 
 **Implemented 2026-10-20** (owner lifted the Python freeze): an explicit request
