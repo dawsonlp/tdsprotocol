@@ -199,6 +199,8 @@ pub struct Session {
     pub transaction: u64,
     pub server_version: Option<[u8; 4]>,
     pub features: BTreeMap<u8, Vec<u8>>,
+    /// Explicit unsupported requests, retained even when observation is off.
+    pub feature_warnings: Vec<crate::azure_features::FeatureRequestWarning>,
     pub session_id: u16,
     pub tls_version: Option<rustls::ProtocolVersion>,
 }
@@ -212,6 +214,7 @@ impl Default for Session {
             transaction: 0,
             server_version: None,
             features: BTreeMap::new(),
+            feature_warnings: Vec::new(),
             session_id: 0,
             tls_version: None,
         }

@@ -1,0 +1,251 @@
+{
+  "schema": 1,
+  "scope": "Artificial public FEDAUTH wire vectors; no live acceptance",
+  "sources": {
+    "clients/python/tds/logins.py": "04fe1bf493936c0ce8a327189190fddf6c4564f895c4757fdfd1873b8c4a6bf4",
+    "clients/python/tds/tokens.py": "c112736a3aebea29fb3bf1bac86dc2d22aa812deabce46a9b606394ee0d703da"
+  },
+  "cases": [
+    {
+      "id": "upfront-ascii-nonce0-echo0",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial.access-token",
+      "echo": false,
+      "nonce": null,
+      "expected": "022e0000006100720074006900660069006300690061006c002e006100630063006500730073002d0074006f006b0065006e00"
+    },
+    {
+      "id": "upfront-ascii-nonce0-echo1",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial.access-token",
+      "echo": true,
+      "nonce": null,
+      "expected": "032e0000006100720074006900660069006300690061006c002e006100630063006500730073002d0074006f006b0065006e00"
+    },
+    {
+      "id": "message-ascii-nonce0",
+      "scenario": "A01",
+      "kind": "message",
+      "token": "artificial.access-token",
+      "nonce": null,
+      "expected": "320000002e0000006100720074006900660069006300690061006c002e006100630063006500730073002d0074006f006b0065006e00"
+    },
+    {
+      "id": "upfront-ascii-nonce1-echo0",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial.access-token",
+      "echo": false,
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "022e0000006100720074006900660069006300690061006c002e006100630063006500730073002d0074006f006b0065006e00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "upfront-ascii-nonce1-echo1",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial.access-token",
+      "echo": true,
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "032e0000006100720074006900660069006300690061006c002e006100630063006500730073002d0074006f006b0065006e00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "message-ascii-nonce1",
+      "scenario": "A01",
+      "kind": "message",
+      "token": "artificial.access-token",
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "520000002e0000006100720074006900660069006300690061006c002e006100630063006500730073002d0074006f006b0065006e00000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "upfront-unicode-nonce0-echo0",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial-λ-🔑",
+      "echo": false,
+      "nonce": null,
+      "expected": "021e0000006100720074006900660069006300690061006c002d00bb032d003dd811dd"
+    },
+    {
+      "id": "upfront-unicode-nonce0-echo1",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial-λ-🔑",
+      "echo": true,
+      "nonce": null,
+      "expected": "031e0000006100720074006900660069006300690061006c002d00bb032d003dd811dd"
+    },
+    {
+      "id": "message-unicode-nonce0",
+      "scenario": "A01",
+      "kind": "message",
+      "token": "artificial-λ-🔑",
+      "nonce": null,
+      "expected": "220000001e0000006100720074006900660069006300690061006c002d00bb032d003dd811dd"
+    },
+    {
+      "id": "upfront-unicode-nonce1-echo0",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial-λ-🔑",
+      "echo": false,
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "021e0000006100720074006900660069006300690061006c002d00bb032d003dd811dd000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "upfront-unicode-nonce1-echo1",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "artificial-λ-🔑",
+      "echo": true,
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "031e0000006100720074006900660069006300690061006c002d00bb032d003dd811dd000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "message-unicode-nonce1",
+      "scenario": "A01",
+      "kind": "message",
+      "token": "artificial-λ-🔑",
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "420000001e0000006100720074006900660069006300690061006c002d00bb032d003dd811dd000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "upfront-empty-nonce0-echo0",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "",
+      "echo": false,
+      "nonce": null,
+      "expected": "0200000000"
+    },
+    {
+      "id": "upfront-empty-nonce0-echo1",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "",
+      "echo": true,
+      "nonce": null,
+      "expected": "0300000000"
+    },
+    {
+      "id": "message-empty-nonce0",
+      "scenario": "A01",
+      "kind": "message",
+      "token": "",
+      "nonce": null,
+      "expected": "0400000000000000"
+    },
+    {
+      "id": "upfront-empty-nonce1-echo0",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "",
+      "echo": false,
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "0200000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "upfront-empty-nonce1-echo1",
+      "scenario": "A01",
+      "kind": "upfront",
+      "token": "",
+      "echo": true,
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "0300000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "message-empty-nonce1",
+      "scenario": "A01",
+      "kind": "message",
+      "token": "",
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected": "2400000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "deferred-password-echo0",
+      "scenario": "A01",
+      "kind": "deferred",
+      "workflow": 1,
+      "echo": false,
+      "expected": "0401"
+    },
+    {
+      "id": "deferred-password-echo1",
+      "scenario": "A01",
+      "kind": "deferred",
+      "workflow": 1,
+      "echo": true,
+      "expected": "0501"
+    },
+    {
+      "id": "deferred-integrated-echo0",
+      "scenario": "A01",
+      "kind": "deferred",
+      "workflow": 2,
+      "echo": false,
+      "expected": "0402"
+    },
+    {
+      "id": "deferred-integrated-echo1",
+      "scenario": "A01",
+      "kind": "deferred",
+      "workflow": 2,
+      "echo": true,
+      "expected": "0502"
+    },
+    {
+      "id": "deferred-interactive-echo0",
+      "scenario": "A01",
+      "kind": "deferred",
+      "workflow": 3,
+      "echo": false,
+      "expected": "0403"
+    },
+    {
+      "id": "deferred-interactive-echo1",
+      "scenario": "A01",
+      "kind": "deferred",
+      "workflow": 3,
+      "echo": true,
+      "expected": "0503"
+    }
+  ],
+  "info_cases": [
+    {
+      "id": "normal",
+      "scenario": "A04",
+      "token": "ee220000000200000001060000001600000002060000001c00000073007400730064006200bb03",
+      "sts_url": "sts",
+      "resource": "dbλ"
+    },
+    {
+      "id": "missing",
+      "scenario": "A04",
+      "token": "ee0400000000000000",
+      "sts_url": "",
+      "resource": ""
+    },
+    {
+      "id": "duplicate",
+      "scenario": "A04",
+      "token": "ee1a0000000200000002020000001600000002020000001800000041004200",
+      "sts_url": "",
+      "resource": "B"
+    },
+    {
+      "id": "odd-surrogate",
+      "scenario": "A04",
+      "token": "ee100000000100000001030000000d00000000d8ff",
+      "sts_url": "�",
+      "resource": ""
+    },
+    {
+      "id": "clipped",
+      "scenario": "A04",
+      "token": "ee1c00000002000000015a00000063000000025a00000015000000616263646566",
+      "sts_url": "",
+      "resource": "�"
+    }
+  ]
+}

@@ -1,5 +1,121 @@
 # Rust client handover
 
+## Current — Rust Azure live campaign and Part B, 2026-10-20
+
+`infra/azure` was applied in SW-Dev (`rg-tds-rust-azure`) at 18:59 UTC; the group
+deletes itself at **2026-10-21 18:59 UTC** (Logic App), budget USD 25. Rust,
+Python and SqlClient were run against Azure SQL (Entra by CLI, service principal
+and managed identity), Key Vault, the VBS enclave, NTLM, Kerberos and the
+Windows certificate store. Everything passes; see the
+[live evidence](docs/design/experiments/rust-azure-live-evidence.md).
+
+- **One driver defect, fixed:** encrypted `execute` described parameterless calls.
+  Azure answered with no result sets and Rust refused the statement; Rust now
+  skips the description, as Python does.
+- **Part B (B-1 to B-11):** done, controlled and live. The owner approved B-7:
+  Kerberos refusals keep GSSAPI status numbers (`ErrorKind::GssapiRefused`).
+  Differences from Python are recorded in the
+  [checkpoint](docs/design/experiments/rust-azure-code-complete.md).
+- **Harness races:** four more fake servers waited for EOF only after a
+  repeated-run hunt caught them.
+- **Next:** the owner decides on teardown (`terraform destroy`, then the checks in
+  `infra/azure/README.md`). Rust remains unpublished.
+
+## Preceding — Rust Azure code-complete checkpoint, 2026-10-20
+
+The owner asked for real-Azure testing of this branch. A free local check came
+first: tests were green, but the plan's code-complete bar was not met. The owner
+chose **Option A**. The [checkpoint](docs/design/experiments/rust-azure-code-complete.md)
+now records cross-feature tests (`azure_cross.rs`, Docker `keyvault_live.rs`),
+the [credential inventory](docs/design/experiments/rust-azure-credential-inventory.md),
+scenario-to-test traceability, and four fixed test-harness races. The macOS
+`check_rust.py --live` run had been broken since `6270814` and is fixed too.
+Exceptions B-1 to B-11 are the **next work after the live campaign and its fixes**.
+
+Campaign decisions (owner, 2026-10-20):
+- **Where:** subscription SW-Dev, one new dedicated resource group created and
+  deleted whole.
+- **Limits:** USD 25 cap; delete within 24 hours of `terraform apply`.
+- **Entra sources:** Azure CLI, service principal (the owner holds Application
+  Administrator) and managed identity.
+- **Microsoft tie-breaker:** .NET SqlClient in Docker; no local install.
+
+The previous `rg-tds-driver-tests` run lived 55 minutes on 2026-10-17 and cost
+USD 0.58. Next: build the Rust live harness, update `infra/azure` (resource group
+variable, runner Rust toolchain, Windows build, service principal, managed
+identity, budget and timed deletion), then provision with the owner's approval.
+
+## Rust Azure integration development, 2026-10-19
+
+PR #1 merged the Rust client and GCP campaign work into `main` at `f45aa43`.
+The old `rust-client` branch was deleted locally and remotely. New branch
+`rust-azure-integration` starts at that merge. The owner requested a development
+plan guided by Python, with cloud test infrastructure set up after code completion.
+The owner clarified that the goal is the full Python Azure integration surface:
+Entra/Azure SQL, Key Vault, Python's explicit no-attestation enclave mode,
+certificate-store and ticket-cache paths used in the Azure campaign, plus existing
+Windows/Browser regressions. The [plan](docs/design/experiments/rust-azure-integration-plan.md)
+uses [paired Python/Rust scenarios](docs/design/experiments/rust-azure-parity-scenarios.md)
+as the primary development evidence; actual Azure testing is deferred until full
+code completion. Key Vault and enclave work are required, not follow-ons. Public
+API/token-provider and audience/authority boundaries have now been approved for
+authentication; its first development slice is implemented. Key-provider and
+enclave-session boundaries have also been approved and implemented. No Azure resource provisioning has started. Earlier branch/running-lab
+descriptions below are historical. Rust remains unpublished.
+
+The owner additionally directed that Python weaknesses suspected during this
+phase go to the [review backlog](docs/design/experiments/python-azure-review-backlog.md).
+Python's real-service-tested behavior is the baseline. Do not change Python
+production behavior or assume a proposed Rust correction is correct from static
+inspection/local comparisons; retain hypotheses and the real-service tests needed
+to decide them. This phase-specific direction supersedes the earlier general
+instruction to apply shared corrections immediately to both clients.
+
+## Rust Azure authentication development checkpoint — 2026-10-19
+
+The owner approved the [authentication contract](docs/design/experiments/rust-azure-authentication-contract.md).
+`ConnectOptions`/`ConnectionConfig` use `Authentication::{Sql, Windows, Entra}`;
+existing constructors remain, but public credential field access has migrated.
+Runtime token providers stay in services, while source/identity labels compare
+as configuration. Both upfront and deferred Entra paths, PRELOGIN echo/nonce,
+FEDAUTHINFO, routing/recovery, redaction and replay missing-evidence handling are
+implemented with controlled tests. Optional `azure-identity` pins official
+Identity/Core 1.0.0; the CLI adds two Entra modes using an owned Azure CLI executor.
+No real credential acquisition/Azure interoperability is claimed.
+
+The [authentication evidence](docs/design/experiments/rust-azure-authentication-evidence.md)
+records the passing development matrix, final affected reruns, source hashes and
+remaining limits. Use `python3 tools/check_rust_azure.py` for the current finite paired slice and
+`python3 tools/check_rust.py` for regressions. The owner subsequently approved the
+[key-provider/enclave contract](docs/design/experiments/rust-azure-key-provider-contract.md).
+The common async key service, optional official Key Vault adapter, Windows CNG
+companion and transparent version-two explicit-none enclave path are implemented
+with [paired development evidence](docs/design/experiments/rust-azure-key-enclave-evidence.md); native/Azure runtime acceptance remains separate.
+The final all-feature check passed 289 tests, with 62 environment-dependent cases
+ignored. Strict lint/docs and the Windows companion cross-check passed.
+The owner approved the [ticket-cache provider](docs/design/experiments/rust-azure-ticket-cache-contract.md):
+optional `system-gssapi` now implements system-cache Kerberos/Negotiate on
+Linux/macOS behind the existing security-context abstraction. It uses a separate
+native companion, explicit principal/service identity, pre-token mechanism
+restriction, typed safe evidence and counted cancellation cleanup. CLI and
+`login_probe` support the new selection. Actual Azure ticket login remains a
+later gate. Its [development check report](docs/design/experiments/rust-azure-ticket-cache-checks.json)
+retains the source-hashed paired comparisons; the newer all-feature workspace
+regression passes 299 tests, 62 ignored, with strict lint/docs. The
+[unsupported-feature policy](docs/design/experiments/rust-azure-feature-probe-contract.md)
+is also now owner-approved and implemented: warn on an explicit unsupported
+request, permit absent/disabled ACK, but fail/close on enabled ACK before SQL
+or pool admission, with no flag-removal retry. Python correction is backlogged
+as PY-AZ-06. Actual Azure acceptance and broader cross-feature work remain;
+full-scope completion is not claimed.
+The [latest feature-policy report](docs/design/experiments/rust-azure-feature-policy-checks.json)
+retains 15 passing paired checks against 179 stable source files and the final
+workspace regression (304 passed, 62 ignored), plus strict lint/docs and core
+compilation. Earlier source-hash reports describe earlier checkpoints.
+Python production behavior and the unrelated enclave-completion backlog remain
+unchanged. This branch records the Azure development checkpoint; consult Git
+history/status for subsequent work. Rust remains unpublished.
+
 ## GCP lab closed — 2026-10-19 04:29 UTC
 
 The owner authorized teardown after reviewing the campaign. Terraform destroyed

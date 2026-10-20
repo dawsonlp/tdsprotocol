@@ -38,14 +38,22 @@ options.server_name = Some("tdssql.tds.test".into());
 ```
 
 The TCP destination, verified TLS name and SQL SPN are separate identities.
-Portable Kerberos currently requires an explicit TCP KDC URL; ticket-cache,
-keytab and HTTP KDC-proxy APIs are not implemented. Native Windows uses
+Portable Kerberos currently requires an explicit TCP KDC URL. Enable
+`--features system-gssapi` on Linux/macOS for `WindowsAuth::system_cache` using
+Kerberos or Negotiate and the system credential cache. The application arranges
+`kinit`/renewal; the driver neither reads cache formats nor changes environment.
+Optional `Credentials::SystemCache { principal: Some(..) }` selects a named
+identity; `None` leaves identity selection to the system. Linux needs
+`libgssapi_krb5` and linker files (`libkrb5-dev` on Debian); macOS links its GSS
+framework. Other platforms report unsupported. A system provider does not accept
+an explicit password or `kdc_url`. Keytab and HTTP KDC-proxy configuration remain
+system policy; the driver has no dedicated APIs for them. Native Windows uses
 `WindowsAuth::signed_in(Method::Negotiate)` with process credentials; impersonated
 thread identity is not an automatic pool configuration key. Retire the pool if
 an external identity changes. Fixed-SPN routing is refused until the application
 supplies the target's configuration. Every recovery creates a fresh context.
 
-One opening deadline covers KDC/token operations. Native Windows calls can outlive
+One opening deadline covers KDC/token operations. Native Windows/GSSAPI calls can outlive
 caller cancellation; a counted worker/reaper owns their eventual handle cleanup
 and cannot install a late session. Opaque tokens and our owned password/buffer
 copies are zeroized. **Portable NTLM has an accepted, documented dependency erasure
@@ -54,14 +62,15 @@ The [sspi zeroization report](../../docs/design/experiments/upstream-sspi-ntlm-z
 is an unsubmitted draft; there is no verified upstream ticket to link for that finding.
 
 CLI equivalents: `--auth ntlm|kerberos|negotiate`, `--native-windows`, `--spn`,
-`--kdc-url` and `--allow-ntlm-fallback`. Passwords remain environment inputs, never
+`--kdc-url` and `--allow-ntlm-fallback`. System-cache login adds `--system-gssapi`
+and optional `--principal NAME` (build with `system-gssapi`). Passwords remain environment inputs, never
 arguments. `login_probe` reads protected JSON on stdin and prints session evidence.
 The [GCP evidence checkpoint](../../docs/design/experiments/rust-gcp-authentication-evidence.md)
 records 64 successful real Windows SQL Server login/transport combinations across
 macOS, Linux and Windows. **Required Extended Protection is unsupported**: SQL
 needs `tls-unique`, which the pinned rustls API does not expose. The owner chose documentation and potential upstream reports rather than
 dependency forks/patch sets or TLS backend changes. NTLM's erasure limitation
-remains; wider acceptance remains open. Entra remains deferred. The
+remains; wider acceptance remains open. The
 [follow-up report](../../docs/design/experiments/gcp-authentication-follow-up-evidence.md)
 records later regression/cancellation evidence and verified lab/project teardown.
 Upstream reference: [rustls #995 — tls-unique channel binding](https://github.com/rustls/rustls/issues/995),
@@ -70,7 +79,90 @@ constraints; no implementation is committed. Our
 [SQL Server follow-up draft](../../docs/design/experiments/upstream-rustls-channel-binding.md)
 is unsubmitted.
 
+## Unsupported Azure feature requests
+
+Azure diagnostic switches are all off by default. Set `azure_feature_probes` on
+`ConnectOptions`/`ConnectionConfig` to request Azure SQL failover-partner support,
+DNS caching, enhanced routing or global transactions for testing. Each explicit
+request produces a typed warning (`azure_feature_probes.warnings()` before
+opening, `Session::feature_warnings` after successful login, and observation
+events). These features are unimplemented: an enabled server ACK returns
+`ErrorKind::UnsupportedFeatureEnabled` and closes the opening before SQL or pool
+admission. Missing/disabled ACKs may complete login. No automatic downgrade or
+flag-removal retry is made. CLI equivalents are `--azure-sql-support`,
+`--azure-dns-caching`, `--enhanced-routing`, `--global-transactions`; warnings
+remain visible with `--observe off`. See the
+[approved policy](../../docs/design/experiments/rust-azure-feature-probe-contract.md).
+
+## Entra authentication in development
+
+`ConnectOptions` and `ConnectionConfig` now select exactly one
+`Authentication::{Sql, Windows, Entra}`. The existing SQL `new` and Windows
+`integrated` constructors remain. Callers that edited `user`, `password` or
+`windows_auth` fields must edit the selected authentication value instead;
+`authentication.sql_credentials_mut()` supplies explicit SQL credential access.
+Direct SQL password change remains a separately validated SQL-only option.
+
+An Entra selection names a credential source and a comparable identity label.
+The application must change the label when its principal, tenant, authority or
+binding changes; the driver cannot infer identity from an opaque token.
+`entra::TokenProvider` returns an owned `AccessToken` asynchronously. Bind runtime
+providers in `ConnectOptions::token_providers` or
+`ConnectionServices::token_providers`; configuration snapshots retain no provider
+object or token. `ConnectOptions::entra` binds a direct provider conveniently.
+
+Both upfront-token and deferred FEDAUTHINFO paths have controlled-peer coverage
+under 7.4/8.0 and plain/MARS. Routing and recovery request the source again under
+their opening deadline. A provider may return a cached token; no application SQL
+is replayed. Driver-owned strings/encoded tokens erase on release and ordinary
+output omits them. The token limit is 48 KiB of UTF-16LE data. Provider-declared
+expired tokens are refused; absent expiry stays unknown and JWTs are not parsed.
+Wire parity includes empty tokens; the wire encoder alone does not authenticate
+one. FEDAUTHINFO metadata is bounded at 64 KiB and continuations at eight rounds.
+
+The optional `azure-identity` feature supplies
+`entra::azure::AzureTokenProvider` over an official `TokenCredential`, including
+application-selected service-principal, managed/workload identity or other
+credential implementations. Authority/tenant stay with that credential; server
+STS text does not select them. The adapter matches Python's resource-to-scope
+conversion. SDK caches/temporary copies and externally supplied credential
+workers are outside the driver's erasure/cleanup guarantee. Its `azure_cli`
+constructor supplies a child-process owner with kill-on-drop requested; Tokio
+manages eventual reaping, without an immediate OS termination guarantee.
+
+The CLI supports `--auth entra-upfront` and `--auth entra-deferred` using this
+Azure CLI credential, without reading the SQL password or accepting bearer-token
+arguments. Supply the target/database and verified CA explicitly. The application
+API supports other credential choices. These are development capabilities;
+actual Azure, SDK credential-environment and native-provider acceptance remains
+pending. Run `python3 tools/check_rust_azure.py` from the repository root for the
+finite paired comparison, including source hashes and logs.
+
 ## Optional encryption key service
+
+`--features azure-keyvault` adds `encryption::keyvault::AzureKeyVaultKeyStore`
+over the official Keys 1.0.1 client and an explicitly supplied SDK credential.
+`--features certificate-store` adds `encryption::certstore::WindowsCertificateStore`;
+private operations require Windows and use non-exportable CNG handles. Both
+implement the async `KeyProvider`/opaque `MasterKey` boundary alongside local RSA.
+`encrypted_with_providers(Vec<Arc<dyn KeyProvider>>, policies, provider_timeout)`
+uses one finite operation budget, including queueing and SDK retries. The legacy
+local constructor uses 30 seconds. Cancellation revokes authority; an already
+running native/local call owns eventual cleanup, and `close().await` waits for it.
+Standalone provider calls take a `KeyOperation`; drain it after canceling work.
+The [compiled service-principal example](examples/azure_encrypted.rs) connects
+with an explicit CA, binds Key Vault and optionally enables explicit-none
+enclaves. It requires application-supplied configuration and existing SQL schema.
+
+Set `options.enclave_attestation = Some(EnclaveAttestation::None)` to request
+version two. This explicitly trusts the server's enclave; no attestation is
+verified. The facade uses P-384 exchange, signed master-key authorization and
+statement-bound packages. One session/counter belongs to this facade's physical
+epoch/lease. Database/collation changes, reset, pool return, recovery, explicit
+invalidation and close retire it. Only this mode retains raw column roots, under
+the chosen column policy, for authorized packages. Ordinary encryption retains
+derived handles. Other attestation modes are not provided.
+
 
 `--features encryption` enables a local PKCS#8 RSA provider, authenticated byte
 encryption/decryption and the D-66 key policies. Transaction scope is the default;
@@ -101,7 +193,9 @@ encrypted.close().await;
 
 `execute` accepts explicit SQL, declarations and named scalar `Param`s; use SQL
 `EXEC` for stored procedures. It discovers parameters on each call and sends
-application SQL once. `exchange` decrypts results for other prepared requests;
+application SQL once. When an enclave is needed, Python's exact stale-refusal
+exceptions (206, 33514, 33195 as the first record) permit one re-description and
+one retry; a second refusal is returned. `exchange` decrypts results for other prepared requests;
 `bulk` encrypts owned rows using server column metadata. Encrypted cells are read
 whole before releasing authenticated plaintext, up to 16 MiB per value. Encrypted
 source producers and borrowed plaintext chunk readers are not provided. Large

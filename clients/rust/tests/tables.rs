@@ -16,6 +16,7 @@ fn input_only_table_requests_match_pythons_null_defaults_hints_and_value_layouts
         serde_json::from_str(include_str!("fixtures/tables/python.json")).unwrap();
     let context = tds_client::requests::Context {
         column_encryption: false,
+        enclaves: false,
         transaction: 17,
         outstanding: 2,
     };

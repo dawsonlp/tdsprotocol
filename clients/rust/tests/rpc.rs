@@ -28,6 +28,7 @@ fn hex(bytes: &[u8]) -> String {
 fn rpc_bodies_match_python_names_numbers_flags_default_null_and_batch_separator() {
     let context = Context {
         column_encryption: false,
+        enclaves: false,
         transaction: 17,
         outstanding: 2,
     };
@@ -117,6 +118,7 @@ fn invalid_declarations_values_and_rounding_are_refused_without_exposing_values(
         Calls(vec![])
             .encode_request(&Context {
                 column_encryption: false,
+                enclaves: false,
                 transaction: 0,
                 outstanding: 1
             })
@@ -128,6 +130,7 @@ fn invalid_declarations_values_and_rounding_are_refused_without_exposing_values(
         missing
             .encode_request(&Context {
                 column_encryption: false,
+                enclaves: false,
                 transaction: 0,
                 outstanding: 1
             })

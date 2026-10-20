@@ -81,6 +81,7 @@ fn encrypted_rpc_is_explicit_negotiated_and_replays_as_ciphertext() {
         transaction: 0,
         outstanding: 1,
         column_encryption: false,
+        enclaves: false,
     };
     assert!(call.encode_request(&context).is_err());
     context.column_encryption = true;

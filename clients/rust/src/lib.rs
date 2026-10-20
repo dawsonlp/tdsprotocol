@@ -10,13 +10,16 @@
 extern crate self as tds_client;
 
 pub mod auth;
+pub mod azure_features;
 pub mod browser;
 pub mod capture;
 pub mod config;
 pub mod connection;
 #[cfg(feature = "encryption")]
 pub mod encryption;
+pub mod entra;
 pub mod error;
+pub mod fedauth;
 pub mod inspection;
 pub mod large;
 pub mod login7;
@@ -37,9 +40,10 @@ pub mod types;
 pub mod values;
 pub mod wire;
 
+pub use auth::{Authentication, SqlCredentials};
 pub use config::{
     ConfigError, ConfigPhase, ConfigRead, ConfigResult, ConfigService, ConnectionConfig,
-    StaticConfig,
+    EnclaveAttestation, StaticConfig,
 };
 #[cfg(feature = "tokio")]
 pub use config::{ConnectionServices, PoolPolicy};

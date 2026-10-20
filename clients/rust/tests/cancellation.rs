@@ -189,6 +189,7 @@ async fn successful_cleanup_returns_the_original_failure_without_replacing_it() 
         peer.reply(&done(0x20)).await;
         assert_eq!(peer.message().await.0, packet::BATCH);
         peer.reply(&done(0)).await;
+        peer.expect_eof().await; // Stay connected until the client closes.
     });
     let connection = Connection::connect(config).await.unwrap();
     let mut channel = connection.serial_channel().await.unwrap();

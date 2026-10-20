@@ -226,8 +226,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     options.mars = config["mars"].as_bool().unwrap_or(false);
     if text("method") == "sql" {
-        options.user = text("username");
-        options.password = password.to_string();
+        options.authentication.sql_credentials_mut().unwrap().user = text("username");
+        options
+            .authentication
+            .sql_credentials_mut()
+            .unwrap()
+            .password = password.to_string().into();
     } else {
         let method = match text("method").as_str() {
             "ntlm" => Method::Ntlm,
@@ -235,10 +239,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "negotiate" => Method::Negotiate,
             _ => return Err("unknown method".into()),
         };
-        let mut auth = if text("provider") == "native" {
-            WindowsAuth::signed_in(method)
-        } else {
-            WindowsAuth::explicit(method, text("username"), password.to_string())
+        let mut auth = match text("provider").as_str() {
+            "native" => WindowsAuth::signed_in(method),
+            "system-gssapi" => {
+                if !cfg!(feature = "system-gssapi") {
+                    return Err("system-gssapi feature is required".into());
+                }
+                if !password.is_empty() {
+                    return Err("system cache login does not accept a password".into());
+                }
+                let mut auth = WindowsAuth::system_cache(method);
+                auth.credentials = tds_client::auth::Credentials::SystemCache {
+                    principal: (!text("principal").is_empty()).then(|| text("principal")),
+                };
+                auth
+            }
+            "portable" | "" => {
+                WindowsAuth::explicit(method, text("username"), password.to_string())
+            }
+            _ => return Err("unknown authentication provider".into()),
         };
         if !text("spn").is_empty() {
             auth.service_principal = Some(text("spn"));
@@ -247,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             auth.kdc_url = Some(text("kdc_url"));
         }
         auth.allow_ntlm_fallback = config["allow_ntlm_fallback"].as_bool().unwrap_or(false);
-        options.windows_auth = Some(auth);
+        options.authentication = tds_client::Authentication::Windows(auth);
     }
     if config["cancel_on_native_worker"].as_bool().unwrap_or(false) {
         #[cfg(windows)]

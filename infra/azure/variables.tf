@@ -29,3 +29,26 @@ variable "domain" {
   type        = string
   default     = "tds.test"
 }
+
+variable "resource_group_name" {
+  description = "The campaign's one resource group: everything is created in it and deleted with it."
+  type        = string
+  default     = "rg-tds-rust-azure"
+}
+
+variable "lifetime_hours" {
+  description = "Hours after creation when the resource group deletes itself, even if terraform destroy never runs."
+  type        = number
+  default     = 24
+}
+
+variable "budget_amount" {
+  description = "The campaign's cost cap in the subscription's currency (USD). Azure budgets alert; the timed deletion stops spending."
+  type        = number
+  default     = 25
+}
+
+variable "alert_email" {
+  description = "Where budget alerts go."
+  type        = string
+}

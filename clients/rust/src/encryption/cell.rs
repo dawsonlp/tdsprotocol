@@ -10,6 +10,9 @@ use zeroize::Zeroizing;
 pub(super) const MAX_VALUE: usize = 16 * 1024 * 1024;
 
 pub(super) struct Cell {
+    // Only the explicit enclave facade retains the normalized root, under the
+    // same column policy. Ordinary local encryption retains derived handles.
+    pub(super) root: Option<Plaintext>,
     encryptor: PaddedBlockEncryptingKey,
     // Decrypt without library padding removal, then validate it ourselves.
     decryptor: DecryptingKey,
@@ -41,6 +44,7 @@ impl Cell {
             .map_err(|_| Error::InvalidMetadata)?;
         }
         let result = Box::new(Self {
+            root: None,
             encryptor: PaddedBlockEncryptingKey::cbc_pkcs7(
                 UnboundCipherKey::new(&AES_256, &working.bytes[..32])
                     .map_err(|_| Error::InvalidMetadata)?,

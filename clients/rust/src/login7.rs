@@ -8,6 +8,9 @@ pub const TDS_7_4: u32 = 0x74000004;
 
 /// No Debug implementation: this value holds authentication material.
 pub struct Login {
+    pub azure_feature_probes: crate::azure_features::AzureFeatureProbes,
+    pub federated: Option<crate::entra::EntraMode>,
+    pub federated_data: Option<zeroize::Zeroizing<Vec<u8>>>,
     pub integrated_security: bool,
     pub sspi: crate::auth::Token,
     pub user: String,
@@ -33,12 +36,17 @@ pub struct Login {
     pub utf8_support: bool,
     /// Request Always Encrypted version one (without enclaves).
     pub column_encryption: bool,
+    /// Request version two with the explicit no-attestation trust mode.
+    pub enclave_attestation: Option<crate::config::EnclaveAttestation>,
     pub recovery_data: Option<Vec<u8>>,
 }
 
 impl Default for Login {
     fn default() -> Self {
         Self {
+            azure_feature_probes: Default::default(),
+            federated: None,
+            federated_data: None,
             integrated_security: false,
             sspi: Default::default(),
             user: String::new(),
@@ -58,6 +66,7 @@ impl Default for Login {
             data_classification: 0,
             utf8_support: false,
             column_encryption: false,
+            enclave_attestation: None,
             recovery_data: None,
         }
     }
@@ -71,6 +80,18 @@ impl Login {
             )));
         }
         let mut features = std::collections::BTreeMap::new();
+        for warning in self.azure_feature_probes.warnings() {
+            features.insert(warning.feature.id(), warning.feature.request());
+        }
+        if let Some(mode) = &self.federated {
+            let data = match mode {
+                crate::entra::EntraMode::Upfront { .. } => vec![],
+                crate::entra::EntraMode::Deferred { workflow } => {
+                    crate::fedauth::deferred_feature(*workflow, false).to_vec()
+                }
+            };
+            features.insert(2, data);
+        }
         if self.session_recovery {
             features.insert(1, self.recovery_data.clone().unwrap_or_default());
         } else if self.recovery_data.is_some() {
@@ -78,8 +99,15 @@ impl Login {
                 "recovery data without its login feature",
             )));
         }
-        if self.column_encryption {
-            features.insert(4, vec![1]);
+        if self.column_encryption || self.enclave_attestation.is_some() {
+            features.insert(
+                4,
+                vec![if self.enclave_attestation.is_some() {
+                    2
+                } else {
+                    1
+                }],
+            );
         }
         if self.data_classification != 0 {
             features.insert(9, vec![self.data_classification]);
@@ -96,6 +124,17 @@ impl Login {
         Ok(features)
     }
     pub fn encode(&self) -> Result<Vec<u8>> {
+        if self.federated.is_some()
+            && (self.integrated_security
+                || !self.user.is_empty()
+                || !self.password.is_empty()
+                || !self.new_password.is_empty()
+                || !self.sspi.is_empty())
+        {
+            return Err(Error::new(ErrorKind::Parameter(
+                "conflicting federated authentication",
+            )));
+        }
         if self.integrated_security
             && (!self.user.is_empty() || !self.password.is_empty() || !self.new_password.is_empty())
         {
@@ -180,11 +219,36 @@ impl Login {
             return Err(Error::new(ErrorKind::Limit("LOGIN7 total length")));
         }
         if !features.is_empty() {
+            // Reserve before copying the federated secret so a later feature
+            // cannot reallocate and leave an unguarded old token allocation.
+            let extra = features
+                .iter()
+                .try_fold(1_usize, |size, (id, data)| {
+                    let length = if *id == 2 {
+                        self.federated_data.as_ref().map_or(0, |d| d.len())
+                    } else {
+                        data.len()
+                    };
+                    size.checked_add(5).and_then(|n| n.checked_add(length))
+                })
+                .ok_or_else(|| Error::new(ErrorKind::Limit("LOGIN7 feature data")))?;
+            out.try_reserve_exact(extra)
+                .map_err(|_| Error::new(ErrorKind::Limit("LOGIN7 feature allocation")))?;
             out[27] |= 0x10;
             let pointer = usize::from(u16::from_le_bytes(out[56..58].try_into().unwrap()));
             let feature_offset = out.len() as u32;
             out[pointer..pointer + 4].copy_from_slice(&feature_offset.to_le_bytes());
             for (id, data) in features {
+                let data = if id == 2 {
+                    self.federated_data
+                        .as_deref()
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::State("missing federated feature data"))
+                        })?
+                        .as_slice()
+                } else {
+                    data.as_slice()
+                };
                 out.push(id);
                 out.extend(
                     u32::try_from(data.len())
@@ -200,6 +264,38 @@ impl Login {
         out[..4].copy_from_slice(&len.to_le_bytes());
         Ok(out)
     }
+}
+
+/// Locate only the feature ID; never decode authentication material for replay.
+pub(crate) fn has_federated_feature(body: &[u8]) -> bool {
+    let Some(field) = body.get(56..60) else {
+        return false;
+    };
+    if u16::from_le_bytes(field[2..4].try_into().unwrap()) != 4 {
+        return false;
+    }
+    let pointer = usize::from(u16::from_le_bytes(field[..2].try_into().unwrap()));
+    let Some(value) = body.get(pointer..pointer.saturating_add(4)) else {
+        return false;
+    };
+    let mut at = u32::from_le_bytes(value.try_into().unwrap()) as usize;
+    while let Some(header) = body.get(at..at.saturating_add(5)) {
+        if header[0] == 0xff {
+            return false;
+        }
+        let length = u32::from_le_bytes(header[1..].try_into().unwrap()) as usize;
+        let Some(end) = at.checked_add(5).and_then(|n| n.checked_add(length)) else {
+            return false;
+        };
+        if end > body.len() {
+            return false;
+        }
+        if header[0] == 2 {
+            return true;
+        }
+        at = end;
+    }
+    false
 }
 
 /// Offline identity evidence. Authentication payloads are never decoded here.

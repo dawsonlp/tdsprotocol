@@ -26,6 +26,7 @@ async fn busy_close_waits_for_ack_and_its_message_then_stale_controls_are_harmle
         peer.reply(&[]).await;
         assert_eq!(peer.message().await.0, packet::BATCH);
         peer.reply(&done(0)).await;
+        peer.expect_eof().await; // Stay connected until the client closes.
     });
     let connection = Connection::connect(config).await.unwrap();
     let mut old = connection.serial_channel().await.unwrap();

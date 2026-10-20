@@ -1,4 +1,4 @@
-//! Local-key Always Encrypted SQL and key lifetimes (D-66, design O).
+//! Always Encrypted SQL, opaque key providers and key lifetimes (D-66, design O).
 //!
 //! [`EncryptedConnection`] composes raw protocol authority with the optional key
 //! service. [`KeySession`] and [`KeyExchange`] remain available for explicitly
@@ -6,21 +6,29 @@
 //! pool/reset/recovery/close events rather than supplying boundaries manually.
 
 mod cell;
+#[cfg(feature = "certificate-store")]
+pub mod certstore;
 mod context;
+mod enclave;
 pub use context::{EncryptedChannel, EncryptedConnection, EncryptedResponse};
+#[cfg(feature = "azure-keyvault")]
+pub mod keyvault;
 mod local;
 pub mod normalize;
 mod policy;
+mod provider;
 mod secret;
 pub use local::LocalKeyStore;
 pub(crate) use policy::LifecycleLink;
 pub use policy::{KeyExchange, KeySession, Policies, Policy, Revocation, Statistics};
+pub use provider::{KeyFuture, KeyOperation, KeyProvider, MasterKey, master_key_metadata};
 pub use secret::Plaintext;
 use std::fmt;
 
 /// Errors contain categories, never provider error strings or secret buffers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
+    Provider(ProviderFailure),
     InvalidPolicy,
     InvalidValue,
     InvalidMetadata,
@@ -34,10 +42,13 @@ pub enum Error {
     AcquisitionExpired,
     Busy,
     Worker,
+    ProviderTimeout,
+    UnsupportedPlatform,
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::Provider(_) => "key provider operation failed",
             Self::InvalidValue => {
                 "value does not match SQL encryption normalization or declaration"
             }
@@ -53,11 +64,36 @@ impl fmt::Display for Error {
             Self::AcquisitionExpired => "key acquisition exceeded the configured maximum age",
             Self::Busy => "encryption owner is busy or already has an attached key service",
             Self::Worker => "encryption provider worker did not complete",
+            Self::ProviderTimeout => "key provider exceeded its acquisition deadline",
+            Self::UnsupportedPlatform => "key provider is unavailable on this platform",
         })
     }
 }
 impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Explicit protected diagnostics are separate from normal error formatting.
+#[derive(Clone)]
+pub struct ProviderFailure(std::sync::Arc<dyn std::error::Error + Send + Sync>);
+impl ProviderFailure {
+    pub fn new(cause: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(std::sync::Arc::new(cause))
+    }
+    pub fn protected_cause(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        self.0.as_ref()
+    }
+}
+impl PartialEq for ProviderFailure {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for ProviderFailure {}
+impl fmt::Debug for ProviderFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ProviderFailure([protected cause])")
+    }
+}
 
 pub use crate::types::crypto::{ColumnKey, WrappedKey};
 impl ColumnKey {

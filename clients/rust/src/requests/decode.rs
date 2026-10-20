@@ -21,6 +21,7 @@ pub struct Call {
     /// Built-in numbers are kept even if this client cannot call them.
     pub procedure: Procedure,
     pub options: u16,
+    pub enclave_package: Vec<u8>,
     pub parameters: Vec<Parameter>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub enum Procedure {
 pub enum Request {
     Batch {
         headers: Vec<Header>,
+        enclave_package: Vec<u8>,
         sql: SqlText,
     },
     Rpc {
@@ -92,7 +94,17 @@ fn headers(r: &mut Reader<'_>) -> Result<Vec<Header>> {
 pub fn request(kind: u8, bytes: &[u8]) -> Result<Request> {
     request_reader(kind, &mut Reader::new(bytes))
 }
+pub fn request_with_enclaves(kind: u8, bytes: &[u8], enclaves: bool) -> Result<Request> {
+    request_reader_with_enclaves(kind, &mut Reader::new(bytes), enclaves)
+}
 pub(crate) fn request_reader(kind: u8, r: &mut Reader<'_>) -> Result<Request> {
+    request_reader_with_enclaves(kind, r, false)
+}
+pub(crate) fn request_reader_with_enclaves(
+    kind: u8,
+    r: &mut Reader<'_>,
+    enclaves: bool,
+) -> Result<Request> {
     if ![
         crate::packet::BATCH,
         crate::packet::RPC,
@@ -110,19 +122,21 @@ pub(crate) fn request_reader(kind: u8, r: &mut Reader<'_>) -> Result<Request> {
     let headers = headers(r)?;
     let result = match kind {
         crate::packet::BATCH => {
+            let enclave_package = package(r, enclaves)?;
             if !r.remaining().is_multiple_of(2) {
                 return Err(Error::malformed(r.offset, "odd SQL text"));
             }
             let n = r.remaining() / 2;
             Request::Batch {
                 headers,
+                enclave_package,
                 sql: r.text("sql", |r| text(r, n))?,
             }
         }
         crate::packet::RPC => {
             let mut calls = vec![];
             loop {
-                calls.push(r.indexed("call", calls.len(), call)?);
+                calls.push(r.indexed("call", calls.len(), |r| call(r, enclaves))?);
                 if r.remaining() == 0 {
                     break;
                 }
@@ -141,7 +155,16 @@ pub(crate) fn request_reader(kind: u8, r: &mut Reader<'_>) -> Result<Request> {
     r.end()?;
     Ok(result)
 }
-fn call(r: &mut Reader<'_>) -> Result<Call> {
+fn package(r: &mut Reader<'_>, enclaves: bool) -> Result<Vec<u8>> {
+    if !enclaves {
+        return Ok(Vec::new());
+    }
+    r.field("enclave package", |r| {
+        let length = usize::from(r.u16()?);
+        Ok(r.take(length)?.to_vec())
+    })
+}
+fn call(r: &mut Reader<'_>, enclaves: bool) -> Result<Call> {
     let n = r.field("procedure name length", |r| r.u16())?;
     let procedure = if n == 0xffff {
         Procedure::Number(r.field("procedure number", |r| r.u16())?)
@@ -149,6 +172,7 @@ fn call(r: &mut Reader<'_>) -> Result<Call> {
         Procedure::Name(r.text("procedure name", |r| text(r, usize::from(n)))?)
     };
     let options = r.field("options", |r| r.u16())?;
+    let enclave_package = package(r, enclaves)?;
     let mut parameters = vec![];
     while r.peek().is_some_and(|b| b != 0xff && b != 0xfe) {
         parameters.push(r.indexed("parameter", parameters.len(), |r| {
@@ -216,6 +240,7 @@ fn call(r: &mut Reader<'_>) -> Result<Call> {
     Ok(Call {
         procedure,
         options,
+        enclave_package,
         parameters,
     })
 }

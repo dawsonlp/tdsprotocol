@@ -125,9 +125,7 @@ mod live_peer {
         }
     }
     fn windows(options: &mut tds_client::ConnectOptions) {
-        options.user.clear();
-        options.password.clear();
-        options.windows_auth = Some(WindowsAuth::explicit(
+        options.authentication = tds_client::Authentication::Windows(WindowsAuth::explicit(
             Method::Ntlm,
             "TDS\\fixture",
             "test-only-password",
@@ -184,6 +182,46 @@ mod live_peer {
                 .all(|e| !e.contains("test-only-password"))
         );
     }
+    /// Part B (B-8): SQL Server refuses a wrong Windows password with 18452
+    /// after the NTLM exchange (Python's live test expects the same number).
+    #[tokio::test]
+    async fn a_wrong_windows_password_is_refused_with_18452_before_any_sql() {
+        let (listener, mut options) = support::listener().await;
+        options.authentication = tds_client::Authentication::Windows(WindowsAuth::explicit(
+            Method::Ntlm,
+            "TDS\\fixture",
+            "not-the-password",
+        ));
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (mut peer, login) = support::Peer::await_login(socket, false).await;
+            let at = u16::from_le_bytes(login[78..80].try_into().unwrap()) as usize;
+            let len = u16::from_le_bytes(login[80..82].try_into().unwrap()) as usize;
+            let challenge = Server::new().step(login[at..at + len].to_vec());
+            let mut reply = vec![0xed];
+            reply.extend((challenge.len() as u16).to_le_bytes());
+            reply.extend(&challenge);
+            peer.reply(&reply).await;
+            assert_eq!(peer.message().await.0, packet::SSPI);
+            // The server's verdict on the response: login failed, untrusted domain.
+            let mut body = 18452_u32.to_le_bytes().to_vec();
+            body.extend([1, 14, 0, 0, 0, 0, 0, 0, 0, 0]);
+            let mut refusal = vec![0xaa];
+            refusal.extend((body.len() as u16).to_le_bytes());
+            refusal.extend(body);
+            refusal.extend(support::done(2));
+            peer.reply(&refusal).await;
+            peer.expect_eof().await;
+        });
+        let error = Connection::connect(options).await.err().expect("refused");
+        assert!(
+            matches!(&error.cause().kind, tds_client::ErrorKind::Server(m) if m.number == 18452),
+            "{error}"
+        );
+        assert_eq!(error.execution, tds_client::Execution::NotSent);
+        assert!(!format!("{error:?} {error}").contains("not-the-password"));
+        server.await.unwrap();
+    }
     #[tokio::test]
     async fn early_login_ack_without_provider_completion_fails_closed() {
         let (listener, mut options) = support::listener().await;
@@ -202,8 +240,7 @@ mod live_peer {
         use tokio::{io::AsyncReadExt, net::TcpListener};
         let kdc = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (listener, mut options) = support::listener().await;
-        options.user.clear();
-        options.password.clear();
+
         options.timeout = Duration::from_millis(600);
         let mut auth =
             WindowsAuth::explicit(Method::Kerberos, "fixture@tds.test", "test-only-password");
@@ -211,7 +248,7 @@ mod live_peer {
             "tcp://127.0.0.1:{}",
             kdc.local_addr().unwrap().port()
         ));
-        options.windows_auth = Some(auth);
+        options.authentication = tds_client::Authentication::Windows(auth);
         let kdc_peer = tokio::spawn(async move {
             let (mut socket, _) = kdc.accept().await.unwrap();
             let length = socket.read_u32().await.unwrap();

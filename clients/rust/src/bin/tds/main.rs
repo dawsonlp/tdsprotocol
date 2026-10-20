@@ -24,7 +24,10 @@ Connection:
   --database NAME       default tds_test
   --password-env NAME   default MSSQL_SA_PASSWORD; never a password argument
   --auth sql|ntlm|kerberos|negotiate   default sql; others need integrated-auth
+  --auth entra-upfront|entra-deferred   Azure CLI credential; needs azure-identity
   --native-windows      use signed-in Windows identity instead of a password
+  --system-gssapi       use the system Kerberos cache (system-gssapi feature)
+  --principal NAME      select a cached Kerberos identity with --system-gssapi
   --spn NAME            explicit SQL service principal
   --kdc-url tcp://HOST:88   portable Kerberos/Negotiate KDC
   --allow-ntlm-fallback  explicitly permit Negotiate to choose NTLM
@@ -33,6 +36,10 @@ Connection:
   --tds-version 7.4|8.0 default 7.4
   --mars               use MARS framing
   --timeout SECONDS     total opening budget, default 15
+  --azure-sql-support   diagnostic unsupported request: warn; enabled ACK fails
+  --azure-dns-caching   diagnostic unsupported request: warn; enabled ACK fails
+  --enhanced-routing    diagnostic unsupported request: warn; enabled ACK fails
+  --global-transactions diagnostic unsupported request: warn; enabled ACK fails
 
 Requests:
   --demo-transactions   run explicit begin/save/rollback/commit and show server state
@@ -67,8 +74,12 @@ Without --fetch, rows are read forward and printed one at a time.
 ";
 
 struct Args {
+    azure_feature_probes: tds_client::azure_features::AzureFeatureProbes,
     authentication: Option<Method>,
+    entra: Option<bool>,
     native_windows: bool,
+    system_gssapi: bool,
+    principal: Option<String>,
     spn: Option<String>,
     kdc_url: Option<String>,
     allow_ntlm_fallback: bool,
@@ -97,8 +108,12 @@ impl Args {
     fn read() -> Result<Option<Self>> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut args = Self {
+            azure_feature_probes: Default::default(),
             authentication: None,
+            entra: None,
             native_windows: false,
+            system_gssapi: false,
+            principal: None,
             spn: None,
             kdc_url: None,
             allow_ntlm_fallback: false,
@@ -136,8 +151,24 @@ impl Args {
                     args.mars = true;
                     continue;
                 }
+                "--azure-sql-support"
+                | "--azure-dns-caching"
+                | "--enhanced-routing"
+                | "--global-transactions" => {
+                    match option.as_str() {
+                        "--azure-sql-support" => args.azure_feature_probes.azure_sql_support = true,
+                        "--azure-dns-caching" => args.azure_feature_probes.dns_caching = true,
+                        "--enhanced-routing" => args.azure_feature_probes.enhanced_routing = true,
+                        _ => args.azure_feature_probes.global_transactions = true,
+                    }
+                    continue;
+                }
                 "--native-windows" => {
                     args.native_windows = true;
+                    continue;
+                }
+                "--system-gssapi" => {
+                    args.system_gssapi = true;
                     continue;
                 }
                 "--allow-ntlm-fallback" => {
@@ -171,8 +202,13 @@ impl Args {
                 "--database" => args.database = value,
                 "--password-env" => args.password_env = value,
                 "--auth" => {
+                    args.entra = match value.as_str() {
+                        "entra-upfront" => Some(false),
+                        "entra-deferred" => Some(true),
+                        _ => None,
+                    };
                     args.authentication = match value.as_str() {
-                        "sql" => None,
+                        "sql" | "entra-upfront" | "entra-deferred" => None,
                         "ntlm" => Some(Method::Ntlm),
                         "kerberos" => Some(Method::Kerberos),
                         "negotiate" => Some(Method::Negotiate),
@@ -180,6 +216,7 @@ impl Args {
                     }
                 }
                 "--spn" => args.spn = Some(value),
+                "--principal" => args.principal = Some(value),
                 "--kdc-url" => args.kdc_url = Some(value),
                 "--ca-file" => args.ca = value.into(),
                 "--server-name" => args.server_name = Some(value),
@@ -210,6 +247,9 @@ impl Args {
                 _ => return Err("unknown option; use --help".into()),
             }
         }
+        if args.entra.is_some() && !cfg!(feature = "azure-identity") {
+            return Err("Entra CLI login requires the azure-identity feature".into());
+        }
         if args.replay.is_some() && live_options {
             return Err(
                 "--replay accepts only --observe; omit live connection/request options".into(),
@@ -233,6 +273,8 @@ impl Args {
         }
         if args.authentication.is_none()
             && (args.native_windows
+                || args.system_gssapi
+                || args.principal.is_some()
                 || args.spn.is_some()
                 || args.kdc_url.is_some()
                 || args.allow_ntlm_fallback)
@@ -240,6 +282,18 @@ impl Args {
             return Err(
                 "Windows authentication options require --auth ntlm, kerberos or negotiate".into(),
             );
+        }
+        if args.system_gssapi
+            && (args.native_windows
+                || args.kdc_url.is_some()
+                || args.authentication == Some(Method::Ntlm))
+        {
+            return Err(
+                "--system-gssapi requires Kerberos/Negotiate and system KDC configuration".into(),
+            );
+        }
+        if args.principal.is_some() && !args.system_gssapi {
+            return Err("--principal requires --system-gssapi".into());
         }
         if !args.parameters.is_empty() && args.procedure.is_none() {
             return Err("parameters require --proc".into());
@@ -452,7 +506,7 @@ async fn run(args: Args) -> Result<()> {
     if let Some(path) = &args.replay {
         return replay::run(path, args.observe);
     }
-    let password = if args.native_windows {
+    let password = if args.native_windows || args.system_gssapi || args.entra.is_some() {
         String::new()
     } else {
         args.password()?
@@ -465,9 +519,42 @@ async fn run(args: Args) -> Result<()> {
     if roots.is_empty() {
         return Err("CA file contains no certificates".into());
     }
-    let mut options = if let Some(method) = args.authentication {
+    let mut options = if let Some(deferred) = args.entra {
+        #[cfg(not(feature = "azure-identity"))]
+        {
+            let _ = deferred;
+            return Err("Entra CLI login requires the azure-identity feature".into());
+        }
+        #[cfg(feature = "azure-identity")]
+        {
+            use tds_client::{
+                entra::{EntraLogin, azure::AzureTokenProvider},
+                fedauth::Workflow,
+            };
+            let login = if deferred {
+                EntraLogin::deferred(
+                    "azure-cli",
+                    "configured-cli-identity",
+                    Workflow::Interactive,
+                )
+            } else {
+                EntraLogin::upfront("azure-cli", "configured-cli-identity")
+            };
+            let provider = AzureTokenProvider::azure_cli(Default::default())?;
+            ConnectOptions::entra(args.host, args.port, login, Arc::new(provider), roots)
+        }
+    } else if let Some(method) = args.authentication {
         let mut auth = if args.native_windows {
             WindowsAuth::signed_in(method)
+        } else if args.system_gssapi {
+            if !cfg!(feature = "system-gssapi") {
+                return Err("system cache login requires the system-gssapi feature".into());
+            }
+            let mut auth = WindowsAuth::system_cache(method);
+            auth.credentials = tds_client::auth::Credentials::SystemCache {
+                principal: args.principal,
+            };
+            auth
         } else {
             WindowsAuth::explicit(method, args.user, password)
         };
@@ -483,6 +570,12 @@ async fn run(args: Args) -> Result<()> {
     options.version = args.version;
     options.mars = args.mars;
     options.timeout = args.timeout;
+    options.azure_feature_probes = args.azure_feature_probes;
+    if args.observe == Level::Off {
+        for warning in options.azure_feature_probes.warnings() {
+            eprintln!("warning: {warning}");
+        }
+    }
     if args.observe != Level::Off {
         options.observe = Some(Observer::new(args.observe, |event| {
             eprintln!("{:>8.3}s {}", event.elapsed.as_secs_f64(), event.text);

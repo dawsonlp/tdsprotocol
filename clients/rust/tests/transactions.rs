@@ -50,6 +50,7 @@ fn transaction_messages_match_python_exactly_and_refuse_unencodable_inputs() {
     for (i, case) in cases.as_array().unwrap().iter().enumerate() {
         let context = Context {
             column_encryption: false,
+            enclaves: false,
             transaction: case["transaction"].as_u64().unwrap(),
             outstanding: case["outstanding"].as_u64().unwrap() as u32,
         };
@@ -61,6 +62,7 @@ fn transaction_messages_match_python_exactly_and_refuse_unencodable_inputs() {
     }
     let context = Context {
         column_encryption: false,
+        enclaves: false,
         transaction: 0,
         outstanding: 1,
     };

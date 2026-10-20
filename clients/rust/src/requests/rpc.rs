@@ -206,6 +206,8 @@ pub struct Call {
     pub options: CallOptions,
     /// Saved columns in result-set order, required with NO_METADATA.
     pub columns: Vec<Vec<Column>>,
+    /// Encrypted package for the negotiated version-two session.
+    pub enclave_package: Vec<u8>,
 }
 impl Call {
     pub fn new(target: impl Into<Procedure>, params: Vec<Param>) -> Self {
@@ -214,9 +216,10 @@ impl Call {
             params,
             options: CallOptions::default(),
             columns: Vec::new(),
+            enclave_package: Vec::new(),
         }
     }
-    pub(super) fn encode_header(&self, output: &mut Vec<u8>) -> Result<()> {
+    pub(super) fn encode_header(&self, output: &mut Vec<u8>, enclaves: bool) -> Result<()> {
         match &self.target {
             Procedure::Name(name) => {
                 if name.0.is_empty() || name.0.len() >= 0xffff {
@@ -239,10 +242,20 @@ impl Call {
             | if self.options.no_metadata { 2 } else { 0 }
             | if self.options.reuse_metadata { 4 } else { 0 };
         output.extend(flags.to_le_bytes());
+        if enclaves {
+            let n = u16::try_from(self.enclave_package.len())
+                .map_err(|_| Error::new(ErrorKind::Limit("enclave package")))?;
+            output.extend(n.to_le_bytes());
+            output.extend(&self.enclave_package);
+        } else if !self.enclave_package.is_empty() {
+            return Err(Error::new(ErrorKind::Parameter(
+                "enclave package requires version two",
+            )));
+        }
         Ok(())
     }
-    fn encode(&self, output: &mut Vec<u8>) -> Result<()> {
-        self.encode_header(output)?;
+    fn encode(&self, output: &mut Vec<u8>, enclaves: bool) -> Result<()> {
+        self.encode_header(output, enclaves)?;
         for param in &self.params {
             param.encode(output)?;
         }
@@ -296,7 +309,7 @@ fn encode(calls: &[Call], context: &Context, bounded: bool) -> Result<Encoded> {
         if index != 0 {
             body.push(0xff);
         }
-        call.encode(&mut body)?;
+        call.encode(&mut body, context.enclaves)?;
         if bounded && body.len() > wire::MAX_PENDING {
             return Err(Error::new(ErrorKind::Limit("RPC message")));
         }

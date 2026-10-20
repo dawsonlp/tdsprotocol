@@ -5,3 +5,4 @@
 *.tfplan
 .terraform.lock.hcl
 secrets/
+azure.json

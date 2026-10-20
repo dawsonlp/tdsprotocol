@@ -84,6 +84,7 @@ struct Replay<F> {
     streams: BTreeMap<(Direction, Option<u64>), Stream>,
     utf8: bool,
     column_encryption: bool,
+    enclaves: bool,
     classification: u8,
     features: BTreeSet<u8>,
     context_known: bool,
@@ -352,7 +353,7 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                 if packet.last {
                     let body = std::mem::take(&mut stream.body);
                     if self.inspect
-                        && let Some(node) = crate::inspection::message_with_encryption(
+                        && let Some(node) = crate::inspection::message_with_enclaves(
                             if key.0 == Direction::Receive && self.hello_reply {
                                 packet::HELLO
                             } else {
@@ -360,6 +361,7 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                             },
                             &body,
                             self.column_encryption,
+                            self.enclaves,
                         )
                     {
                         self.item(Some(key), Content::Inspection(node))?;
@@ -509,7 +511,10 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
                                     stream.failed = true;
                                     self.context_known = false;
                                 }
-                                4 if data == &[1] => self.column_encryption = true,
+                                4 if matches!(data.first(), Some(1 | 2)) => {
+                                    self.column_encryption = true;
+                                    self.enclaves = data[0] == 2;
+                                }
                                 4 => {
                                     self.issue(
                                         Some(key),
@@ -589,7 +594,8 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             return Err(Error::new(ErrorKind::Unsupported("server packet type")));
         }
         if kind == packet::LOGIN {
-            self.integrated_login = body.get(25).is_some_and(|flags| flags & 0x80 != 0);
+            self.integrated_login = body.get(25).is_some_and(|flags| flags & 0x80 != 0)
+                || crate::login7::has_federated_feature(body);
             self.hello_reply = false;
             self.streams
                 .entry((Direction::Receive, key.1))
@@ -598,7 +604,7 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             return login(&crate::capture::without_password(kind, body))
                 .map(|v| Some(Message::Login(v)));
         }
-        if kind == packet::SSPI {
+        if matches!(kind, packet::SSPI | 0x08) {
             return Ok(Some(Message::Authentication { bytes: body.len() }));
         }
         self.integrated_login = false;
@@ -612,7 +618,7 @@ impl<F: FnMut(Item) -> io::Result<()>> Replay<F> {
             return decode::bulk_with_encryption(body, self.column_encryption)
                 .map(|v| Some(Message::RequestBulk(v)));
         }
-        decode::request(kind, body).map(|v| Some(Message::Request(v)))
+        decode::request_with_enclaves(kind, body, self.enclaves).map(|v| Some(Message::Request(v)))
     }
     fn finish(&mut self) -> io::Result<()> {
         if self.summary.packets == 0 && self.summary.issues == 0 {
@@ -681,6 +687,7 @@ pub fn replay_with_inspection(
         streams: BTreeMap::new(),
         utf8: false,
         column_encryption: false,
+        enclaves: false,
         classification: 0,
         features: BTreeSet::new(),
         context_known: true,

@@ -95,6 +95,7 @@ impl Done {
 /// The first slice exposes records in wire order; it does not infer operations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Record {
+    FedAuthInfo(crate::fedauth::Info),
     Sspi(crate::auth::Token),
     ReturnStatus(i32),
     OutputValue(OutputValue),
@@ -455,6 +456,7 @@ impl Decoder {
             let name = match self.pending.first().copied() {
                 Some(0xad) => "LOGINACK",
                 Some(0xed) => "SSPI",
+                Some(0xee) => "FEDAUTHINFO",
                 Some(0xaa) => "ERROR",
                 Some(0xab) => "INFO",
                 Some(0x81) => "COLMETADATA",
@@ -642,6 +644,14 @@ impl Decoder {
     fn decode(&self, r: &mut Reader<'_>) -> Result<Record> {
         let tag = r.field("token", |r| r.u8())?;
         match tag {
+            0xee => {
+                let length = r.u32()? as usize;
+                if length > 64 * 1024 {
+                    return Err(Error::new(ErrorKind::Limit("FEDAUTHINFO message")));
+                }
+                let bytes = r.take(length)?;
+                crate::fedauth::read_info(bytes).map(Record::FedAuthInfo)
+            }
             0xed => {
                 let length = usize::from(r.field("length", |r| r.u16())?);
                 if length > crate::auth::MAX_TOKEN {

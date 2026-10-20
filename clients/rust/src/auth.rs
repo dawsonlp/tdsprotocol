@@ -3,6 +3,9 @@
 use std::fmt;
 use zeroize::Zeroizing;
 
+mod selection;
+pub use selection::{Authentication, SqlCredentials};
+
 pub const MAX_TOKEN: usize = 48 * 1024;
 pub const MAX_ROUNDS: u8 = 8;
 
@@ -39,6 +42,8 @@ pub enum Method {
 pub enum Provider {
     Portable,
     NativeWindows,
+    /// System Kerberos/GSSAPI on Linux/macOS; requires `system-gssapi`.
+    SystemGssapi,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -48,6 +53,11 @@ pub enum Credentials {
         password: Zeroizing<String>,
     },
     SignedIn,
+    /// Select credentials through the system library, optionally for a named
+    /// Kerberos principal. Cache locations and ticket bytes are not settings.
+    SystemCache {
+        principal: Option<String>,
+    },
 }
 impl Credentials {
     pub fn explicit(username: impl Into<String>, password: impl Into<String>) -> Self {
@@ -62,6 +72,7 @@ impl fmt::Debug for Credentials {
         f.write_str(match self {
             Self::Explicit { .. } => "Explicit([redacted])",
             Self::SignedIn => "SignedIn",
+            Self::SystemCache { .. } => "SystemCache([redacted])",
         })
     }
 }
@@ -104,6 +115,21 @@ impl WindowsAuth {
             allow_ntlm_fallback: false,
         }
     }
+    /// Use the system's Kerberos credential cache. The application arranges
+    /// `kinit`/renewal before opening; this client never edits the environment.
+    /// Set `credentials` to `SystemCache { principal: Some(..) }` to select a
+    /// specific identity. Changing an implicit system identity requires retiring
+    /// existing sessions; a cache change cannot reauthenticate a live socket.
+    pub fn system_cache(method: Method) -> Self {
+        Self {
+            method,
+            provider: Provider::SystemGssapi,
+            credentials: Credentials::SystemCache { principal: None },
+            service_principal: None,
+            kdc_url: None,
+            allow_ntlm_fallback: false,
+        }
+    }
     pub(crate) fn compatible_with(&self, old: &Self) -> bool {
         let mut candidate = self.clone();
         if let (
@@ -119,13 +145,22 @@ impl WindowsAuth {
     }
 }
 
+#[cfg(feature = "system-gssapi")]
+mod gssapi;
 #[cfg(all(feature = "integrated-auth", windows))]
 mod native;
 #[cfg(feature = "integrated-auth")]
 mod portable;
+#[cfg(feature = "system-gssapi")]
+pub use gssapi::pending_workers as pending_gssapi_workers;
 #[cfg(all(feature = "integrated-auth", windows))]
 pub use native::pending_workers as pending_native_workers;
 #[cfg(feature = "integrated-auth")]
 pub(crate) use portable::Context;
 #[cfg(feature = "integrated-auth")]
 pub(crate) use portable::channel_binding;
+#[cfg(feature = "system-gssapi")]
+pub use tds_native_gssapi::{
+    Evidence as GssapiEvidence, Mechanism as GssapiMechanism, Status as GssapiStatus,
+    StatusKind as GssapiStatusKind,
+};

@@ -42,7 +42,8 @@ use crate::{
 /// Explicit trust roots and credentials. Debug never displays the password.
 #[derive(Clone)]
 pub struct ConnectOptions {
-    pub windows_auth: Option<crate::auth::WindowsAuth>,
+    pub authentication: crate::Authentication,
+    pub token_providers: crate::entra::TokenProviders,
     pub observe: Option<Observer>,
     /// New physical connection, new recording and distinct output. Never called
     /// merely because an existing transport is lent to its next borrower.
@@ -52,8 +53,6 @@ pub struct ConnectOptions {
     pub mars: bool,
     pub host: String,
     pub port: u16,
-    pub user: String,
-    pub password: String,
     /// One-time direct LOGIN7 operation. Pools reject it; later recovery uses
     /// the accepted new credential without repeating the change request.
     pub new_password: String,
@@ -83,8 +82,25 @@ pub struct ConnectOptions {
     pub utf8_support: bool,
     /// Request Always Encrypted version one (without enclaves).
     pub column_encryption: bool,
+    /// Request version two with the explicit no-attestation trust mode.
+    pub enclave_attestation: Option<crate::config::EnclaveAttestation>,
+    /// Diagnostic requests: warn on request, fail login if the server enables one.
+    pub azure_feature_probes: crate::azure_features::AzureFeatureProbes,
 }
 impl ConnectOptions {
+    pub fn entra(
+        host: impl Into<String>,
+        port: u16,
+        login: crate::entra::EntraLogin,
+        provider: Arc<dyn crate::entra::TokenProvider>,
+        roots: RootCertStore,
+    ) -> Self {
+        let mut options = Self::new(host, port, "", "", roots);
+        options.token_providers =
+            crate::entra::TokenProviders::new().with(login.source.clone(), provider);
+        options.authentication = crate::Authentication::Entra(login);
+        options
+    }
     pub fn integrated(
         host: impl Into<String>,
         port: u16,
@@ -92,7 +108,7 @@ impl ConnectOptions {
         roots: RootCertStore,
     ) -> Self {
         let mut options = Self::new(host, port, "", "", roots);
-        options.windows_auth = Some(authentication);
+        options.authentication = crate::Authentication::Windows(authentication);
         options
     }
     pub fn new(
@@ -104,14 +120,13 @@ impl ConnectOptions {
     ) -> Self {
         Self {
             observe: None,
-            windows_auth: None,
+            authentication: crate::Authentication::sql(user, password),
+            token_providers: Default::default(),
             capture_factory: None,
             version: ProtocolVersion::V7_4,
             mars: false,
             host: host.into(),
             port,
-            user: user.into(),
-            password: password.into(),
             new_password: String::new(),
             database: String::new(),
             server_name: None,
@@ -130,6 +145,8 @@ impl ConnectOptions {
             data_classification: 2,
             utf8_support: true,
             column_encryption: false,
+            enclave_attestation: None,
+            azure_feature_probes: Default::default(),
         }
     }
 }
@@ -449,8 +466,8 @@ impl Connection {
                     }
                     routed_from = Some(here);
                     if target
-                        .windows_auth
-                        .as_ref()
+                        .authentication
+                        .windows()
                         .is_some_and(|auth| auth.service_principal.is_some())
                     {
                         return Err(Error::new(ErrorKind::Unsupported("routed integrated login with a fixed SPN requires explicit target configuration"))
@@ -516,7 +533,6 @@ impl Connection {
             endpoint.clone(),
             ready,
             DriverSettings {
-                #[cfg(feature = "integrated-auth")]
                 login_deadline: deadline,
                 observer: options.observe.clone(),
                 capture,
@@ -665,6 +681,24 @@ impl Connection {
         policies: crate::encryption::Policies,
     ) -> crate::encryption::Result<crate::encryption::KeySession> {
         let keys = crate::encryption::KeySession::new(providers, policies)?;
+        self.attach_key_session(keys).await
+    }
+    #[cfg(feature = "encryption")]
+    pub async fn key_session_with_providers(
+        &self,
+        providers: Vec<Arc<dyn crate::encryption::KeyProvider>>,
+        policies: crate::encryption::Policies,
+        provider_timeout: Duration,
+    ) -> crate::encryption::Result<crate::encryption::KeySession> {
+        let keys =
+            crate::encryption::KeySession::with_providers(providers, policies, provider_timeout)?;
+        self.attach_key_session(keys).await
+    }
+    #[cfg(feature = "encryption")]
+    async fn attach_key_session(
+        &self,
+        keys: crate::encryption::KeySession,
+    ) -> crate::encryption::Result<crate::encryption::KeySession> {
         let (reply, receive) = oneshot::channel();
         self.endpoint
             .submit(Command::AttachKeys(keys.link(), reply))
@@ -892,7 +926,7 @@ impl SerialChannel {
         guard.disarm();
         result?;
         Ok(Response {
-            channel: self,
+            channel: Some(self),
             exchange,
             finished: false,
             control,
@@ -922,7 +956,7 @@ impl SerialChannel {
 /// decoder buffer. Dropping an unfinished response closes the connection.
 #[must_use = "Read through completion, finish, fetch, or explicitly close this response"]
 pub struct Response<'a> {
-    channel: &'a mut SerialChannel,
+    channel: Option<&'a mut SerialChannel>,
     exchange: u64,
     finished: bool,
     control: Arc<ExchangeControl>,
@@ -987,7 +1021,15 @@ impl Response<'_> {
         Ok(record)
     }
     async fn next_event_inner(&mut self) -> Result<Option<Record>> {
-        if !self.finished && self.channel.life.close_request().is_some() {
+        if !self.finished
+            && self
+                .channel
+                .as_ref()
+                .expect("response owns its channel")
+                .life
+                .close_request()
+                .is_some()
+        {
             return self.read_record().await;
         }
         if let Some(record) = self.control.retention().unread.pop_front() {
@@ -1085,7 +1127,14 @@ impl Response<'_> {
         if self.finished {
             return Ok(None);
         }
-        if self.channel.life.close_request().is_some() {
+        if self
+            .channel
+            .as_ref()
+            .expect("response owns its channel")
+            .life
+            .close_request()
+            .is_some()
+        {
             let original =
                 Error::new(ErrorKind::Closed).at(Step::Cleanup, Execution::PossiblyExecuted);
             return match self.cleanup_result().await {
@@ -1100,7 +1149,11 @@ impl Response<'_> {
                 Err(error) => Err(Error::cleanup(Error::canceled(), error)),
             };
         }
-        let endpoint = &self.channel.endpoint;
+        let endpoint = &self
+            .channel
+            .as_ref()
+            .expect("response owns its channel")
+            .endpoint;
         if self.control.epoch != endpoint.epoch() {
             return self.cleanup_result().await.map(|_| None);
         }
@@ -1115,7 +1168,12 @@ impl Response<'_> {
         let mut guard = Abandon::for_epoch(endpoint.clone(), self.control.epoch);
         let (reply, receive) = oneshot::channel();
         permit.send(Command::Next {
-            channel: self.channel.life.id,
+            channel: self
+                .channel
+                .as_ref()
+                .expect("response owns its channel")
+                .life
+                .id,
             exchange: self.exchange,
             epoch: self.control.epoch,
             reply,
@@ -1149,10 +1207,21 @@ impl Response<'_> {
             .completion
             .take()
             .ok_or_else(|| Error::new(ErrorKind::State("exchange completion already consumed")))?;
-        let mut guard = Abandon::for_epoch(self.channel.endpoint.clone(), self.control.epoch);
-        let completion = receive
-            .await
-            .map_err(|_| self.channel.endpoint.closed_error())??;
+        let mut guard = Abandon::for_epoch(
+            self.channel
+                .as_ref()
+                .expect("response owns its channel")
+                .endpoint
+                .clone(),
+            self.control.epoch,
+        );
+        let completion = receive.await.map_err(|_| {
+            self.channel
+                .as_ref()
+                .expect("response owns its channel")
+                .endpoint
+                .closed_error()
+        })??;
         guard.disarm();
         self.finished = true;
         Ok(completion)
@@ -1184,10 +1253,33 @@ impl Response<'_> {
         }
     }
 }
+#[cfg(feature = "encryption")]
+impl<'a> Response<'a> {
+    /// Internal continuation after a fully drained, explicitly stale enclave
+    /// refusal. Extracting a live response's channel is never permitted.
+    pub(crate) fn into_finished_channel(mut self) -> Result<&'a mut SerialChannel> {
+        if !self.finished || self.channel.as_ref().is_none_or(|c| c.endpoint.is_closed()) {
+            return Err(Error::new(ErrorKind::Closed));
+        }
+        Ok(self
+            .channel
+            .take()
+            .expect("finished response owns its channel"))
+    }
+}
 impl Drop for Response<'_> {
     fn drop(&mut self) {
-        if !self.finished && self.channel.life.close_result().is_none() {
-            self.channel.endpoint.revoke_epoch(self.control.epoch);
+        if !self.finished
+            && self
+                .channel
+                .as_ref()
+                .is_some_and(|c| c.life.close_result().is_none())
+        {
+            self.channel
+                .as_ref()
+                .expect("response owns its channel")
+                .endpoint
+                .revoke_epoch(self.control.epoch);
         }
     }
 }
@@ -1249,7 +1341,6 @@ struct Reconnect {
     configuration: Option<crate::config::Binding>,
 }
 struct DriverSettings {
-    #[cfg(feature = "integrated-auth")]
     login_deadline: Instant,
     observer: Option<Observer>,
     capture: Option<Capture>,
@@ -1260,7 +1351,6 @@ struct Broken {
     idle: bool,
 }
 struct Driver {
-    #[cfg(feature = "integrated-auth")]
     login_deadline: Instant,
     #[cfg(feature = "integrated-auth")]
     authentication: Option<crate::auth::Context>,
@@ -1408,6 +1498,24 @@ fn deliver_traces(
 }
 
 impl Driver {
+    async fn authenticate_federated(&mut self) -> Result<()> {
+        if self.core.is_ready()
+            || !matches!(
+                self.reconnect.options.authentication,
+                crate::Authentication::Entra(_)
+            )
+        {
+            return Ok(());
+        }
+        let result = tokio::select! {
+            result = recovery::supply_federated(&mut self.core, &self.reconnect.options, self.login_deadline) => result,
+            _ = self.endpoint.changed.notified() => return Err(Error::new(ErrorKind::Canceled)),
+        };
+        if self.endpoint.is_revoked() {
+            return Err(Error::new(ErrorKind::Canceled));
+        }
+        result
+    }
     #[cfg(feature = "integrated-auth")]
     async fn authenticate(&mut self) -> Result<()> {
         if self.core.is_ready() {
@@ -1420,8 +1528,8 @@ impl Driver {
         let options = &self.reconnect.options;
         if self.authentication.is_none() {
             let auth = options
-                .windows_auth
-                .as_ref()
+                .authentication
+                .windows()
                 .ok_or_else(|| Error::new(ErrorKind::State("missing authentication provider")))?;
             self.authentication = Some(crate::auth::Context::new(
                 auth,
@@ -1438,6 +1546,10 @@ impl Driver {
         }?;
         if self.endpoint.is_revoked() {
             return Err(Error::new(ErrorKind::Canceled));
+        }
+        #[cfg(feature = "system-gssapi")]
+        if let Some(evidence) = context.gssapi_evidence() {
+            self.core.record_gssapi_evidence(evidence);
         }
         self.core.provide_authentication_token(result.0, result.1)
     }
@@ -2074,6 +2186,7 @@ impl Driver {
                 continue;
             }
             self.update_position();
+            self.authenticate_federated().await?;
             #[cfg(feature = "integrated-auth")]
             self.authenticate().await?;
             self.deliver_observations()?;
@@ -2145,8 +2258,12 @@ impl Driver {
                 && let Some(reply) = self.ready.take()
             {
                 if !self.reconnect.options.new_password.is_empty() {
-                    self.reconnect.options.password =
-                        std::mem::take(&mut self.reconnect.options.new_password);
+                    self.reconnect
+                        .options
+                        .authentication
+                        .sql_credentials_mut()
+                        .expect("validated SQL password change")
+                        .password = std::mem::take(&mut self.reconnect.options.new_password).into();
                 }
                 if reply.send(Ok(())).is_err() {
                     return Err(self.endpoint.closed_error());
@@ -2269,7 +2386,6 @@ async fn drive(
     settings: DriverSettings,
 ) {
     let mut driver = Driver {
-        #[cfg(feature = "integrated-auth")]
         login_deadline: settings.login_deadline,
         #[cfg(feature = "integrated-auth")]
         authentication: None,

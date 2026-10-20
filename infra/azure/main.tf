@@ -21,12 +21,19 @@ resource "random_password" "test_user" { # the domain user the Windows logins te
   override_special = "!#%*-_=+"
 }
 
+resource "time_static" "created" {} # fixed at the first apply: the lifetime counts from here
+
+locals {
+  deadline = timeadd(time_static.created.rfc3339, "${var.lifetime_hours}h") # deletion, and the service principal's secret expiry
+}
+
 resource "azurerm_resource_group" "tds" {
-  name     = "rg-tds-driver-tests"
+  name     = var.resource_group_name
   location = var.location
   tags = {
-    purpose   = "tds driver tests (D-62)"
+    purpose   = "tds driver tests (D-62): Rust Azure acceptance"
     temporary = "true: terraform destroy when done"
+    expires   = local.deadline # lifetime.tf deletes the group at this time
     owner     = var.admin_login
   }
 }

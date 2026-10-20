@@ -14,10 +14,27 @@ pub(crate) fn failure() -> Error {
 pub(crate) type AuthFuture<'a> = Pin<Box<dyn Future<Output = Result<(Token, bool)>> + Send + 'a>>;
 pub(crate) trait SecurityContext: Send {
     fn step<'a>(&'a mut self, challenge: Option<Token>, binding: &'a [u8]) -> AuthFuture<'a>;
+    #[cfg(feature = "system-gssapi")]
+    fn gssapi_evidence(&self) -> Option<super::GssapiEvidence> {
+        None
+    }
 }
 pub(crate) struct Context(Box<dyn SecurityContext>);
 impl Context {
     pub fn new(auth: &WindowsAuth, host: &str, port: u16) -> Result<Self> {
+        if auth.provider == Provider::SystemGssapi {
+            #[cfg(feature = "system-gssapi")]
+            return Ok(Self(Box::new(super::gssapi::System::new(
+                auth,
+                auth.service_principal
+                    .clone()
+                    .unwrap_or_else(|| format!("MSSQLSvc/{host}:{port}")),
+            )?)));
+            #[cfg(not(feature = "system-gssapi"))]
+            return Err(Error::new(ErrorKind::Unsupported(
+                "system GSSAPI adapter is not built",
+            )));
+        }
         if auth.provider == Provider::NativeWindows {
             #[cfg(windows)]
             {
@@ -127,6 +144,10 @@ impl Context {
         binding: &[u8],
     ) -> Result<(Token, bool)> {
         self.0.step(challenge, binding).await
+    }
+    #[cfg(feature = "system-gssapi")]
+    pub fn gssapi_evidence(&self) -> Option<super::GssapiEvidence> {
+        self.0.gssapi_evidence()
     }
 }
 struct Portable<P: Sspi> {
@@ -307,4 +328,18 @@ pub(crate) fn channel_binding(certificate: &[u8]) -> Result<Vec<u8>> {
     binding[28..32].copy_from_slice(&32_u32.to_le_bytes());
     binding.extend(application);
     Ok(binding)
+}
+
+#[cfg(all(test, not(feature = "system-gssapi")))]
+mod tests {
+    use super::*;
+    #[test]
+    fn system_cache_is_explicitly_unavailable_without_its_feature() {
+        let auth = WindowsAuth::system_cache(Method::Kerberos);
+        let error = Context::new(&auth, "sql.test", 1433).err().unwrap();
+        assert!(matches!(
+            error.kind,
+            ErrorKind::Unsupported("system GSSAPI adapter is not built")
+        ));
+    }
 }

@@ -19,6 +19,18 @@ from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGES = (
+    ("experiments/rust-azure-live-evidence.md", "rust-azure-live", "", "Rust Azure Live Campaign Evidence", "check"),
+    ("experiments/rust-azure-code-complete.md", "rust-azure-code-complete", "", "Rust Azure Code-Complete Checkpoint", "check"),
+    ("experiments/rust-azure-credential-inventory.md", "rust-azure-credentials", "", "Rust Azure Credential Inventory", "check"),
+    ("experiments/rust-azure-key-enclave-evidence.md", "rust-azure-keys-evidence", "", "Rust Azure Key and Enclave Evidence", "check"),
+    ("experiments/rust-azure-ticket-cache-contract.md", "rust-azure-ticket-cache", "", "Rust Ticket Cache Provider", "explanation"),
+    ("experiments/rust-azure-feature-probe-contract.md", "rust-azure-feature-probes", "", "Rust Azure Feature Policy", "explanation"),
+    ("experiments/rust-azure-authentication-evidence.md", "rust-azure-evidence", "", "Rust Azure Authentication Evidence", "check"),
+    ("experiments/rust-azure-integration-plan.md", "rust-azure-plan", "", "Rust Azure Integration", "explanation"),
+    ("experiments/rust-azure-parity-scenarios.md", "rust-azure-parity", "", "Rust Azure Parity Scenarios", "check"),
+    ("experiments/rust-azure-authentication-contract.md", "rust-azure-authentication", "", "Rust Azure Authentication Contract", "explanation"),
+    ("experiments/rust-azure-key-provider-contract.md", "rust-azure-key-providers", "", "Rust Azure Key Providers and Enclaves", "explanation"),
+    ("experiments/python-azure-review-backlog.md", "python-azure-review", "", "Python Azure Review Backlog", "check"),
     ("D-rust-development.md", "rust", "D", "Building the Rust Client", "explanation"),
     ("E-python-baseline.md", "python-baseline", "E", "Python Baseline", "check"),
     ("F-rust-value-api.md", "rust-values", "F", "Rust Type and Value API", "explanation"),

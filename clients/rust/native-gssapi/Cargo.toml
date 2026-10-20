@@ -1,0 +1,10 @@
+[package]
+name = "tds-native-gssapi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Owned system GSSAPI security-context boundary for cached Kerberos credentials"
+
+[dependencies]
+zeroize = "=1.9.1"

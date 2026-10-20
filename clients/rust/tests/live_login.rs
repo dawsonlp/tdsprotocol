@@ -40,8 +40,12 @@ async fn restricted_sql_login_has_only_its_actual_permissions_in_each_transport_
             for version in [ProtocolVersion::V7_4, ProtocolVersion::V8_0] {
                 for mars in [false, true] {
                     let mut config = options.clone();
-                    config.user = login_name.clone();
-                    config.password = password.clone();
+                    config.authentication.sql_credentials_mut().unwrap().user = login_name.clone();
+                    config
+                        .authentication
+                        .sql_credentials_mut()
+                        .unwrap()
+                        .password = password.clone().into();
                     config.version = version;
                     config.mars = mars;
                     let connection = Connection::connect(config).await?;

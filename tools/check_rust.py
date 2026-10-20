@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,8 +38,14 @@ def main():
         ('rustdoc', cargo + ['doc', *manifest, '--locked', '--offline', '--all-features', '--no-deps']),
     ]
     if args.live:
+        # Native certificate-store acceptance needs Windows and its own fixture; it refuses other hosts.
+        native = [] if sys.platform == 'win32' else [
+            '--skip', 'native_non_exportable_certificate_mutually_wraps_and_signs_with_python']
+        # The Azure campaign's tests (azure_live, certstore_live) run from infra/azure's runbook.
+        native += ['--skip', 'mac_', '--skip', 'runner_', '--skip', 'certificate_store_keys_read_python_values',
+                   '--skip', 'missing_and_wrong_certificates_are_refused']
         matrix.append(('live', cargo + ['test', *manifest, '--locked', '--offline', '--all-features',
-                                       '--', '--ignored', '--test-threads=1', '--nocapture']))
+                                       '--', '--ignored', '--test-threads=1', '--nocapture', *native]))
     result = {'started': dt.datetime.now(dt.timezone.utc).isoformat(), 'checks': []}
     for name, command in matrix:
         log = output / f'{name}.log'

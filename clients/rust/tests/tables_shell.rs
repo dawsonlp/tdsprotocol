@@ -28,6 +28,7 @@ async fn produced_tables_preserve_following_parameters_and_batched_call_offsets(
     let expected = Calls(vec![make(Some(rows.clone())), make(Some(vec![]))])
         .encode_request(&tds_client::requests::Context {
             column_encryption: false,
+            enclaves: false,
             transaction: 0,
             outstanding: 1,
         })

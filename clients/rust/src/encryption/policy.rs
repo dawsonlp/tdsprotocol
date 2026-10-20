@@ -1,7 +1,6 @@
 use super::{
-    ColumnKey, Error, LocalKeyStore, Plaintext, Result,
+    ColumnKey, Error, KeyOperation, KeyProvider, LocalKeyStore, MasterKey, Plaintext, Result,
     cell::{Cell, MAX_VALUE},
-    local::Master,
     secret::Secret,
 };
 use std::{
@@ -82,6 +81,10 @@ pub struct Statistics {
     pub master_loads: u64,
     pub unwrap_attempts: u64,
     pub unwraps: u64,
+    /// Logical calls; SDK transport retries/challenges are separate.
+    pub metadata_verifications: u64,
+    pub authorized_keys: u64,
+    pub enclave_packages: u64,
     pub hits: u64,
     pub coalesced: u64,
     pub evictions: u64,
@@ -130,9 +133,11 @@ struct Bank {
     transaction: Option<u64>,
     transaction_sequence: u64,
     guards: BTreeSet<u64>,
-    masters: Vec<Entry<MasterId, Master>>,
-    cells: Vec<Entry<ColumnKey, Box<Cell>>>,
+    masters: Vec<Entry<MasterId, Arc<dyn MasterKey>>>,
+    cells: Vec<Entry<ColumnKey, Arc<Cell>>>,
     stats: Statistics,
+    enclaves: bool,
+    enclave: Option<Arc<Mutex<super::enclave::Session>>>,
 }
 impl Bank {
     fn next(&mut self) -> Result<u64> {
@@ -177,6 +182,7 @@ impl Bank {
     fn clear(&mut self) {
         self.masters.clear();
         self.cells.clear();
+        self.enclave = None;
     }
     fn transaction_end(&mut self) {
         self.masters
@@ -185,7 +191,11 @@ impl Bank {
             .retain(|e| !matches!(e.scope, Scope::Transaction(_)));
         self.transaction = None;
     }
-    fn cached(&mut self, token: &Token, key: &ColumnKey, input: &Input) -> Result<Option<Output>> {
+    fn cached(
+        &mut self,
+        token: &Token,
+        key: &ColumnKey,
+    ) -> Result<Option<(Arc<Cell>, Option<Instant>)>> {
         self.check(token)?;
         self.expire(Instant::now());
         let scope = self.scope(token, token.policies.column);
@@ -198,7 +208,10 @@ impl Bank {
         };
         self.cells[index].used = self.next()?;
         self.stats.hits += 1;
-        input.apply(&self.cells[index].value).map(Some)
+        Ok(Some((
+            self.cells[index].value.clone(),
+            self.cells[index].deadline,
+        )))
     }
 }
 fn insert<K, V>(entries: &mut Vec<Entry<K, V>>, entry: Entry<K, V>, capacity: usize) -> bool {
@@ -217,11 +230,13 @@ fn insert<K, V>(entries: &mut Vec<Entry<K, V>>, entry: Entry<K, V>, capacity: us
 }
 struct Inner {
     bank: Mutex<Bank>,
-    providers: Vec<LocalKeyStore>,
+    providers: Vec<Arc<dyn KeyProvider>>,
     gate: Arc<AsyncMutex<()>>,
     changed: Arc<Notify>,
-    completed: Notify,
-    pending: AtomicUsize,
+    completed: Arc<Notify>,
+    pending: Arc<AtomicUsize>,
+    revoked: Notify,
+    provider_timeout: Duration,
     #[cfg(test)]
     audit: Option<super::secret::Audit>,
     #[cfg(test)]
@@ -240,6 +255,7 @@ impl Inner {
         bank.guards.clear();
         drop(bank);
         self.changed.notify_one();
+        self.revoked.notify_waiters();
     }
     fn check_loading(
         &self,
@@ -262,24 +278,102 @@ impl Inner {
         }
         result
     }
-    fn load(
+    fn operation(&self) -> KeyOperation {
+        KeyOperation {
+            pending: self.pending.clone(),
+            completed: self.completed.clone(),
+        }
+    }
+    async fn cached_value(
+        &self,
+        token: &Token,
+        cell: Arc<Cell>,
+        expires: Option<Instant>,
+        input: Input,
+        reply: &oneshot::Sender<Result<Output>>,
+        scopes: (Scope, Scope),
+    ) -> Result<Output> {
+        let output = self
+            .operation()
+            .blocking(move || Ok(input.apply(&cell)))
+            .await?;
+        let mut bank = self.bank();
+        self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
+        if expires.is_some_and(|at| Instant::now() >= at) {
+            return Err(Error::AcquisitionExpired);
+        }
+        output.map(|value| value.with_deadline(expires))
+    }
+    async fn load(
         &self,
         token: &Token,
         key: &ColumnKey,
-        input: &Input,
+        input: Input,
         reply: &oneshot::Sender<Result<Output>>,
+        scopes: (Scope, Scope),
     ) -> Result<Output> {
-        let scopes = {
-            let bank = self.bank();
-            bank.check(token)?;
-            bank.scopes(token)
+        self.check_loading(&mut self.bank(), token, scopes, reply.is_closed())?;
+        if let Input::Release { signatures, .. } = &input {
+            if !self.bank().enclaves {
+                return Err(Error::InvalidPolicy);
+            }
+            let mut allowed = false;
+            for (wrapped, signature) in signatures {
+                let Some(provider) = self
+                    .providers
+                    .iter()
+                    .find(|p| p.name().to_uppercase() == wrapped.provider.to_uppercase())
+                else {
+                    continue;
+                };
+                let master = provider.open(&wrapped.path, self.operation()).await?;
+                self.check_loading(&mut self.bank(), token, scopes, reply.is_closed())?;
+                self.bank().stats.metadata_verifications += 1;
+                let valid = master
+                    .verify_metadata(true, signature, self.operation())
+                    .await?;
+                self.check_loading(&mut self.bank(), token, scopes, reply.is_closed())?;
+                if valid {
+                    self.bank().stats.authorized_keys += 1;
+                    allowed = true;
+                    break;
+                }
+            }
+            if !allowed {
+                return Err(Error::Authentication);
+            }
+        }
+        let cached = {
+            let mut bank = self.bank();
+            self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
+            bank.cached(token, key)?
         };
+        if let Some((cell, expires)) = cached {
+            return self
+                .cached_value(token, cell, expires, input, reply, scopes)
+                .await;
+        }
+        let _gate = self.gate.clone().lock_owned().await;
+        let cached = {
+            let mut bank = self.bank();
+            self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
+            let cached = bank.cached(token, key)?;
+            if cached.is_some() {
+                bank.stats.coalesced += 1;
+            }
+            cached
+        };
+        if let Some((cell, expires)) = cached {
+            return self
+                .cached_value(token, cell, expires, input, reply, scopes)
+                .await;
+        }
         let mut failure = Error::KeyUnavailable;
         for wrapped in &key.values {
             let Some(provider) = self
                 .providers
                 .iter()
-                .position(|p| p.name == wrapped.provider.to_uppercase())
+                .position(|p| p.name().to_uppercase() == wrapped.provider.to_uppercase())
             else {
                 continue;
             };
@@ -287,94 +381,116 @@ impl Inner {
                 provider,
                 path: wrapped.path.clone(),
             };
-            let mut bank = self.bank();
-            self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
-            bank.expire(Instant::now());
-            if let Some(index) = bank
-                .masters
-                .iter()
-                .position(|e| e.scope == scopes.0 && e.key == id)
-            {
-                bank.masters[index].used = bank.next()?;
-                bank.stats.unwrap_attempts += 1;
-                let born = Instant::now();
-                let cell = bank.masters[index].value.unwrap(
-                    wrapped,
+            let cached_master = {
+                let mut bank = self.bank();
+                self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
+                bank.expire(Instant::now());
+                if let Some(index) = bank
+                    .masters
+                    .iter()
+                    .position(|e| e.scope == scopes.0 && e.key == id)
+                {
+                    bank.masters[index].used = bank.next()?;
+                    Some((
+                        bank.masters[index].value.clone(),
+                        bank.masters[index].deadline,
+                    ))
+                } else {
+                    bank.stats.master_load_attempts += 1;
+                    None
+                }
+            };
+            let master_born = Instant::now();
+            let (master, existing_deadline, install_master) =
+                if let Some((master, deadline)) = cached_master {
+                    (master, deadline, false)
+                } else {
                     #[cfg(test)]
-                    &self.audit,
-                );
-                match cell {
-                    Ok(cell) => {
-                        bank.stats.unwraps += 1;
-                        let now = Instant::now();
-                        if bank.masters[index].deadline.is_some_and(|d| now >= d)
-                            || deadline(scopes.1, born)?.is_some_and(|d| now >= d)
-                        {
-                            bank.expire(now);
-                            return Err(Error::AcquisitionExpired);
+                    {
+                        let gate = self.load_gate.lock().unwrap().clone();
+                        if let Some(gate) = gate {
+                            self.operation()
+                                .blocking(move || {
+                                    gate.block();
+                                    Ok(())
+                                })
+                                .await?;
                         }
-                        return self.finish_load(
-                            &mut bank, token, key, input, scopes, cell, born, None, reply,
-                        );
                     }
-                    Err(error) => {
-                        failure = error;
-                        continue;
+                    let opened = self.providers[provider]
+                        .open(&wrapped.path, self.operation())
+                        .await;
+                    {
+                        let mut bank = self.bank();
+                        if opened.is_ok() {
+                            bank.stats.master_loads += 1;
+                        }
+                        self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
                     }
+                    let master = match opened {
+                        Ok(value) => value,
+                        Err(error) => {
+                            failure = error;
+                            continue;
+                        }
+                    };
+                    let expires = deadline(scopes.0, master_born)?;
+                    if expires.is_some_and(|at| Instant::now() >= at) {
+                        return Err(Error::AcquisitionExpired);
+                    }
+                    (master, expires, true)
+                };
+            self.bank().stats.unwrap_attempts += 1;
+            let born = Instant::now();
+            let root = master.unwrap(wrapped, self.operation()).await;
+            {
+                let mut bank = self.bank();
+                self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
+                if root.is_ok() {
+                    bank.stats.unwraps += 1;
                 }
             }
-            bank.stats.master_load_attempts += 1;
-            drop(bank); // no lock crosses provider I/O
-            let master_born = Instant::now();
-            #[cfg(test)]
-            if let Some(gate) = self.load_gate.lock().unwrap().clone() {
-                gate.block();
-            }
-            let master = self.providers[provider].load(
-                &wrapped.path,
-                #[cfg(test)]
-                &self.audit,
-            );
-            let mut bank = self.bank();
-            if master.is_ok() {
-                bank.stats.master_loads += 1;
-            }
-            self.check_loading(&mut bank, token, scopes, reply.is_closed())?;
-            let master = match master {
-                Ok(master) => master,
+            let root = match root {
+                Ok(value) => value,
                 Err(error) => {
                     failure = error;
                     continue;
                 }
             };
-            if deadline(scopes.0, master_born)?.is_some_and(|d| Instant::now() >= d) {
+            if existing_deadline.is_some_and(|at| Instant::now() >= at) {
                 return Err(Error::AcquisitionExpired);
             }
-            bank.stats.unwrap_attempts += 1;
-            let born = Instant::now();
-            match master.unwrap(
-                wrapped,
-                #[cfg(test)]
-                &self.audit,
-            ) {
-                Ok(cell) => {
-                    bank.stats.unwraps += 1;
-                    return self.finish_load(
-                        &mut bank,
-                        token,
-                        key,
-                        input,
-                        scopes,
-                        cell,
-                        born,
-                        Some((id, master, master_born)),
-                        reply,
-                    );
-                }
-                Err(error) => {
-                    failure = error;
-                }
-            }
+            #[cfg(test)]
+            let audit = self.audit.clone();
+            let retain_root = self.bank().enclaves;
+            let (cell, output) = self
+                .operation()
+                .blocking(move || {
+                    let mut cell = Cell::derive(
+                        root.as_bytes(),
+                        #[cfg(test)]
+                        &audit,
+                    )?;
+                    if retain_root {
+                        cell.root = Some(root);
+                    }
+                    let cell: Arc<Cell> = cell.into();
+                    let output = input.apply(&cell);
+                    Ok((cell, output))
+                })
+                .await?;
+            let mut bank = self.bank();
+            return self.finish_load(
+                &mut bank,
+                token,
+                key,
+                output,
+                scopes,
+                cell,
+                born,
+                install_master.then_some((id, master, master_born)),
+                reply,
+            );
         }
         Err(failure)
     }
@@ -384,11 +500,11 @@ impl Inner {
         bank: &mut Bank,
         token: &Token,
         key: &ColumnKey,
-        input: &Input,
+        output: Result<Output>,
         scopes: (Scope, Scope),
-        cell: Box<Cell>,
+        cell: Arc<Cell>,
         born: Instant,
-        master: Option<(MasterId, Master, Instant)>,
+        master: Option<(MasterId, Arc<dyn MasterKey>, Instant)>,
         reply: &oneshot::Sender<Result<Output>>,
     ) -> Result<Output> {
         let now = Instant::now();
@@ -402,7 +518,6 @@ impl Inner {
         }
         // Failed value authentication never returns plaintext. A valid key can
         // still be reused after a corrupted value, so insertion is independent.
-        let output = input.apply(&cell);
         self.check_loading(bank, token, scopes, reply.is_closed())?;
         let now = Instant::now();
         if expires.is_some_and(|d| now >= d)
@@ -441,16 +556,29 @@ impl Inner {
         );
         bank.stats.evictions += u64::from(evicted);
         self.changed.notify_one();
-        output
+        output.map(|value| value.with_deadline(expires))
     }
 }
 enum Input {
     Encrypt(Secret, bool),
     Decrypt(Vec<u8>),
+    Release {
+        signatures: Vec<(super::WrappedKey, Vec<u8>)>,
+        scopes: (Scope, Scope),
+    },
 }
 enum Output {
     Cipher(Vec<u8>),
     Plain(Plaintext),
+    Root(Plaintext, Option<Instant>),
+}
+impl Output {
+    fn with_deadline(self, expires: Option<Instant>) -> Self {
+        match self {
+            Self::Root(value, _) => Self::Root(value, expires),
+            other => other,
+        }
+    }
 }
 impl Input {
     fn apply(&self, cell: &Cell) -> Result<Output> {
@@ -459,6 +587,10 @@ impl Input {
                 cell.encrypt(&secret.bytes, *random).map(Output::Cipher)
             }
             Self::Decrypt(bytes) => cell.decrypt(bytes).map(Output::Plain),
+            Self::Release { .. } => {
+                Plaintext::copy(cell.root.as_ref().ok_or(Error::InvalidPolicy)?.as_bytes())
+                    .map(|value| Output::Root(value, None))
+            }
         }
     }
 }
@@ -498,6 +630,8 @@ impl LifecycleLink {
                 .checked_add(1)
                 .ok_or(Error::Closed)?;
             bank.transaction = Some(bank.transaction_sequence);
+            drop(bank);
+            inner.revoked.notify_waiters();
         }
         Ok(())
     }
@@ -538,6 +672,7 @@ impl LifecycleLink {
             _ => {}
         }
         inner.changed.notify_one();
+        inner.revoked.notify_waiters();
         Ok(())
     }
     pub(crate) fn expect_reuse_reset(&self, pending: bool) {
@@ -545,6 +680,14 @@ impl LifecycleLink {
     }
 }
 impl KeySession {
+    pub(super) fn forget_enclave(&self) {
+        self.inner.bank().enclave = None;
+    }
+    pub(super) fn enable_enclaves(&self) {
+        let mut bank = self.inner.bank();
+        bank.clear();
+        bank.enclaves = true;
+    }
     pub(crate) fn link(&self) -> LifecycleLink {
         LifecycleLink {
             inner: Arc::downgrade(&self.inner),
@@ -552,13 +695,56 @@ impl KeySession {
         }
     }
     /// Requires a running Tokio runtime. Opens no key file until first use.
-    pub fn new(providers: Vec<LocalKeyStore>, policies: Policies) -> Result<Self> {
+    pub fn new(mut providers: Vec<LocalKeyStore>, policies: Policies) -> Result<Self> {
+        #[cfg(test)]
+        let audit = Some(Arc::new(Mutex::new(Vec::new())));
+        #[cfg(test)]
+        for provider in &mut providers {
+            provider.audit.clone_from(&audit);
+        }
+        Self::build(
+            providers
+                .drain(..)
+                .map(|p| Arc::new(p) as Arc<dyn KeyProvider>)
+                .collect(),
+            policies,
+            Duration::from_secs(30),
+            #[cfg(test)]
+            audit,
+        )
+    }
+    /// A finite total acquisition budget includes queueing, open and unwrap.
+    /// Provider SDK retries consume this same budget. Constructors open no keys.
+    pub fn with_providers(
+        providers: Vec<Arc<dyn KeyProvider>>,
+        policies: Policies,
+        provider_timeout: Duration,
+    ) -> Result<Self> {
+        Self::build(
+            providers,
+            policies,
+            provider_timeout,
+            #[cfg(test)]
+            Some(Arc::new(Mutex::new(Vec::new()))),
+        )
+    }
+    fn build(
+        providers: Vec<Arc<dyn KeyProvider>>,
+        policies: Policies,
+        provider_timeout: Duration,
+        #[cfg(test)] audit: Option<super::secret::Audit>,
+    ) -> Result<Self> {
         policies.validate()?;
         if tokio::runtime::Handle::try_current().is_err()
+            || provider_timeout.is_zero()
+            || Instant::now().checked_add(provider_timeout).is_none()
             || providers.is_empty()
             || providers
                 .iter()
-                .map(|p| &p.name)
+                .any(|p| p.name().is_empty() || p.name().len() > 255)
+            || providers
+                .iter()
+                .map(|p| p.name().to_uppercase())
                 .collect::<BTreeSet<_>>()
                 .len()
                 != providers.len()
@@ -576,14 +762,18 @@ impl KeySession {
                 masters: Vec::new(),
                 cells: Vec::new(),
                 stats: Statistics::default(),
+                enclaves: false,
+                enclave: None,
             }),
             providers,
             gate: Arc::new(AsyncMutex::new(())),
             changed: Arc::new(Notify::new()),
-            completed: Notify::new(),
-            pending: AtomicUsize::new(0),
+            completed: Arc::new(Notify::new()),
+            pending: Arc::new(AtomicUsize::new(0)),
+            revoked: Notify::new(),
+            provider_timeout,
             #[cfg(test)]
-            audit: Some(Arc::new(Mutex::new(Vec::new()))),
+            audit,
             #[cfg(test)]
             load_gate: Mutex::new(None),
         });
@@ -671,12 +861,14 @@ impl KeySession {
             .ok_or(Error::Closed)?;
         bank.transaction = Some(bank.transaction_sequence);
         self.inner.changed.notify_one();
+        self.inner.revoked.notify_waiters();
         Ok(())
     }
     /// Savepoint rollback and inner commit must not call this method.
     pub fn transaction_end(&self) {
         self.inner.bank().transaction_end();
         self.inner.changed.notify_one();
+        self.inner.revoked.notify_waiters();
     }
     /// Advance context after provider/security/database changes. Old guards fail.
     pub fn invalidate(&self) {
@@ -689,6 +881,7 @@ impl KeySession {
             bank.stats.closed = true;
         }
         self.inner.changed.notify_one();
+        self.inner.revoked.notify_waiters();
     }
     pub fn revoke(&self, _reason: Revocation) {
         self.inner.revoke();
@@ -706,6 +899,7 @@ impl KeySession {
         bank.policies = policies;
         bank.context = bank.context.checked_add(1).ok_or(Error::Closed)?;
         self.inner.changed.notify_one();
+        self.inner.revoked.notify_waiters();
         Ok(())
     }
     pub fn statistics(&self) -> Statistics {
@@ -749,6 +943,100 @@ pub struct KeyExchange {
     token: Token,
 }
 impl KeyExchange {
+    pub(super) fn has_enclave(&self) -> Result<bool> {
+        let bank = self.inner.bank();
+        bank.check(&self.token)?;
+        Ok(bank.enclave.is_some())
+    }
+    pub(super) async fn establish_enclave(
+        &self,
+        attestation: super::enclave::Attestation,
+        info: Vec<u8>,
+    ) -> Result<()> {
+        self.inner.bank().check(&self.token)?;
+        let session = self
+            .inner
+            .operation()
+            .blocking(move || attestation.establish(&info))
+            .await?;
+        let mut bank = self.inner.bank();
+        bank.check(&self.token)?;
+        if !bank.enclaves {
+            return Err(Error::InvalidPolicy);
+        }
+        // Another channel may have established while this describe was in
+        // flight. Keep the accepted counter and discard this candidate.
+        if bank.enclave.is_none() {
+            bank.enclave = Some(Arc::new(Mutex::new(session)));
+        }
+        Ok(())
+    }
+    pub(super) async fn enclave_package(
+        &self,
+        statement: &str,
+        keys: &[super::context::EnclaveColumn],
+    ) -> Result<Vec<u8>> {
+        let (session, scopes) = {
+            let bank = self.inner.bank();
+            bank.check(&self.token)?;
+            (
+                bank.enclave.clone().ok_or(Error::InvalidMetadata)?,
+                bank.scopes(&self.token),
+            )
+        };
+        let mut released = Vec::with_capacity(keys.len());
+        let mut expires: Option<Instant> = None;
+        for needed in keys {
+            let Output::Root(root, deadline) = self
+                .operate(
+                    &needed.key,
+                    Input::Release {
+                        signatures: needed.signatures.clone(),
+                        scopes,
+                    },
+                )
+                .await?
+            else {
+                unreachable!()
+            };
+            if let Some(at) = deadline {
+                expires = Some(expires.map_or(at, |previous| previous.min(at)));
+            }
+            released.push(super::enclave::ReleasedKey {
+                database_id: needed.key.database_id,
+                metadata_version: needed.key.metadata_version,
+                key_id: needed.key.key_id,
+                root,
+            });
+        }
+        let statement = statement.to_owned();
+        let expected = session.clone();
+        let package = self
+            .inner
+            .operation()
+            .blocking(move || {
+                session
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .package(&statement, &released)
+            })
+            .await?;
+        let mut bank = self.inner.bank();
+        self.inner
+            .check_loading(&mut bank, &self.token, scopes, false)?;
+        if expires.is_some_and(|at| Instant::now() >= at) {
+            return Err(Error::AcquisitionExpired);
+        }
+        if !bank
+            .enclave
+            .as_ref()
+            .is_some_and(|session| Arc::ptr_eq(session, &expected))
+        {
+            return Err(Error::Expired);
+        }
+        bank.stats.enclave_packages += 1;
+        Ok(package)
+    }
     pub async fn encrypt(
         &self,
         key: &ColumnKey,
@@ -784,34 +1072,56 @@ impl KeyExchange {
     }
     async fn operate(&self, key: &ColumnKey, input: Input) -> Result<Output> {
         key.validate()?;
-        if let Some(output) = self.inner.bank().cached(&self.token, key, &input)? {
-            return Ok(output);
-        }
-        let gate = self.inner.gate.clone().lock_owned().await;
-        {
-            let mut bank = self.inner.bank();
-            if let Some(output) = bank.cached(&self.token, key, &input)? {
-                bank.stats.coalesced += 1;
-                return Ok(output);
-            }
-        }
+        let deadline = Instant::now()
+            .checked_add(self.inner.provider_timeout)
+            .ok_or(Error::InvalidPolicy)?;
         let (send, receive) = oneshot::channel();
         let inner = self.inner.clone();
         let token = self.token.clone();
         let key = key.clone();
-        inner.pending.fetch_add(1, Ordering::AcqRel);
-        tokio::task::spawn_blocking(move || {
-            struct Pending(Arc<Inner>);
-            impl Drop for Pending {
-                fn drop(&mut self) {
-                    self.0.pending.fetch_sub(1, Ordering::AcqRel);
-                    self.0.completed.notify_one();
-                }
+        let cancel = Arc::new(Notify::new());
+        struct Cancel(Arc<Notify>);
+        impl Drop for Cancel {
+            fn drop(&mut self) {
+                self.0.notify_one();
             }
-            let _pending = Pending(inner.clone());
-            let _gate = gate;
-            let output = inner.load(&token, &key, &input, &send);
-            let _ = send.send(output); // closed receiver destroys owned output
+        }
+        let _cancel = Cancel(cancel.clone());
+        let scopes = {
+            let mut bank = inner.bank();
+            bank.check(&token)?;
+            let scopes = match &input {
+                Input::Release { scopes, .. } => *scopes,
+                _ => bank.scopes(&token),
+            };
+            inner.check_loading(&mut bank, &token, scopes, send.is_closed())?;
+            scopes
+        };
+        let pending = inner.operation().enter();
+        tokio::spawn(async move {
+            let _pending = pending;
+            let revoked = inner.revoked.notified();
+            tokio::pin!(revoked);
+            revoked.as_mut().enable();
+            let result = {
+                let load = tokio::time::timeout_at(
+                    deadline,
+                    inner.load(&token, &key, input, &send, scopes),
+                );
+                tokio::pin!(load);
+                loop {
+                    tokio::select! {
+                        result=&mut load => break result.unwrap_or(Err(Error::ProviderTimeout)),
+                        _=cancel.notified() => { inner.bank().stats.discarded_loads += 1; break Err(Error::Closed); },
+                        _=&mut revoked => {
+                            let checked=inner.check_loading(&mut inner.bank(),&token,scopes,send.is_closed());
+                            if let Err(error)=checked { break Err(error); }
+                            revoked.set(inner.revoked.notified()); revoked.as_mut().enable();
+                        }
+                    }
+                }
+            };
+            let _ = send.send(result);
         });
         receive.await.map_err(|_| Error::Worker)?
     }
@@ -825,6 +1135,7 @@ impl Drop for KeyExchange {
         bank.cells
             .retain(|e| e.scope != Scope::Exchange(self.token.id));
         self.inner.changed.notify_one();
+        self.inner.revoked.notify_waiters();
     }
 }
 impl fmt::Debug for KeyExchange {

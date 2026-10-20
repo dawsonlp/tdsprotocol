@@ -1,0 +1,22 @@
+{
+  "scope": "Python wire parity; enabled acknowledgement is a Rust refusal",
+  "python_source_sha256": "7f4428c2d6799030a62a602cb3957b89861ce881c123eb964a07cdc0a7841043",
+  "cases": [
+    {
+      "id": 5,
+      "encoded": "0500000000ff"
+    },
+    {
+      "id": 8,
+      "encoded": "080100000001ff"
+    },
+    {
+      "id": 11,
+      "encoded": "0b00000000ff"
+    },
+    {
+      "id": 15,
+      "encoded": "0f00000000ff"
+    }
+  ]
+}

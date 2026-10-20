@@ -47,7 +47,12 @@ pub enum Execution {
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    TokenProvider(crate::entra::ProviderError),
     Authentication(&'static str),
+    /// The system Kerberos/Negotiate provider refused: GSSAPI's status numbers,
+    /// never its messages. `kind()` tells absent from expired credentials.
+    #[cfg(feature = "system-gssapi")]
+    GssapiRefused(crate::auth::GssapiStatus),
     #[cfg(feature = "encryption")]
     Encryption(crate::encryption::Error),
     NotYetRead(&'static str),
@@ -62,6 +67,9 @@ pub enum ErrorKind {
         field: &'static str,
     },
     Unsupported(&'static str),
+    /// A well-formed server acknowledgement enabled an explicitly requested
+    /// capability that this driver does not implement. No SQL is permitted.
+    UnsupportedFeatureEnabled(crate::azure_features::AzureFeature),
     Limit(&'static str),
     State(&'static str),
     Closed,
@@ -106,8 +114,16 @@ pub struct Error {
 
 impl Error {
     #[cfg(feature = "tokio")]
+    fn is_gssapi_refusal(&self) -> bool {
+        #[cfg(feature = "system-gssapi")]
+        return matches!(&self.cause().kind, ErrorKind::GssapiRefused(_));
+        #[cfg(not(feature = "system-gssapi"))]
+        false
+    }
+    #[cfg(feature = "tokio")]
     pub(crate) fn is_authentication_failure(&self) -> bool {
-        matches!(&self.cause().kind, ErrorKind::Authentication(_))
+        matches!(&self.cause().kind, ErrorKind::Authentication(_) | ErrorKind::TokenProvider(_))
+            || self.is_gssapi_refusal()
             // Windows NTLM refusal is reported as 18452 by SQL Server; SQL
             // credentials commonly use 18456. Both must refresh the source.
             || matches!(&self.cause().kind, ErrorKind::Server(message) if matches!(message.number, 18452 | 18456))
@@ -198,7 +214,23 @@ impl fmt::Display for Error {
         }
         write!(f, "TDS {:?}: ", self.step)?;
         match &self.kind {
+            ErrorKind::TokenProvider(error) => error.fmt(f),
             ErrorKind::Authentication(reason) => write!(f, "authentication failed: {reason}"),
+            #[cfg(feature = "system-gssapi")]
+            ErrorKind::GssapiRefused(status) => {
+                use crate::auth::GssapiStatusKind as Kind;
+                let meaning = match status.kind() {
+                    Kind::NoCredentials => "no usable credentials (no ticket cache or ticket)",
+                    Kind::CredentialsExpired => "the credentials (ticket) have expired",
+                    Kind::Failure => "the mechanism failed; the minor status says why",
+                    Kind::Other => "refused",
+                };
+                write!(
+                    f,
+                    "system GSSAPI refused: {meaning} (major status 0x{:08x}, minor status 0x{:08x})",
+                    status.major, status.minor
+                )
+            }
             #[cfg(feature = "encryption")]
             ErrorKind::Encryption(e) => e.fmt(f),
             ErrorKind::NotYetRead(reason) => write!(f, "not yet read: {reason}"),
@@ -212,6 +244,10 @@ impl fmt::Display for Error {
                 write!(f, "malformed {field} at byte {offset}")
             }
             ErrorKind::Unsupported(what) => write!(f, "unsupported: {what}"),
+            ErrorKind::UnsupportedFeatureEnabled(feature) => write!(
+                f,
+                "server enabled unimplemented feature: {feature}; opening stopped"
+            ),
             ErrorKind::Limit(what) => write!(f, "limit exceeded: {what}"),
             ErrorKind::State(why) => f.write_str(why),
             ErrorKind::Closed => f.write_str("connection or channel closed"),
