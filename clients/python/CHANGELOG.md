@@ -1,5 +1,16 @@
 # Python client release notes
 
+## Unreleased — Azure authentication follow-ups
+
+Live testing on the Azure campaign's deployment (see the
+[follow-up plan](../../docs/design/experiments/azure-auth-followups.md)):
+
+- The built-in `Spnego` adapter runs pyspnego's blocking calls in a bounded pool
+  of worker threads, so a Kerberos KDC that never answers can no longer hold an
+  opening past its deadline or stall the event loop. Live: an unreachable KDC
+  returned at the 1.5 s deadline (it previously blocked for more than 4 s). A
+  canceled call finishes in its worker and its result is released.
+
 ## Unreleased — GCP authentication follow-up
 
 Rust/GCP interoperability testing exposed shared-client corrections:

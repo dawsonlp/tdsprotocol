@@ -15,6 +15,7 @@ import enum
 import os
 import ssl
 import time
+import warnings
 import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generator
@@ -126,6 +127,17 @@ class ConnectError(Exception):
     def __init__(self, step: str, problem: str):
         super().__init__(f"{step}: {problem}")
         self.step = step
+
+
+class UnsupportedFeatureEnabled(ConnectError):
+    """The server enabled a feature this login asked for but the driver does not implement (PY-AZ-06). The connection
+    is closed before any SQL: a session would depend on behavior that nothing provides. There is no retry without the
+    feature; leave it out of `features` to connect."""
+
+    def __init__(self, feature: "login7.Feature"):
+        super().__init__("log in", f"the server enabled {login7.UNSUPPORTED[feature]} ({feature.name}), which this "
+                                   "driver does not implement; the connection is closed before any SQL")
+        self.feature = feature
 
 
 class CaptureError(Exception):
@@ -567,6 +579,7 @@ class ConnectionCore:
         self.session = SessionState()
         self.server: Record | None = None  # the LOGINACK
         self.features: dict = {}  # the features the server accepted (FEATUREEXTACK), with each one's data
+        self._requested: set = set()  # the features this login asked for
         self.session_id = 0  # the server's id for this session (the packet header's session id)
         self.reset_pending = False  # the next request resets the session (the connection was given back, D-36)
         self.failure: BaseException | None = None  # why the connection can't continue, once it can't
@@ -690,6 +703,11 @@ class ConnectionCore:
         flags_2 = login7.OptionFlags2.INITIAL_LANGUAGE_MUST_SUCCEED | (
             login7.OptionFlags2.ODBC_CLIENT if o.odbc else login7.OptionFlags2(0))  # on by default (D-9)
         features = login7.feature_list(o.features, {login7.Feature.SESSION_RECOVERY: recovery} if recovery else None)
+        for feature in features.keys() & login7.UNSUPPORTED.keys():
+            warnings.warn(f"the login asks for {login7.UNSUPPORTED[feature]} ({feature.name}), which this driver does "
+                          "not implement; the login fails if the server enables it", login7.UnsupportedFeatureWarning,
+                          stacklevel=2)
+        self._requested = set(features)
         if isinstance(login, logins.WindowsLogin):  # the first token goes in the login; the server may challenge it
             self._authenticating = True
             user = password = ""
@@ -856,6 +874,13 @@ class ConnectionCore:
         for r in records:
             if r.token == "FEATUREEXTACK":
                 self.features = dict(r.features)
+        for feature in self.features.keys() & login7.UNSUPPORTED.keys():  # PY-AZ-06
+            data = self.features[feature]
+            if feature not in self._requested or len(data) != 1 or data[0] > 1:
+                raise ConnectError("log in", f"the server's acknowledgement of {feature.name} is unrequested or "
+                                             "malformed")
+            if data == b"\x01":
+                raise UnsupportedFeatureEnabled(feature)
         self.negotiated.update(login7.result_context(self.features))
         if ack is None:
             raise LoginRejected(errors)

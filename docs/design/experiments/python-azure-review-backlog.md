@@ -47,6 +47,13 @@ proposed remedy is still deferred.
 
 ## PY-AZ-06 — owner-directed unsupported-feature negotiation policy
 
+**Implemented 2026-10-20** (owner lifted the Python freeze): an explicit request
+warns (`UnsupportedFeatureWarning`); an enabled acknowledgement raises
+`UnsupportedFeatureEnabled` before any SQL, with no retry; unrequested, malformed
+and duplicate acknowledgements are protocol errors (`tests/test_unsupported_features.py`).
+Live on Azure SQL: AZURE_SQL_SUPPORT, AZURE_DNS_CACHING and GLOBAL_TRANSACTIONS
+refused as enabled, ENHANCED_ROUTING allowed (acknowledged 0), as in Rust.
+
 Decision accepted 2026-10-19. This explicit owner direction supersedes the
 provisional-remedy rule above for this item. Python implementation remains
 backlogged; no Python production code is changed in the Rust phase.
