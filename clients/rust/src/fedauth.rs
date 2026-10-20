@@ -30,9 +30,10 @@ pub struct Info {
     pub sts_url: String,
 }
 
-/// Match Python's slicing/replacement-decoding behavior while bounding all
-/// reads by this token. Duplicate known fields keep the last value; missing
-/// fields remain empty. Review candidates PY-AZ-01 do not establish new policy.
+/// Strict, as in Python (PY-AZ-01, owner decision 2026-10-20): each option lies
+/// inside the token, has an even length and valid UTF-16, and appears once, and
+/// the SPN is present. Azure's real FEDAUTHINFO meets all of these (observed
+/// 2026-10-20). Unknown option ids are bounds-checked and otherwise ignored.
 pub(crate) fn read_info(bytes: &[u8]) -> Result<Info> {
     let mut reader = crate::wire::Reader::new(bytes);
     let count = usize::try_from(reader.u32()?)
@@ -42,48 +43,45 @@ pub(crate) fn read_info(bytes: &[u8]) -> Result<Info> {
     }
     let start = 4 + 9 * count;
     let data = &bytes[start..];
-    let mut info = Info {
-        resource: String::new(),
-        sts_url: String::new(),
-    };
-    for _ in 0..count {
+    let (mut sts_url, mut resource) = (None, None);
+    let mut seen = std::collections::BTreeSet::new();
+    for index in 0..count {
+        let at = 4 + 9 * index;
         let id = reader.u8()?;
-        let length = i64::from(reader.u32()?);
-        let offset = i64::from(reader.u32()?) - start as i64;
-        let index = |value: i64| -> usize {
-            (if value < 0 {
-                data.len() as i64 + value
-            } else {
-                value
+        let length = reader.u32()? as usize;
+        let offset = reader.u32()? as usize;
+        if !seen.insert(id) {
+            return Err(Error::malformed(at, "FEDAUTHINFO duplicate option"));
+        }
+        let begin = offset
+            .checked_sub(start)
+            .filter(|begin| {
+                begin
+                    .checked_add(length)
+                    .is_some_and(|end| end <= data.len())
             })
-            .clamp(0, data.len() as i64) as usize
-        };
-        let begin = index(offset);
-        let end = index(offset + length).max(begin);
-        let raw = &data[begin..end];
-        let units = raw
+            .ok_or_else(|| Error::malformed(at, "FEDAUTHINFO option bounds"))?;
+        if length % 2 != 0 {
+            return Err(Error::malformed(at, "FEDAUTHINFO option length"));
+        }
+        let units: Vec<u16> = data[begin..begin + length]
             .as_chunks::<2>()
             .0
             .iter()
             .map(|unit| u16::from_le_bytes(*unit))
-            .collect::<Vec<_>>();
-        let mut text = String::from_utf16_lossy(&units);
-        // Python treats a final high surrogate plus an incomplete next unit
-        // as one truncated sequence. Other odd trailing bytes add U+FFFD.
-        if !raw.len().is_multiple_of(2)
-            && !units
-                .last()
-                .is_some_and(|unit| (0xd800..=0xdbff).contains(unit))
-        {
-            text.push('\u{fffd}');
-        }
+            .collect();
+        let text = String::from_utf16(&units)
+            .map_err(|_| Error::malformed(at, "FEDAUTHINFO option text"))?;
         match id {
-            1 => info.sts_url = text,
-            2 => info.resource = text,
+            1 => sts_url = Some(text),
+            2 => resource = Some(text),
             _ => {}
         }
     }
-    Ok(info)
+    Ok(Info {
+        resource: resource.ok_or_else(|| Error::malformed(0, "FEDAUTHINFO SPN"))?,
+        sts_url: sts_url.unwrap_or_default(),
+    })
 }
 
 /// Library 2 (MSAL/ADAL), the PRELOGIN echo bit, then the acquisition workflow.

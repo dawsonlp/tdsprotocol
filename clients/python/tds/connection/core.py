@@ -768,7 +768,10 @@ class ConnectionCore:
                 if not done:
                     continue
             if info is not None and isinstance(login, logins.EntraLogin):
-                where = _fed_auth_info(info)
+                try:
+                    where = _fed_auth_info(info)
+                except ValueError as e:
+                    raise ConnectError("log in", f"the server's FEDAUTHINFO is malformed: {e}") from None
                 spn, sts_url = where.get(FedAuthInfoId.SPN, ""), where.get(FedAuthInfoId.STS_URL, "")
                 self._step("log in", f"the server asks for a token for {spn} from {sts_url}")
                 token = yield from self._obtain(f"a token for {spn} from {sts_url}", login.fetch, spn, sts_url)

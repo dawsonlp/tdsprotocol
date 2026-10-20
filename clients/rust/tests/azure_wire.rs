@@ -92,7 +92,7 @@ fn supplementary_unicode_counts_utf16_bytes_and_nonce_has_no_length_prefix() {
 }
 
 #[test]
-fn fedauthinfo_fields_match_python_at_every_fragment_boundary() {
+fn fedauthinfo_fields_and_refusals_match_python_at_every_fragment_boundary() {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/azure/wire.json")).unwrap();
     for case in fixture["info_cases"].as_array().unwrap() {
         let bytes = unhex(case["token"].as_str().unwrap());
@@ -101,6 +101,15 @@ fn fedauthinfo_fields_match_python_at_every_fragment_boundary() {
             decoder.feed(&bytes[..split]).unwrap();
             assert!(decoder.next_record().unwrap().is_none());
             decoder.feed(&bytes[split..]).unwrap();
+            if let Some(reason) = case["error"].as_str() {
+                // Python refuses this token (strict parsing, PY-AZ-01); so must Rust.
+                assert!(
+                    decoder.next_record().is_err(),
+                    "{} split {split}: Python refused it: {reason}",
+                    case["id"]
+                );
+                continue;
+            }
             let tds_client::Record::FedAuthInfo(info) = decoder.next_record().unwrap().unwrap()
             else {
                 panic!()
