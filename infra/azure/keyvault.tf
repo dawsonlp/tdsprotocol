@@ -13,7 +13,7 @@ resource "azurerm_key_vault" "tds" {
   network_acls {
     default_action = "Deny"
     bypass         = "AzureServices"
-    ip_rules       = [var.client_ip]
+    ip_rules       = [var.client_ip, azurerm_public_ip.runner.ip_address]
   }
 }
 

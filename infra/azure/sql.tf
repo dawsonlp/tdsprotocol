@@ -25,6 +25,13 @@ resource "azurerm_mssql_firewall_rule" "developer" {
   end_ip_address   = var.client_ip
 }
 
+resource "azurerm_mssql_firewall_rule" "runner" { # managed-identity logins come from the runner
+  name             = "runner"
+  server_id        = azurerm_mssql_server.tds.id
+  start_ip_address = azurerm_public_ip.runner.ip_address
+  end_ip_address   = azurerm_public_ip.runner.ip_address
+}
+
 resource "azurerm_mssql_database" "tds" {
   name                        = "tds"
   server_id                   = azurerm_mssql_server.tds.id

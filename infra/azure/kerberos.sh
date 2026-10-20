@@ -1,14 +1,26 @@
 #!/bin/sh
-# Run the Kerberos tests on the runner (D-62): copy the driver there, take a ticket for the domain's test user (its
-# password goes in on standard input, never on a command line), and run tests/test_kerberos_azure.py.
+# On the runner (D-62): Kerberos and managed-identity logins, for Python and Rust. Copies the drivers there, takes a
+# ticket for the domain's test user (its password goes in on standard input, never on a command line), runs Python's
+# tests/test_kerberos_azure.py and paired.py identity, then Rust's runner_ tests, and finally checks that without a
+# ticket Rust refuses instead of falling back to NTLM. Only azure.json, paired.py and the public CA go to the runner.
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
+repo="$here/../.."
 runner=$(python3 -c "import json; print(json.load(open('$here/azure.json'))['runner_public_ip'])")
 domain=$(python3 -c "import json; print(json.load(open('$here/azure.json'))['domain'])")
 key="$here/secrets/runner_ed25519"
-ssh_="ssh -i $key -o StrictHostKeyChecking=accept-new -o BatchMode=yes tds@$runner"
-rsync -a --delete -e "ssh -i $key -o StrictHostKeyChecking=accept-new -o BatchMode=yes" \
-    --exclude .venv --exclude __pycache__ --exclude .pytest_cache "$here/../../clients/python/" "tds@$runner:tds/"
+ssh_opts="-i $key -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+ssh_="ssh $ssh_opts tds@$runner"
+rsync -a --delete -e "ssh $ssh_opts" --exclude .venv --exclude __pycache__ --exclude .pytest_cache \
+    "$repo/clients/python/" "tds@$runner:tds/"
+rsync -a --delete -e "ssh $ssh_opts" --exclude target "$repo/clients/rust/" "tds@$runner:rust/clients/rust/"
+$ssh_ "mkdir -p rust/infra/azure/secrets"
+scp -q $ssh_opts "$here/azure.json" "$here/paired.py" "tds@$runner:rust/infra/azure/"
+scp -q $ssh_opts "$here/secrets/ca.pem" "tds@$runner:rust/infra/azure/secrets/ca.pem"
 python3 -c "import json; print(json.load(open('$here/secrets/secrets.json'))['test_user_password'])" \
     | $ssh_ "kinit tdsuser@$(echo $domain | tr a-z A-Z) >/dev/null && klist | head -3"
 $ssh_ "cd tds && ~/.local/bin/uv sync -q --extra kerberos && TDS_KERBEROS_HOST=tdssql.$domain ~/.local/bin/uv run -q pytest -q -p no:cacheprovider tests/test_kerberos_azure.py"
+$ssh_ "cd tds && ~/.local/bin/uv run -q python ~/rust/infra/azure/paired.py identity"
+cargo="cd rust/clients/rust && ~/.cargo/bin/cargo test --locked --features azure-keyvault,system-gssapi --test azure_live --"
+$ssh_ "$cargo --ignored --test-threads=1 --nocapture runner_"
+$ssh_ "kdestroy && TDS_EXPECT_NO_TICKET=1 $cargo --ignored --nocapture runner_without_a_ticket"

@@ -48,12 +48,15 @@ resource "tls_private_key" "runner" {
   algorithm = "ED25519"
 }
 
-resource "azurerm_linux_virtual_machine" "runner" { # where the Kerberos tests run, inside the domain's network
-  name                  = "vm-tds-runner"
-  computer_name         = "tdsrunner"
-  resource_group_name   = azurerm_resource_group.tds.name
-  location              = azurerm_resource_group.tds.location
-  size                  = "Standard_B1ms"
+resource "azurerm_linux_virtual_machine" "runner" { # Kerberos and managed-identity tests, inside the domain's network
+  name                = "vm-tds-runner"
+  computer_name       = "tdsrunner"
+  resource_group_name = azurerm_resource_group.tds.name
+  location            = azurerm_resource_group.tds.location
+  size                = "Standard_B2ms" # 8 GB: compiling the Rust client with the Azure SDK
+  identity {
+    type = "SystemAssigned" # the managed identity the Entra tests log in as
+  }
   admin_username        = "tds"
   network_interface_ids = [azurerm_network_interface.runner.id]
   admin_ssh_key {
