@@ -85,5 +85,5 @@ and fix. Evidence collected 2026-10-20 (`paired.py review` and a capture):
 ### I. Finish
 - [x] I1. Full Rust matrix: 251 default / 103 core / 327 all-features, 0 failed, strict Clippy, rustdoc, 62/62 Docker live; Azure paired check 117 Rust tests in 16 steps, source unchanged; Python 926 passed
 - [x] I2. Evidence record, handover, credential inventory, review backlog, roadmap and Python changelog updated
-- [ ] I3. PR `azure-auth-followups` → `main`, merged
-- [ ] I4. Expiry rehearsal: let the Logic App delete the resource group at the deadline, check the inventory, then `terraform destroy` for the app registration and state, and purge the soft-deleted vault
+- [x] I3. PR #4 `azure-auth-followups` → `main`, merged (`13ce471`)
+- [x] I4. **Replaced at the owner's request:** instead of waiting for the Logic App (due 2026-10-21 18:59 UTC), the deployment was torn down with `terraform destroy` on 2026-10-20 at 22:36 UTC: 39 resources destroyed, state empty. Checked afterwards: `rg-tds-rust-azure` not found, no soft-deleted vault, no SQL server, no app registration; the deleted registration was purged from Entra's recycle bin. Local `azure.json`, `secrets/`, state and plan were deleted. **The self-delete Logic App therefore remains untested:** the automatic-expiry rehearsal is still open for a future deployment.

@@ -97,8 +97,8 @@
     "<ul>",
     "<li>[x] I1. Full Rust matrix: 251 default / 103 core / 327 all-features, 0 failed, strict Clippy, rustdoc, 62/62 Docker live; Azure paired check 117 Rust tests in 16 steps, source unchanged; Python 926 passed</li>",
     "<li>[x] I2. Evidence record, handover, credential inventory, review backlog, roadmap and Python changelog updated</li>",
-    "<li>[ ] I3. PR <code>azure-auth-followups</code> → <code>main</code>, merged</li>",
-    "<li>[ ] I4. Expiry rehearsal: let the Logic App delete the resource group at the deadline, check the inventory, then <code>terraform destroy</code> for the app registration and state, and purge the soft-deleted vault</li>",
+    "<li>[x] I3. PR #4 <code>azure-auth-followups</code> → <code>main</code>, merged (<code>13ce471</code>)</li>",
+    "<li>[x] I4. <strong>Replaced at the owner's request:</strong> instead of waiting for the Logic App (due 2026-10-21 18:59 UTC), the deployment was torn down with <code>terraform destroy</code> on 2026-10-20 at 22:36 UTC: 39 resources destroyed, state empty. Checked afterwards: <code>rg-tds-rust-azure</code> not found, no soft-deleted vault, no SQL server, no app registration; the deleted registration was purged from Entra's recycle bin. Local <code>azure.json</code>, <code>secrets/</code>, state and plan were deleted. <strong>The self-delete Logic App therefore remains untested:</strong> the automatic-expiry rehearsal is still open for a future deployment.</li>",
     "</ul>",
   ].join('\n');
   window.TDS.page(page);

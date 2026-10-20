@@ -16,7 +16,10 @@ what the campaign found, and what remains unproven.
   Key Vault, a domain controller, SQL Server 2022 on Windows, an Ubuntu runner
   with a managed identity, a service principal, a budget and the self-delete
   Logic App.
-- **Limits:** the group deletes itself at 2026-10-21 18:59 UTC; budget USD 25.
+- **Limits:** the group would delete itself at 2026-10-21 18:59 UTC; budget USD 25.
+- **Torn down:** with `terraform destroy` at the owner's request, 2026-10-20
+  22:36 UTC, after about 3.6 hours; everything verified gone, the app
+  registration purged from Entra's recycle bin. The self-delete was not exercised.
 - **Clients:** Rust at branch `rust-azure-integration`; Python `tds` at the same
   commit; Microsoft.Data.SqlClient 7.1.1 in Microsoft's .NET 10 SDK image.
 
