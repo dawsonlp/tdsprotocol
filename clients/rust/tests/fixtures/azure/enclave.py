@@ -79,6 +79,12 @@ else:
                 +result("isiiii",[(1,"@v",2,2,0,1)],True)+result("x",[(info,)],False))
     output["description"]=encode(description(local.sign_master_key_metadata("master.pem")))
     output["description_denied"]=encode(description(bytes(256)))
+    # The same description with the vault-wrapped key and vault metadata signature.
+    vault_wrapped=base64.b64decode(key_fixture["wrapped"])
+    output["description_vault"]=encode(
+        result("iiiixxsssbx",[(0,5,7,1,b"version1",vault_wrapped,"AZURE_KEY_VAULT",key_fixture["path"],"RSA_OAEP",True,
+                               base64.b64decode(key_fixture["metadata_signature"]))],True)
+        +result("isiiii",[(1,"@v",2,2,0,1)],True)+result("x",[(info,)],False))
     output["column_root"]=encode(hashlib.sha256(b"public disposable CEK 0").digest())
     (HERE/"enclave.json").write_text(json.dumps(output,indent=2)+"\n")
     print("Generated Python fixed-P384 session, package and version-two batch/RPC")

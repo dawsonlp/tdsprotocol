@@ -60,6 +60,7 @@ def main():
         ("rust-integrated-regressions", ["cargo", "test", "--manifest-path", "clients/rust/Cargo.toml", "--offline", "--locked", "--all-features", "--test", "authentication", "--test", "config"]),
         ("rust-key-policy",["cargo","test","--manifest-path","clients/rust/Cargo.toml","--offline","--locked","--all-features","--lib","encryption::"]),
         ("rust-key-enclave",["cargo","test","--manifest-path","clients/rust/Cargo.toml","--offline","--locked","--all-features","--test","key_providers","--test","keyvault","--test","enclave_wire","--test","enclave_connection"]),
+        ("rust-cross-feature",["cargo","test","--manifest-path","clients/rust/Cargo.toml","--offline","--locked","--all-features","--test","azure_cross"]),
         ("python-read-rust-keys",[str(python),"clients/rust/tests/fixtures/azure/key_providers.py","--check",str(output/"local.json"),str(output/"vault.json")]),
         ("python-read-rust-enclave",[str(python),"clients/rust/tests/fixtures/azure/enclave.py","--check",str(output/"enclave.json")]),
     ]

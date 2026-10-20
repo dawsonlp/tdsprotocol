@@ -1,87 +1,20 @@
 #![cfg(feature = "encryption")]
+#[path = "support/enclave.rs"]
+mod enclave;
 mod support;
-use aws_lc_rs::{
-    agreement::{self, ECDH_P384, PrivateKey, UnparsedPublicKey},
-    digest::{SHA256, digest},
-};
-use base64::{Engine, engine::general_purpose::STANDARD};
-use std::{sync::Arc, time::Duration};
+use aws_lc_rs::digest::{SHA256, digest};
+use enclave::{bytes, fixture, peer_key, read_call, root_from_parameters};
+use std::time::Duration;
 use tds_client::{
-    encryption::{self, KeyFuture, KeyOperation, KeyProvider, MasterKey, Plaintext, WrappedKey},
+    encryption::{self, WrappedKey},
     requests::decode,
     *,
 };
-fn fixture() -> serde_json::Value {
-    serde_json::from_str(include_str!("fixtures/azure/enclave.json")).unwrap()
-}
-fn bytes(f: &serde_json::Value, name: &str) -> Vec<u8> {
-    STANDARD.decode(f[name].as_str().unwrap()).unwrap()
-}
 fn acknowledgement() -> Vec<u8> {
     vec![
         0xe3, 8, 0, 7, 5, 9, 4, 0xd0, 0, 0x34, 0, 0xae, 4, 8, 0, 0, 0, 2, 3, b'V', 0, b'B', 0,
         b'S', 0, 0xff,
     ]
-}
-struct Root([u8; 32]);
-impl KeyProvider for Root {
-    fn name(&self) -> &str {
-        "peer"
-    }
-    fn open<'a>(&'a self, _: &'a str, _: KeyOperation) -> KeyFuture<'a, Arc<dyn MasterKey>> {
-        Box::pin(async move { Ok(Arc::new(Root(self.0)) as Arc<dyn MasterKey>) })
-    }
-}
-impl MasterKey for Root {
-    fn unwrap<'a>(&'a self, _: &'a WrappedKey, _: KeyOperation) -> KeyFuture<'a, Plaintext> {
-        Box::pin(async move { Plaintext::copy(&self.0) })
-    }
-    fn wrap<'a>(&'a self, _: &'a Plaintext, _: KeyOperation) -> KeyFuture<'a, Vec<u8>> {
-        Box::pin(async { unreachable!() })
-    }
-    fn sign_metadata(&self, _: bool, _: KeyOperation) -> KeyFuture<'_, Vec<u8>> {
-        Box::pin(async { unreachable!() })
-    }
-    fn verify_metadata<'a>(&'a self, _: bool, _: &'a [u8], _: KeyOperation) -> KeyFuture<'a, bool> {
-        Box::pin(async { unreachable!() })
-    }
-}
-fn peer_key(root: [u8; 32]) -> encryption::KeySession {
-    encryption::KeySession::with_providers(
-        vec![Arc::new(Root(root))],
-        Default::default(),
-        Duration::from_secs(2),
-    )
-    .unwrap()
-}
-fn root_from_parameters(parameters: &[u8]) -> [u8; 32] {
-    assert_eq!(
-        &parameters[..20],
-        &[
-            2, 0, 0, 0, 0, 0, 0, 0, 104, 0, 0, 0, b'E', b'C', b'K', b'3', 48, 0, 0, 0
-        ]
-    );
-    let mut seed = [0; 48];
-    seed[47] = 2;
-    let private = PrivateKey::from_private_key(&ECDH_P384, &seed).unwrap();
-    let mut point = vec![4];
-    point.extend(&parameters[20..]);
-    agreement::agree(
-        &private,
-        UnparsedPublicKey::new(&ECDH_P384, point),
-        (),
-        |secret| Ok(digest(&SHA256, secret).as_ref().try_into().unwrap()),
-    )
-    .unwrap()
-}
-fn read_call(body: &[u8]) -> decode::Call {
-    let decode::Request::Rpc { mut calls, .. } =
-        decode::request_with_enclaves(packet::RPC, body, true).unwrap()
-    else {
-        panic!("RPC")
-    };
-    assert_eq!(calls.len(), 1);
-    calls.remove(0)
 }
 #[tokio::test]
 async fn facade_authorizes_keys_shares_counter_and_recreates_session_after_invalidation() {
@@ -180,6 +113,7 @@ async fn facade_authorizes_keys_shares_counter_and_recreates_session_after_inval
             );
             peer.reply(&support::done(0)).await;
         }
+        peer.expect_eof().await; // Stay connected until the client closes.
     });
     let connection = Connection::connect(options).await.unwrap();
     let policies = encryption::Policies {
@@ -278,6 +212,7 @@ async fn enclave_stale_refusal_is_redescribed_once_and_second_refusal_is_returne
                 })
                 .await;
             }
+            peer.expect_eof().await; // Stay connected until the client closes.
         });
         let connection = Connection::connect(options).await.unwrap();
         let encrypted = connection
@@ -342,6 +277,7 @@ async fn unsigned_enclave_key_is_refused_before_application_sql() {
         // encrypted statement was queued after authorization failed.
         assert_eq!(peer.message().await.0, packet::BATCH);
         peer.reply(&support::done(0)).await;
+        peer.expect_eof().await; // Stay connected until the client closes.
     });
     let connection = Connection::connect(options).await.unwrap();
     let encrypted = connection
