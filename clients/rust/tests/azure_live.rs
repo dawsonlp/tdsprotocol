@@ -233,7 +233,11 @@ async fn mac_entra_tokens_up_front_and_mid_login_route_and_name_the_user() {
                 // destination's. Deferred: Azure's gateway routes without
                 // FEDAUTHINFO, so only the destination asks (Python matches).
                 let resources = provider.resources();
-                assert_eq!(resources.len(), if deferred { 1 } else { 2 }, "{resources:?}");
+                assert_eq!(
+                    resources.len(),
+                    if deferred { 1 } else { 2 },
+                    "{resources:?}"
+                );
                 if deferred {
                     assert!(
                         resources
@@ -729,5 +733,287 @@ async fn runner_without_a_ticket_kerberos_and_negotiate_are_refused() {
             "no login was attempted: {error}"
         );
         println!("NO TICKET {method:?}: refused before login: {error}");
+    }
+}
+
+// ---------------------------------------------------------------- Part B, live
+
+struct Empty;
+impl TokenProvider for Empty {
+    fn acquire<'a>(&'a self, _: TokenRequest<'a>) -> TokenFuture<'a> {
+        Box::pin(async { Ok(AccessToken::new(String::new(), None)) })
+    }
+}
+
+/// B-2: an empty token is sent unchanged (as Python does); Azure decides. It
+/// closes the connection during login, without an error token; Python's client
+/// observes the same ("the server closed the connection") for both flows.
+#[tokio::test]
+#[ignore = "live Azure campaign: Part B"]
+async fn mac_b2_azure_closes_the_connection_on_an_empty_token() {
+    let lab = lab();
+    for deferred in [false, true] {
+        let options = azure_sql(
+            &lab,
+            entra("empty", deferred),
+            TokenProviders::new().with("empty", Arc::new(Empty)),
+        );
+        let error = Connection::connect(options).await.err().expect("refused");
+        assert!(matches!(error.cause().kind, ErrorKind::Closed), "{error}");
+        assert_eq!(error.step, tds_client::Step::Login);
+        assert_eq!(error.execution, tds_client::Execution::NotSent);
+        println!("B-2 empty token deferred={deferred}: {error}");
+    }
+}
+
+fn az(args: &[&str]) -> String {
+    let done = std::process::Command::new("az")
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        done.status.success(),
+        "az {}: {}",
+        args[..3].join(" "),
+        String::from_utf8_lossy(&done.stderr)
+    );
+    String::from_utf8(done.stdout).unwrap().trim().to_owned()
+}
+
+/// B-4: vault refusals against the real Key Vault.
+#[tokio::test]
+#[ignore = "live Azure campaign: Part B"]
+async fn mac_b4_key_vault_missing_key_tampered_envelope_and_rotation() {
+    let lab = lab();
+    let key_url = lab.get("key_vault_key_id");
+    let vault_url = key_url.split("/keys/").next().unwrap().to_owned();
+    let vault_name = vault_url
+        .trim_start_matches("https://")
+        .split('.')
+        .next()
+        .unwrap()
+        .to_owned();
+    let store = AzureKeyVaultKeyStore::new(cli_credential());
+    let op = KeyOperation::default();
+    let wrapped_by = async |path: &str| {
+        let master = store.open(path, op.clone()).await.unwrap();
+        let wrapped = master
+            .wrap(&Plaintext::copy(&[7; 32]).unwrap(), op.clone())
+            .await
+            .unwrap();
+        tds_client::encryption::WrappedKey {
+            provider: "AZURE_KEY_VAULT".into(),
+            path: path.into(),
+            algorithm: "RSA_OAEP".into(),
+            encrypted: wrapped,
+        }
+    };
+    let unwrap = async |path: &str, key: &tds_client::encryption::WrappedKey| {
+        let master = store.open(path, op.clone()).await.unwrap();
+        master.unwrap(key, op.clone()).await
+    };
+
+    let good = wrapped_by(key_url).await;
+    assert_eq!(unwrap(key_url, &good).await.unwrap().as_bytes(), [7; 32]);
+    let missing = format!("{vault_url}/keys/tds-missing-key");
+    let error = unwrap(&missing, &good).await.unwrap_err();
+    assert!(
+        matches!(error, tds_client::encryption::Error::Provider(_)),
+        "{error:?}"
+    );
+    println!("B-4 missing key: {error}");
+    let mut tampered = good.clone();
+    *tampered.encrypted.last_mut().unwrap() ^= 1;
+    assert_eq!(
+        unwrap(key_url, &tampered).await.unwrap_err(),
+        tds_client::encryption::Error::Authentication
+    );
+    println!("B-4 tampered envelope signature: Authentication");
+
+    // A dedicated key, so rotation leaves the campaign's tables intact.
+    let name = "tds-rotation";
+    az(&[
+        "keyvault",
+        "key",
+        "create",
+        "--vault-name",
+        &vault_name,
+        "--name",
+        name,
+        "--kty",
+        "RSA",
+        "--size",
+        "2048",
+        "--ops",
+        "wrapKey",
+        "unwrapKey",
+        "sign",
+        "verify",
+        "-o",
+        "none",
+    ]);
+    let versionless = format!("{vault_url}/keys/{name}");
+    let pinned = az(&[
+        "keyvault",
+        "key",
+        "show",
+        "--vault-name",
+        &vault_name,
+        "--name",
+        name,
+        "--query",
+        "key.kid",
+        "-o",
+        "tsv",
+    ]);
+    let by_versionless = wrapped_by(&versionless).await;
+    let by_pinned = wrapped_by(&pinned).await;
+    az(&[
+        "keyvault",
+        "key",
+        "create",
+        "--vault-name",
+        &vault_name,
+        "--name",
+        name,
+        "--kty",
+        "RSA",
+        "--size",
+        "2048",
+        "--ops",
+        "wrapKey",
+        "unwrapKey",
+        "sign",
+        "verify",
+        "-o",
+        "none",
+    ]); // a new current version
+    assert_eq!(
+        unwrap(&pinned, &by_pinned).await.unwrap().as_bytes(),
+        [7; 32]
+    );
+    let after = unwrap(&versionless, &by_versionless).await;
+    println!(
+        "B-4 after rotation: pinned path unwraps; versionless path: {:?}",
+        after.as_ref().map(|_| "unwrapped")
+    );
+    assert_eq!(
+        after.unwrap_err(),
+        tds_client::encryption::Error::Authentication,
+        "the new version cannot verify the old envelope"
+    );
+    az(&[
+        "keyvault",
+        "key",
+        "delete",
+        "--vault-name",
+        &vault_name,
+        "--name",
+        name,
+        "-o",
+        "none",
+    ]);
+}
+
+/// B-6: after pool return the session resets; a new wrapper re-authorizes
+/// keys and establishes a new enclave session (Rust's agreed scope).
+#[tokio::test]
+#[ignore = "live Azure campaign: Part B (after the paired Key Vault test)"]
+async fn mac_b6_enclave_queries_work_again_after_pool_return() {
+    let lab = lab();
+    let mut options = azure_sql(
+        &lab,
+        entra("cli", false),
+        TokenProviders::new().with("cli", cli()),
+    );
+    options.enclave_attestation = Some(EnclaveAttestation::None);
+    drop(connect(options.clone()).await);
+    let pool = Pool::new(options, 1).unwrap();
+    for round in 1..=2 {
+        let lease = pool.acquire().await.unwrap();
+        let providers: Vec<Arc<dyn KeyProvider>> =
+            vec![Arc::new(AzureKeyVaultKeyStore::new(cli_credential()))];
+        let encrypted = lease
+            .encrypted_with_providers(providers, Policies::default(), Duration::from_secs(60))
+            .await
+            .unwrap();
+        let mut channel = encrypted.serial_channel().await.unwrap();
+        let like = channel
+            .execute(
+                "SELECT name FROM dbo.rust_enclave WHERE name LIKE @p ORDER BY id",
+                "@p nvarchar(50)",
+                vec![Param::new(
+                    "@p",
+                    nvarchar(Collation(
+                        lease.session().await.unwrap().collation.try_into().unwrap(),
+                    )),
+                    Some(nvarchar_value("A%")),
+                )],
+            )
+            .await
+            .unwrap()
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(
+            names(like.result_sets()[0].rows().unwrap()),
+            ["Ada", "Alan"]
+        );
+        channel.close().await.unwrap();
+        let statistics = encrypted.statistics();
+        assert!(statistics.authorized_keys >= 1 && statistics.enclave_packages >= 1);
+        println!(
+            "B-6 lease {round}: authorized keys={} packages={}",
+            statistics.authorized_keys, statistics.enclave_packages
+        );
+        encrypted.close().await;
+        assert_eq!(lease.release().await.unwrap(), ReleaseOutcome::Returned);
+    }
+    pool.close().await.unwrap();
+}
+
+/// B-9: the `tds` CLI's Entra modes with the signed-in Azure CLI user.
+#[tokio::test]
+#[ignore = "live Azure campaign: Part B"]
+async fn mac_b9_cli_entra_modes_log_in() {
+    let lab = lab();
+    let roots = ["/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .unwrap();
+    for mode in ["entra-upfront", "entra-deferred"] {
+        let done = std::process::Command::new(env!("CARGO_BIN_EXE_tds"))
+            .args([
+                "--host",
+                lab.get("azure_sql_server"),
+                "--port",
+                "1433",
+                "--database",
+                lab.get("azure_sql_database"),
+                "--auth",
+                mode,
+                "--ca-file",
+                roots,
+                "--timeout",
+                "60",
+                "--query",
+                "SELECT SUSER_SNAME() AS who",
+            ])
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&done.stdout);
+        assert!(
+            done.status.success(),
+            "{mode}: {out} {}",
+            String::from_utf8_lossy(&done.stderr)
+        );
+        assert!(out.contains('@'), "{mode}: {out}");
+        println!(
+            "B-9 tds --auth {mode}: {}",
+            out.lines()
+                .filter(|l| l.contains('@'))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
     }
 }

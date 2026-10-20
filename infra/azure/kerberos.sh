@@ -11,10 +11,10 @@ domain=$(python3 -c "import json; print(json.load(open('$here/azure.json'))['dom
 key="$here/secrets/runner_ed25519"
 ssh_opts="-i $key -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
 ssh_="ssh $ssh_opts tds@$runner"
+$ssh_ "mkdir -p rust/clients/rust rust/infra/azure/secrets"
 rsync -a --delete -e "ssh $ssh_opts" --exclude .venv --exclude __pycache__ --exclude .pytest_cache \
     "$repo/clients/python/" "tds@$runner:tds/"
 rsync -a --delete -e "ssh $ssh_opts" --exclude target "$repo/clients/rust/" "tds@$runner:rust/clients/rust/"
-$ssh_ "mkdir -p rust/infra/azure/secrets"
 scp -q $ssh_opts "$here/azure.json" "$here/paired.py" "tds@$runner:rust/infra/azure/"
 scp -q $ssh_opts "$here/secrets/ca.pem" "tds@$runner:rust/infra/azure/secrets/ca.pem"
 python3 -c "import json; print(json.load(open('$here/secrets/secrets.json'))['test_user_password'])" \

@@ -33,10 +33,20 @@ impl TokenCredential for Credential {
         })
     }
 }
+/// Like a real vault, only the fixture's key version (`/keys/MyKey/Version1`)
+/// verifies its signatures; any other key or version answers "not valid".
 #[derive(Debug, Default)]
 pub struct Vault {
     pub calls: Mutex<Vec<(String, Value)>>,
     pub denied: AtomicBool,
+    /// Every operation answers 404, as for a deleted or never-created key.
+    pub missing: AtomicBool,
+    /// Every operation answers 200 with a body the SDK cannot read.
+    pub malformed: AtomicBool,
+    /// Hold each operation until `release` is notified; `entered` signals arrival.
+    pub hold: AtomicBool,
+    pub entered: tokio::sync::Notify,
+    pub release: tokio::sync::Notify,
     pub requests: AtomicUsize,
 }
 impl Vault {
@@ -78,6 +88,24 @@ impl HttpClient for Vault {
             .lock()
             .unwrap()
             .push((path.clone(), body.clone()));
+        if self.hold.load(Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        if self.missing.load(Ordering::SeqCst) {
+            return Ok(AsyncRawResponse::from_bytes(
+                StatusCode::NotFound,
+                Headers::new(),
+                br#"{"error":{"code":"KeyNotFound","message":"artificial-missing-key"}}"#.to_vec(),
+            ));
+        }
+        if self.malformed.load(Ordering::SeqCst) {
+            return Ok(AsyncRawResponse::from_bytes(
+                StatusCode::Ok,
+                Headers::new(),
+                b"not json".to_vec(),
+            ));
+        }
         if self.denied.load(Ordering::SeqCst) {
             return Ok(AsyncRawResponse::from_bytes(StatusCode::Forbidden,Headers::new(),br#"{"error":{"code":"Forbidden","message":"artificial-private-provider-diagnostic"}}"#.to_vec()));
         }
@@ -109,7 +137,8 @@ impl HttpClient for Vault {
             assert_eq!(body["alg"], "RS256");
             let digest = value("digest");
             let signature = value("value");
-            json!({"value":(digest==b(&f,"body_digest")&&signature==b(&f,"signature")) || (digest==b(&f,"metadata_digest")&&signature==b(&f,"metadata_signature"))})
+            let fixture_key = path.starts_with("/keys/MyKey/Version1/");
+            json!({"value":fixture_key && ((digest==b(&f,"body_digest")&&signature==b(&f,"signature")) || (digest==b(&f,"metadata_digest")&&signature==b(&f,"metadata_signature")))})
         } else {
             panic!("unexpected vault operation {path}")
         };
