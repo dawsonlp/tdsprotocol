@@ -211,3 +211,39 @@ def test_two_challenges_in_one_reply_are_refused_before_provider_dispatch():
     with pytest.raises(ConnectError, match='multiple Windows authentication challenges'):
         logged_in(FakeServer([b'\xed\x01\x00X\xed\x01\x00Y'+login_ack()]), WindowsLogin(provider))
     assert provider.exchange.challenges == [None]
+
+
+class Reporting(Provider):
+    """A provider whose exchange reports completion: complete only after it has answered `finishing_after` steps."""
+
+    def __init__(self, tokens, finishing_after):
+        super().__init__(tokens)
+        self.finishing_after = finishing_after
+
+    def begin(self, host, port):
+        from test_logins import Exchange
+        finishing_after = self.finishing_after
+
+        class Completing(Exchange):
+            @property
+            def complete(self):
+                return len(self.challenges) >= finishing_after
+
+        self.begun.append((host, port))
+        self.exchange = Completing(self.tokens)
+        return self.exchange
+
+
+def test_a_provider_that_reports_completion_is_checked_when_the_server_accepts():
+    """H1: the server's LOGINACK before the provider finished (for Kerberos, without the server's proof of identity)
+    refuses the login; a provider that finished is accepted."""
+    with pytest.raises(ConnectError, match="before the Windows provider finished"):
+        logged_in(FakeServer([login_ack()]), WindowsLogin(Reporting([b'FIRST'], finishing_after=2)))
+    final = b'\xed\x05\x00FINAL'  # the server's final token arrives with its LOGINACK
+    logged_in(FakeServer([final + login_ack()]), WindowsLogin(Reporting([b'FIRST', b''], finishing_after=2)))
+
+
+def test_a_provider_without_completion_keeps_the_legacy_behavior():
+    from test_logins import Exchange
+    assert not hasattr(Exchange([]), "complete")
+    logged_in(FakeServer([login_ack()]), WindowsLogin(Provider([b'FIRST'])))

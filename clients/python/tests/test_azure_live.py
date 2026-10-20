@@ -114,17 +114,24 @@ def test_a_sql_login_on_azure_sql(azure):
 
 
 def test_the_azure_only_features(azure, credential):
+    """PY-AZ-06: each unimplemented Azure feature, requested alone, warns; one the server enables refuses the login
+    before any SQL. Both campaigns saw AZURE_SQL_SUPPORT, AZURE_DNS_CACHING and GLOBAL_TRANSACTIONS enabled."""
     places, _ = azure
     asked = [Feature.AZURE_SQL_SUPPORT, Feature.AZURE_DNS_CACHING, Feature.ENHANCED_ROUTING, Feature.GLOBAL_TRANSACTIONS]
-
-    async def go():
-        async with await tds.connect(**azure_sql(places), login=tds.EntraToken(entra_token(credential)),
-                                     features=[*tds.DEFAULT_FEATURES, *asked]) as connection:
-            return {f: connection.features.get(f) for f in asked}
-
-    accepted = run(go())
-    print("acknowledged:", {f.name: v for f, v in accepted.items()})  # recorded on Connect › Edge cases
-    assert any(v is not None for v in accepted.values())
+    outcomes = {}
+    for feature in asked:
+        async def go():
+            async with await tds.connect(**azure_sql(places), login=tds.EntraToken(entra_token(credential)),
+                                         features=[*tds.DEFAULT_FEATURES, feature]) as connection:
+                return connection.features.get(feature)
+        with pytest.warns(tds.UnsupportedFeatureWarning):
+            try:
+                outcomes[feature.name] = f"allowed ({run(go())!r})"
+            except tds.UnsupportedFeatureEnabled as e:
+                assert e.feature == feature
+                outcomes[feature.name] = "refused: enabled"
+    print("outcomes:", outcomes)  # recorded on Connect › Edge cases
+    assert any(v.startswith("refused") for v in outcomes.values())
 
 
 # --------------------------------------------------------------------------- Windows logins (NTLM) and the Browser

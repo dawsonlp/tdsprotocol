@@ -505,16 +505,42 @@ FEDAUTHINFO_OPTION = Struct("option", [
 
 
 def _fed_auth_info(f) -> dict:
-    """Each option's data, as UTF-16 text. The offsets count from the option count, which comes before the options."""
+    """Each option's data, as UTF-16 text. The offsets count from the option count, which comes before the options.
+
+    Strict (PY-AZ-01, owner decision 2026-10-20): each option lies inside the token, has an even length and valid
+    UTF-16, and appears once, and the SPN is present. Azure's real FEDAUTHINFO meets all of these (observed
+    2026-10-20); a token that doesn't raises ValueError, naming the problem."""
     start = 4 + 9 * len(f.options)
-    return {o.id: f.data[o.offset - start : o.offset - start + o.length].decode("utf-16-le", "replace") for o in f.options}
+    out = {}
+    for o in f.options:
+        begin = o.offset - start
+        if o.id in out:
+            raise ValueError(f"option {o.id} appears twice")
+        if begin < 0 or begin + o.length > len(f.data):
+            raise ValueError(f"option {o.id} lies outside the token")
+        if o.length % 2:
+            raise ValueError(f"option {o.id} has an odd length, not UTF-16")
+        try:
+            out[o.id] = f.data[begin:begin + o.length].decode("utf-16-le")
+        except UnicodeDecodeError:
+            raise ValueError(f"option {o.id} is not valid UTF-16") from None
+    if FedAuthInfoId.SPN not in out:
+        raise ValueError("it names no SPN (option 2)")
+    return out
+
+
+def _fed_auth_info_summary(f) -> str:
+    try:
+        return ", ".join(f"{k.name.lower() if hasattr(k, 'name') else k}: {v}" for k, v in _fed_auth_info(f).items())
+    except ValueError as e:
+        return f"malformed: {e}"
 
 
 FEDAUTHINFO = Token(0xEE, "FEDAUTHINFO", length=U32, source="§2.2.7.12", body=Struct("FEDAUTHINFO", [
     Field("count", U32),
     Field("options", Repeat("count", FEDAUTHINFO_OPTION)),
     Field("data", Raw()),
-], summary=lambda f: ", ".join(f"{k.name.lower() if hasattr(k, 'name') else k}: {v}" for k, v in _fed_auth_info(f).items())))
+], summary=_fed_auth_info_summary))
 
 
 TOKENS = TokenStream([ENVCHANGE, INFO, ERROR, LOGINACK, FEATUREEXTACK, DONE, DONEPROC, DONEINPROC, COLMETADATA, ORDER,

@@ -96,11 +96,28 @@ Observations for later decisions, not defects:
   distinguishable for Negotiate (different major status), but "expired" is
   specifically identified only for Kerberos.
 
+## Follow-ups on the same deployment (2026-10-20)
+
+After the campaign the owner lifted the Python freeze; the
+[follow-up checklist](azure-auth-followups.md) has the details.
+
+| Item | Result |
+|---|---|
+| Session recovery | ✅ shown live: the server ends a session with `KILL`; Rust and Python recover with one new token and the SET options restored, under the Proxy and Redirect policies (a relay can't be used: the gateway routes by LOGIN7's server name) |
+| Windows password rotation | ✅ Rust and Python pools re-read once after 18452 and reopen with the new password; a domain account's old password still works within AD's NTLM grace period, a local account's does not |
+| Python Kerberos opening deadline | ✅ fixed: an unreachable KDC returns at the 1.5 s deadline (it previously blocked for over 4 s) |
+| Unsupported Azure features in Python | ✅ PY-AZ-06 applied; live outcomes match Rust |
+| FEDAUTHINFO | ✅ strict in both clients; Azure's real layout passes |
+| Synchronous credentials in Python | ✅ event-loop stall 0.42 s → 0.015 s |
+| Credential modes | ✅ client assertion and Azure Developer CLI, both clients, both flows |
+| Provider completion in Python | ✅ checked when the server accepts; real NTLM and Kerberos pass |
+| GCP-proven Rust paths | ✅ portable explicit Kerberos (runner) and native signed-in Kerberos (SQL VM); native Negotiate to the machine itself chooses NTLM, refused unless fallback is allowed |
+
 ## Not shown live
 
-- **Recovery:** the Redirect policy sends clients straight to the database node,
-  so a local relay cannot break the connection. Recovery stays covered by
-  controlled tests.
+- **Recovery through a broken network path:** recovery is shown live after the
+  server ends the session; a network break cannot be simulated with a relay,
+  because Azure's gateway routes by LOGIN7's server name.
 - **Credential modes** without an environment here: workload identity, client
   assertion, azd, Azure Pipelines, certificate service principal (see the
   [inventory](rust-azure-credential-inventory.md)).

@@ -4,11 +4,11 @@ Read in this order: packet → prelogin → login7 → tokens → requests → r
 The design is in docs/design.
 """
 
-from .connection.core import CaptureError, ChannelClosed, ConnectError, LoginRejected, OutOfTurn, Routed, SerialChannelMisuse, SessionNotRecovered
+from .connection.core import CaptureError, ChannelClosed, ConnectError, LoginRejected, OutOfTurn, Routed, SerialChannelMisuse, SessionNotRecovered, UnsupportedFeatureEnabled
 from .connection.shell import ChannelCleanupError, Connection, Pool, SerialChannel, connect
 from .config import ConfigService, ConfigurationError, ConnectionConfig, ConnectionServices, StaticConfig
 from . import browser, transactions, types
-from .login7 import DEFAULT_FEATURES, Feature
+from .login7 import DEFAULT_FEATURES, Feature, UnsupportedFeatureWarning
 from .logins import EntraLogin, EntraToken, WindowsLogin, Workflow
 from .requests import DEFAULT, Batch, BulkInsert, BulkRows, Builtin, Call, CallOptions, Calls, Param
 from .response import (Cancelled, FetchedResponse, NotYetRead, Response, ResultSet, RowsNotAvailable, ServerError,
@@ -18,5 +18,5 @@ __all__ = ["ConfigService", "ConfigurationError", "ConnectionConfig", "Connectio
            "BulkInsert", "BulkRows", "transactions", "browser", "Feature", "DEFAULT_FEATURES", "WindowsLogin", "EntraToken", "EntraLogin", "Workflow",
            "DEFAULT", "types", "Response", "FetchedResponse", "ResultSet", "StreamedRow", "ValueStream",
            "Unread", "ServerError", "Cancelled", "NotYetRead", "RowsNotAvailable",
-           "ConnectError", "LoginRejected", "Routed", "SessionNotRecovered", "SerialChannelMisuse", "OutOfTurn",
+           "ConnectError", "UnsupportedFeatureEnabled", "UnsupportedFeatureWarning", "LoginRejected", "Routed", "SessionNotRecovered", "SerialChannelMisuse", "OutOfTurn",
            "ChannelClosed", "ChannelCleanupError", "CaptureError"]

@@ -1,5 +1,37 @@
 # Python client release notes
 
+## Unreleased — Azure authentication follow-ups
+
+Live testing on the Azure campaign's deployment (see the
+[follow-up plan](../../docs/design/experiments/azure-auth-followups.md)):
+
+- The built-in `Spnego` adapter runs pyspnego's blocking calls in a bounded pool
+  of worker threads, so a Kerberos KDC that never answers can no longer hold an
+  opening past its deadline or stall the event loop. Live: an unreachable KDC
+  returned at the 1.5 s deadline (it previously blocked for more than 4 s). A
+  canceled call finishes in its worker and its result is released.
+- The azure-identity adapter runs synchronous credentials in a worker thread
+  (PY-AZ-03): the Azure CLI credential stalled the event loop for 0.42 s per
+  login; live, the stall is now 0.015 s, the same as the asynchronous credential.
+- Unimplemented Azure features follow the owner-approved policy (PY-AZ-06): an
+  explicit request warns (`UnsupportedFeatureWarning`); an enabled
+  acknowledgement raises `UnsupportedFeatureEnabled` before any SQL, with no
+  retry; unrequested, malformed and duplicate acknowledgements are protocol
+  errors. A feature appearing twice in any feature list is refused.
+- `ConnectionConfig` can name explicit Windows credentials (`windows="ntlm"`,
+  `"kerberos"` or `"negotiate"`); each opening makes its own Spnego provider, so
+  a pool picks up a rotated Windows password after one 18452 refusal, as Rust's
+  does. Live: local and domain accounts rotated during a pool's life.
+- A Windows provider's exchange may report `complete`. If it is False when the
+  server accepts the login (for Kerberos, without the server's proof of
+  identity), the login is refused, as in Rust; `Spnego` reports pyspnego's
+  completion. Providers without the property are accepted as before (H1).
+- FEDAUTHINFO is parsed strictly (PY-AZ-01): options outside the token, odd
+  lengths, invalid UTF-16, duplicates and a missing SPN are refused, as in Rust.
+- The Key Vault key store refuses lengths that point past an encrypted column
+  key before any vault call, raises `KeyNotDecrypted` for a path that is not a
+  vault key URL, and refuses an unwrapped root that is not 32 bytes (PY-AZ-05).
+
 ## Unreleased — GCP authentication follow-up
 
 Rust/GCP interoperability testing exposed shared-client corrections:

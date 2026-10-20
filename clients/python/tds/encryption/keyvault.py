@@ -51,12 +51,20 @@ class AzureKeyVaultKeyStore:
         ciphertext_length = int.from_bytes(encrypted[3:5], "little")
         start = 5 + path_length
         body, signature = encrypted[: start + ciphertext_length], encrypted[start + ciphertext_length :]
-        client = self._for(key_path)
+        if len(body) < start + ciphertext_length or not signature:  # the lengths point past the value (PY-AZ-05)
+            raise KeyNotDecrypted(f"{where}: its lengths point past the end of the encrypted column key")
+        try:
+            client = self._for(key_path)
+        except Exception as e:  # not a Key Vault key URL (PY-AZ-05: this was raised raw, outside the key error)
+            raise KeyNotDecrypted(f"{where}: not a Key Vault key URL ({type(e).__name__}: {str(e)[:200]})") from None
         try:
             valid = client.verify(self._sign, hashlib.sha256(body).digest(), signature).is_valid
             if not valid:
                 raise KeyNotDecrypted(f"{where}: its signature doesn't verify with this Key Vault key")
-            return client.unwrap_key(self._wrap, body[start:]).key
+            root = client.unwrap_key(self._wrap, body[start:]).key
+            if len(root) != 32:  # an AEAD_AES_256_CBC_HMAC_SHA_256 column key is 32 bytes (PY-AZ-05, as in Rust)
+                raise KeyNotDecrypted(f"{where}: Key Vault returned {len(root)} bytes, not a 32-byte column key")
+            return root
         except KeyNotDecrypted:
             raise
         except Exception as e:  # the vault refused, or couldn't be reached. The error includes the vault's own message.

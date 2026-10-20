@@ -41,22 +41,31 @@ def fixture():
                 kind="deferred", workflow=int(workflow), echo=echo,
                 expected=fed_auth_feature(EntraLogin(lambda *_: "unused", workflow), None, echo, None).hex()))
     info_cases = []
-    # Values and directories include valid and unusual but sliceable Python
-    # inputs. Compare behavior; these do not certify a service's accepted data.
+    # Strict parsing in both clients (PY-AZ-01, owner decision 2026-10-20). "azure" has the layout Azure SQL sent
+    # live (SPN first, then the STS URL); the others must be refused. Python's outcome is the expectation.
+    spn, sts = "https://database.windows.net/".encode("utf-16-le"), "https://login.windows.net/tenant".encode("utf-16-le")
     for name, options, data in [
         ("normal", [(1, 6, 22), (2, 6, 28)], "stsdbλ".encode("utf-16-le")),
+        ("azure", [(2, len(spn), 22), (1, len(sts), 22 + len(spn))], spn + sts),
         ("missing", [], b""),
+        ("no-spn", [(1, 6, 13)], "sts".encode("utf-16-le")),
         ("duplicate", [(2, 2, 22), (2, 2, 24)], b"A\x00B\x00"),
+        ("odd-length", [(2, 3, 13)], b"A\x00B\x00"),
         ("odd-surrogate", [(1, 3, 13)], b"\x00\xd8\xff"),
+        ("lone-surrogate", [(2, 2, 13)], b"\x00\xd8"),
         ("clipped", [(1, 90, 99), (2, 90, 21)], b"abcdef"),
+        ("before-data", [(2, 2, 4)], b"A\x00"),
     ]:
         record = SimpleNamespace(options=[SimpleNamespace(id=i, length=n, offset=o) for i,n,o in options], data=data)
-        expected = _fed_auth_info(record)
+        try:
+            expected = _fed_auth_info(record)
+            outcome = dict(sts_url=expected.get(1, ""), resource=expected.get(2, ""))
+        except ValueError as e:
+            outcome = dict(error=str(e))
         body = len(options).to_bytes(4, "little") + b"".join(
             bytes([i]) + n.to_bytes(4,"little") + o.to_bytes(4,"little") for i,n,o in options) + data
         token = b"\xee" + len(body).to_bytes(4,"little") + body
-        info_cases.append(dict(id=name, scenario="A04", token=token.hex(),
-                               sts_url=expected.get(1,""), resource=expected.get(2,"")))
+        info_cases.append(dict(id=name, scenario="A04", token=token.hex(), **outcome))
     return dict(schema=1, scope="Artificial public FEDAUTH wire vectors; no live acceptance",
                 sources={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                          for p in [ROOT / "clients/python/tds/logins.py", ROOT / "clients/python/tds/tokens.py"]},

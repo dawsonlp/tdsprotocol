@@ -2,8 +2,8 @@
   "schema": 1,
   "scope": "Artificial public FEDAUTH wire vectors; no live acceptance",
   "sources": {
-    "clients/python/tds/logins.py": "04fe1bf493936c0ce8a327189190fddf6c4564f895c4757fdfd1873b8c4a6bf4",
-    "clients/python/tds/tokens.py": "c112736a3aebea29fb3bf1bac86dc2d22aa812deabce46a9b606394ee0d703da"
+    "clients/python/tds/logins.py": "094ddd0b9593763cd7216a3218b63e1ed5e735166b5c5dad39bcac9447a83f3a",
+    "clients/python/tds/tokens.py": "b9dd70bdc0672cca1ddb06d4284a941414113860ab08d27f40fc841cb9e3b117"
   },
   "cases": [
     {
@@ -220,32 +220,59 @@
       "resource": "dbλ"
     },
     {
+      "id": "azure",
+      "scenario": "A04",
+      "token": "ee9000000002000000023a00000016000000014000000050000000680074007400700073003a002f002f00640061007400610062006100730065002e00770069006e0064006f00770073002e006e00650074002f00680074007400700073003a002f002f006c006f00670069006e002e00770069006e0064006f00770073002e006e00650074002f00740065006e0061006e007400",
+      "sts_url": "https://login.windows.net/tenant",
+      "resource": "https://database.windows.net/"
+    },
+    {
       "id": "missing",
       "scenario": "A04",
       "token": "ee0400000000000000",
-      "sts_url": "",
-      "resource": ""
+      "error": "it names no SPN (option 2)"
+    },
+    {
+      "id": "no-spn",
+      "scenario": "A04",
+      "token": "ee130000000100000001060000000d000000730074007300",
+      "error": "it names no SPN (option 2)"
     },
     {
       "id": "duplicate",
       "scenario": "A04",
       "token": "ee1a0000000200000002020000001600000002020000001800000041004200",
-      "sts_url": "",
-      "resource": "B"
+      "error": "option 2 appears twice"
+    },
+    {
+      "id": "odd-length",
+      "scenario": "A04",
+      "token": "ee110000000100000002030000000d00000041004200",
+      "error": "option 2 has an odd length, not UTF-16"
     },
     {
       "id": "odd-surrogate",
       "scenario": "A04",
       "token": "ee100000000100000001030000000d00000000d8ff",
-      "sts_url": "�",
-      "resource": ""
+      "error": "option 1 has an odd length, not UTF-16"
+    },
+    {
+      "id": "lone-surrogate",
+      "scenario": "A04",
+      "token": "ee0f0000000100000002020000000d00000000d8",
+      "error": "option 2 is not valid UTF-16"
     },
     {
       "id": "clipped",
       "scenario": "A04",
       "token": "ee1c00000002000000015a00000063000000025a00000015000000616263646566",
-      "sts_url": "",
-      "resource": "�"
+      "error": "option 1 lies outside the token"
+    },
+    {
+      "id": "before-data",
+      "scenario": "A04",
+      "token": "ee0f000000010000000202000000040000004100",
+      "error": "option 2 lies outside the token"
     }
   ]
 }

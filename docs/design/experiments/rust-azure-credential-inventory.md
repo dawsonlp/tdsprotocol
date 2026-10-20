@@ -32,13 +32,13 @@ callable, or a Rust `TokenProvider` implementation.
 
 | Credential mode | Python 1.26.0 | Rust `azure_identity` 1.0.0 | Rust development evidence | Live campaign |
 |---|---|---|---|---|
-| Azure CLI | `AzureCliCredential` | `AzureCliCredential`, `AzureTokenProvider::azure_cli` | `official_cli_credential_uses_selected_tenant_and_scope_without_driver_cache`, `owned_executor_cancellation_terminates_and_reaps_its_child` | Yes: both clients, both flows |
-| Service principal, secret | `ClientSecretCredential` | `ClientSecretCredential` | `service_principal_uses_configured_tenant_form_and_sdk_cache` | Yes: both clients, plus .NET SqlClient |
-| Managed identity | `ManagedIdentityCredential` | `ManagedIdentityCredential` | Generic adapter only: `official_credential_adapter_preserves_scope_and_expiry_without_authority_override` | Yes: runner VM system-assigned identity |
+| Azure CLI | `AzureCliCredential` | `AzureCliCredential`, `AzureTokenProvider::azure_cli` | `official_cli_credential_uses_selected_tenant_and_scope_without_driver_cache`, `owned_executor_cancellation_terminates_and_reaps_its_child` | **Passed live**, both clients, both flows; also the `tds` CLI |
+| Service principal, secret | `ClientSecretCredential` | `ClientSecretCredential` | `service_principal_uses_configured_tenant_form_and_sdk_cache` | **Passed live**, both clients, plus .NET SqlClient |
+| Managed identity | `ManagedIdentityCredential` | `ManagedIdentityCredential` | Generic adapter only: `official_credential_adapter_preserves_scope_and_expiry_without_authority_override` | **Passed live** (runner VM), both clients, both flows; vault sign/verify |
 | Service principal, certificate | `CertificateCredential` | `ClientCertificateCredential` only behind the SDK's `client_certificate` feature (OpenSSL); not enabled | None | No: exception E-CRED-1 |
 | Workload identity | `WorkloadIdentityCredential` | `WorkloadIdentityCredential` | None | No: needs a federated Kubernetes/CI environment |
-| Client assertion | `ClientAssertionCredential` | `ClientAssertionCredential` | None | No |
-| Azure Developer CLI | `AzureDeveloperCliCredential` | `AzureDeveloperCliCredential` | None | No |
+| Client assertion | `ClientAssertionCredential` | `ClientAssertionCredential` | None | **Passed live** 2026-10-20, both clients, both flows (application-signed assertion with a disposable certificate) |
+| Azure Developer CLI | `AzureDeveloperCliCredential` | `AzureDeveloperCliCredential` | None | **Passed live** 2026-10-20, both clients, both flows (azd signed in as the service principal) |
 | Azure Pipelines | `AzurePipelinesCredential` | `AzurePipelinesCredential` | None | No |
 | Developer-tool chain | Part of `DefaultAzureCredential` | `DeveloperToolsCredential` (Azure CLI, then azd) | None | No |
 | Default chain | `DefaultAzureCredential` | **None** | — | No: gap E-CRED-2 |
@@ -50,14 +50,14 @@ callable, or a Rust `TokenProvider` implementation.
 ## Exceptions recorded at code completion
 
 - **E-CRED-1, certificate service principal.** Enabling the SDK's
-  `client_certificate` feature adds an OpenSSL dependency. That is a dependency
-  decision for the owner, not part of this checkpoint. The secret form covers the
-  service-principal path in the campaign.
+  `client_certificate` feature adds an OpenSSL dependency; the owner decided on
+  2026-10-20 not to enable it. Certificate-based service principals use
+  `ClientAssertionCredential` with an application-signed assertion, shown live.
 - **E-CRED-2, credentials the Rust SDK does not provide.** Rust cannot match
   Python's "any azure-identity credential" because the official Rust SDK has no
   default chain, environment, interactive or delegated credentials. These are SDK
   gaps, not driver gaps: the driver accepts any `TokenCredential` or
   `TokenProvider`. They stay listed here rather than being silently deferred.
 
-Workload identity, client assertion, azd and Pipelines compile through the same
-generic adapter but have no environment evidence. They are not claimed as working.
+Workload identity and Azure Pipelines compile through the same generic adapter
+but have no environment evidence; they are not claimed as working.

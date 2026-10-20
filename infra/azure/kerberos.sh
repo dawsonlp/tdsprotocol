@@ -23,6 +23,9 @@ python3 -c "import json; print(json.load(open('$here/secrets/secrets.json'))['te
     | $ssh_ "kinit tdsuser@$(echo $domain | tr a-z A-Z) >/dev/null && klist | head -3"
 $ssh_ "cd tds && ~/.local/bin/uv sync -q --extra kerberos && TDS_KERBEROS_HOST=tdssql.$domain ~/.local/bin/uv run -q pytest -q -p no:cacheprovider tests/test_kerberos_azure.py"
 $ssh_ "cd tds && ~/.local/bin/uv run -q python ~/rust/infra/azure/paired.py identity"
+# The Kerberos opening deadline (follow-up D): a KDC that never answers must not hold the opening.
+python3 -c "import json; print(json.load(open('$here/secrets/secrets.json'))['test_user_password'])" \
+    | $ssh_ "cd tds && ~/.local/bin/uv run -q python ~/rust/infra/azure/paired.py kdc-deadline"
 cargo="cd rust/clients/rust && ~/.cargo/bin/cargo test --locked --features azure-keyvault,system-gssapi --test azure_live --"
 $ssh_ "$cargo --ignored --test-threads=1 --nocapture runner_"
 # An expired ticket: one minute long, then wait it out. Then no ticket at all.

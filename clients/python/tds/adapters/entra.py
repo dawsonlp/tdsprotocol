@@ -6,6 +6,9 @@
     tds.connect(host, port, login=tds.EntraLogin(fetch(credential)))         # fetched mid-login
 """
 
+import asyncio
+import inspect
+
 RESOURCE = "https://database.windows.net/"
 
 
@@ -14,9 +17,15 @@ def _scope(resource: str) -> str:
 
 
 async def _token(credential, scope: str) -> str:
-    result = credential.get_token(scope)
-    if hasattr(result, "__await__"):
-        result = await result
+    if inspect.iscoroutinefunction(credential.get_token):  # azure.identity.aio's credentials
+        result = await credential.get_token(scope)
+    else:
+        # A synchronous credential can wait on a process (the Azure CLI) or the network. It runs in a worker thread,
+        # so the event loop and the opening's deadline stay in charge (PY-AZ-03: the CLI credential stalled the loop
+        # for 0.42 s per login). A call that outlives a canceled opening finishes in its worker; its token is dropped.
+        result = await asyncio.to_thread(credential.get_token, scope)
+        if hasattr(result, "__await__"):
+            result = await result
     return result.token
 
 

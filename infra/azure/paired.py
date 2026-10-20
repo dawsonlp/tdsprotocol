@@ -4,6 +4,12 @@
     ../../clients/python/.venv/bin/python paired.py read         read Rust's tables (after Rust's paired test)
     ../../clients/python/.venv/bin/python paired.py principal    service-principal logins, both flows
     python paired.py identity                                    managed-identity logins (on the runner)
+    ../../clients/python/.venv/bin/python paired.py recovery     the server ends a session; it is recovered
+    ../../clients/python/.venv/bin/python paired.py rotation     Windows password rotation, explicit connections
+    python paired.py kdc-deadline < password                     on the runner: an unreachable KDC meets the deadline
+    ../../clients/python/.venv/bin/python paired.py review       evidence for PY-AZ-02, 03 and 04 (no changes made)
+    ../../clients/python/.venv/bin/python paired.py assertion    client assertion: certificate, signed JWT, logins
+    ../../clients/python/.venv/bin/python paired.py azd          Azure Developer CLI credential (after azd auth login)
 
 The order is: write, Rust's mac_key_vault_and_enclave_values_round_trip_and_read_python_values with
 TDS_AZURE_PAIRED=1, then read. Both clients use the same Key Vault key, values and expected rows; each creates its own
@@ -25,6 +31,7 @@ PLACES = json.loads((HERE / "azure.json").read_text())
 VAULT_VALUE = "kept in a vault"
 STAFF = [("Ada", 41000), ("Alan", 52000), ("Grace", 61000)]
 TEXT = tds.types.nvarchar(tds.types.MAX)
+CLEANUP = ("DECLARE @i int = 0, @k nvarchar(max); WHILE SUSER_ID(N\'{login}\') IS NOT NULL AND @i < 10 BEGIN SET @k = N\'\'; SELECT @k += N\'BEGIN TRY KILL \' + CAST(session_id AS nvarchar) + N\' END TRY BEGIN CATCH END CATCH;\' FROM sys.dm_exec_sessions WHERE login_name = N\'{login}\'; EXEC (@k); BEGIN TRY DROP LOGIN [{login}] END TRY BEGIN CATCH WAITFOR DELAY \'00:00:01\' END CATCH; SET @i += 1; END")  # end the login's sessions (each may already be gone), then drop it
 
 
 def secrets() -> dict:
@@ -121,6 +128,292 @@ async def logins(credential, expected_user: str, label: str) -> None:
         print(f"PAIRED python {label} {type(login).__name__}: login={name} user={user}")
 
 
+async def recovery() -> None:
+    """Follow-up B: KILL ends the session from an admin connection; explicit recovery asks the token source again
+    and the server rebuilds the session's SET options. Paired with Rust's mac_recovery_after_the_server_ends_the_session."""
+    admin_login = tds.EntraToken(entra_token(cli()))
+    for deferred in (False, True):
+        calls = []
+        inner_token, inner_fetch = entra_token(cli()), entra_fetch(cli())
+        def counted_token():
+            calls.append("token")
+            return inner_token()
+        def counted_fetch(spn, sts):
+            calls.append(spn)
+            return inner_fetch(spn, sts)
+        login = tds.EntraLogin(counted_fetch) if deferred else tds.EntraToken(counted_token)
+        async with await tds.connect(**azure_sql(admin_login)) as admin, await tds.connect(**azure_sql(login)) as c:
+            async with c.serial_channel() as channel:
+                await fetch(channel, "SET DATEFIRST 3; SET TEXTSIZE 100")
+                spid = (await fetch(channel, "SELECT CAST(@@SPID AS int)")).result_sets[0].rows[0][0]
+            before = len(calls)
+            async with admin.serial_channel() as channel:
+                await fetch(channel, f"KILL {spid}")
+            for _ in range(100):
+                if not c.alive:
+                    break
+                await asyncio.sleep(0.1)
+            await c.recover()
+            async with c.serial_channel() as channel:
+                state = (await fetch(channel, "SELECT CAST(@@DATEFIRST AS int), CAST(@@TEXTSIZE AS int)")).result_sets[0].rows[0]
+            assert state == (3, 100), state
+            print(f"PAIRED python recovery deferred={deferred}: recovered; recoveries={c.recoveries} "
+                  f"new token calls={len(calls) - before} state={state} old spid={spid}")
+
+
+def rotation_account(vm: str, action: str, scope: str, name: str, password: str = "") -> None:
+    """scripts/rotation.ps1 on a VM: a throwaway account. The password goes to az as a parameter."""
+    import subprocess
+    done = subprocess.run(["az", "vm", "run-command", "invoke", "-g", PLACES["resource_group"], "-n", vm,
+                           "--command-id", "RunPowerShellScript", "--scripts", f"@{HERE / 'scripts' / 'rotation.ps1'}",
+                           "-o", "json", "--parameters", f"Action={action}", f"Scope={scope}", f"Name={name}",
+                           f"Password={password}"],
+                          capture_output=True, text=True, check=True)
+    messages = json.loads(done.stdout)["value"]
+    assert not any("StdErr" in m["code"] and m["message"].strip() for m in messages), done.stdout
+    assert any(f"{action} done" in m["message"] for m in messages), done.stdout
+
+
+async def rotation() -> None:
+    """Follow-up C, Python: explicit connections, then a pool whose ConnectionConfig names Windows credentials (C3).
+    Whether the old password is still accepted right after the change is recorded (a domain account's previous
+    password stays usable for NTLM for a while); the pool re-reads once after 18452 and opens with the new one."""
+    import secrets as random
+    from tds.adapters.spnego import Spnego
+    context = ssl.create_default_context(cafile=str(HERE / PLACES["sql_vm_ca"]))
+    host = PLACES["sql_vm_public_ip"]
+    def windows(user, password):
+        return {"host": host, "port": 1433, "ssl_context": context, "login": tds.WindowsLogin(Spnego(user, password, "ntlm"))}
+    admin_options = {"host": host, "port": 1433, "user": "tdsadmin", "password": secrets()["sql_admin_password"],
+                     "ssl_context": context}
+    async def who(connection):
+        async with connection.serial_channel() as channel:
+            return (await fetch(channel, "SELECT SUSER_SNAME()")).result_sets[0].rows[0][0]
+    async def who_with(options):
+        async with await tds.connect(**options) as c:
+            return await who(c)
+    class Source:
+        def __init__(self, value):
+            self.value = value
+        async def read(self):
+            return self.value
+    for scope, vm, prefix in (("local", "vm-tds-sql", "TDSSQL"), ("domain", "vm-tds-dc", "TDS")):
+        first, second = (f"Tds-{random.token_hex(9)}-Rr7!" for _ in range(2))
+        name = f"tdsrot-{random.token_hex(4)}"  # new each run: a reused name can map to a stale SID
+        login = f"{prefix}\\{name}"
+        rotation_account(vm, "create", scope, name, first)
+        async with await tds.connect(**admin_options) as admin:
+            async with admin.serial_channel() as channel:
+                await fetch(channel, f"IF SUSER_ID(N'{login}') IS NULL CREATE LOGIN [{login}] FROM WINDOWS")
+        assert (await who_with(windows(login, first))).upper() == login.upper()
+        source = Source(tds.ConnectionConfig(host, 1433, login, first, windows="ntlm"))
+        pool = tds.Pool.from_config(source, size=3, services=tds.ConnectionServices(ssl_context=context))
+        async with pool.connection() as old:
+            assert (await who(old)).upper() == login.upper()
+            rotation_account(vm, "set", scope, name, second)
+            try:
+                await who_with(windows(login, first))
+                explicit = "still accepted right after the change"
+            except tds.LoginRejected as e:
+                assert "18452" in str(e), e
+                explicit = "refused (18452)"
+            try:
+                async with pool.connection():
+                    pooled = "a pool opening with the old password still logged in"
+            except tds.LoginRejected:
+                pooled = "a pool opening with the old password was refused and not retried (settings unchanged)"
+            source.value = tds.ConnectionConfig(host, 1433, login, second, windows="ntlm")
+            async with pool.connection() as new:
+                assert (await who(new)).upper() == login.upper()
+            assert (await who_with(windows(login, second))).upper() == login.upper()
+        idle_after = pool.idle
+        await pool.close()
+        async with await tds.connect(**admin_options) as admin:
+            async with admin.serial_channel() as channel:
+                await fetch(channel, CLEANUP.format(login=login))
+        rotation_account(vm, "remove", scope, name)
+        print(f"PAIRED python rotation {scope}: explicit old password {explicit}; {pooled}; the pool re-read the new "
+              f"password and logged in; idle connections after returning both: {idle_after}")
+
+
+async def kdc_deadline() -> None:
+    """Follow-up D, on the runner: the GCP failure again. A Kerberos config whose KDC never answers (an unused address
+    in the lab's subnet), an empty ticket cache and an explicit password make gssapi wait on the KDC. The opening must
+    return at its 1.5 s deadline while the event loop keeps running. The password arrives on standard input."""
+    import os
+    import tempfile
+    import time
+    from tds.adapters.spnego import Spnego
+    password = sys.stdin.readline().strip()
+    realm = PLACES["domain"].upper()
+    scratch = tempfile.mkdtemp(prefix="tds-kdc-")
+    config = os.path.join(scratch, "krb5.conf")
+    with open(config, "w") as f:
+        f.write(f"[libdefaults]\n  default_realm = {realm}\n  dns_lookup_kdc = false\n  rdns = false\n"
+                f"[realms]\n  {realm} = {{\n    kdc = 10.42.1.250\n  }}\n")
+    os.environ["KRB5_CONFIG"], os.environ["KRB5CCNAME"] = config, f"FILE:{os.path.join(scratch, 'empty-cache')}"
+    ticks = 0
+
+    async def heartbeat():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0.01)
+
+    beat = asyncio.create_task(heartbeat())
+    started = time.monotonic()
+    try:
+        await tds.connect(f"tdssql.{PLACES['domain']}", 1433, timeout=1.5,
+                          ssl_context=ssl.create_default_context(cafile=str(HERE / PLACES["sql_vm_ca"])),
+                          login=tds.WindowsLogin(Spnego(f"tdsuser@{realm}", password, "kerberos")))
+        outcome = "connected (unexpected)"
+    except tds.ConnectError as e:
+        outcome = str(e).splitlines()[0]
+    elapsed = time.monotonic() - started
+    beat.cancel()
+    print(f"PAIRED python kdc-deadline: returned after {elapsed:.2f} s with the event loop ticking {ticks} times: {outcome}")
+    assert elapsed < 2.5 and ticks > 50, (elapsed, ticks)
+
+
+async def review() -> None:
+    """Live evidence for the Python Azure review backlog; it changes nothing.
+
+    PY-AZ-02: real refusal texts (wrong service principal secret, managed identity off-VM, a vault key that forbids
+    unwrap), checked for the secret and for anything token-like. PY-AZ-03: the event loop's longest stall during a
+    login through a synchronous credential, and through the asynchronous one. PY-AZ-04: enclave queries over two
+    connections from one Encryption context, and concurrently on one MARS connection."""
+    import re
+    import subprocess
+    import time
+    from azure.identity import AzureCliCredential, ClientSecretCredential, ManagedIdentityCredential
+    from azure.identity.aio import AzureCliCredential as AsyncCliCredential
+    from tds.encryption import Encryption
+    from tds.encryption.keyvault import AzureKeyVaultKeyStore
+
+    canary = "wrong-secret-canary-7f3a"
+    def leaks(text: str) -> list[str]:
+        return [name for name, found in (("secret", canary in text), ("jwt", re.search(r"eyJ[\w-]{10,}\.", text)))
+                if found]
+    refusals = {
+        "service principal, wrong secret": ClientSecretCredential(PLACES["tenant_id"], PLACES["service_principal_client_id"], canary),
+        "managed identity off the VM": ManagedIdentityCredential(),
+    }
+    for label, credential in refusals.items():
+        try:
+            await tds.connect(**azure_sql(tds.EntraToken(entra_token(credential))), timeout=30)
+            print(f"REVIEW PY-AZ-02 {label}: unexpectedly connected")
+        except Exception as e:
+            text = str(e)
+            print(f"REVIEW PY-AZ-02 {label}: {type(e).__name__}, {len(text)} chars, leaks={leaks(text)}: {text[:240]!r}")
+    vault = PLACES["key_vault_key_id"].split("/keys/")[0]
+    name = f"tds-sign-only-{int(time.time())}"
+    vault_name = vault.removeprefix("https://").split(".")[0]
+    subprocess.run(["az", "keyvault", "key", "create", "--vault-name", vault_name, "--name", name, "--kty", "RSA",
+                    "--size", "2048", "--ops", "sign", "verify", "-o", "none"], check=True)
+    try:
+        store = AzureKeyVaultKeyStore(cli())
+        envelope = store.encrypt_column_key(PLACES["key_vault_key_id"])  # a valid envelope from the campaign key
+        try:
+            store.decrypt_column_key(f"{vault}/keys/{name}", "RSA_OAEP", envelope)
+        except Exception as e:
+            text = str(e)
+            print(f"REVIEW PY-AZ-02 vault key without unwrap: {type(e).__name__}, leaks={leaks(text)}: {text[:240]!r}")
+    finally:
+        subprocess.run(["az", "keyvault", "key", "delete", "--vault-name", vault_name, "--name", name, "-o", "none"])
+        subprocess.run(["az", "keyvault", "key", "purge", "--vault-name", vault_name, "--name", name],
+                       capture_output=True)
+
+    for label, credential in (("synchronous", AzureCliCredential()), ("asynchronous", AsyncCliCredential())):
+        gaps, last = [], time.monotonic()
+        async def heartbeat():
+            nonlocal last
+            while True:
+                await asyncio.sleep(0.01)
+                now = time.monotonic(); gaps.append(now - last); last = now
+        beat = asyncio.create_task(heartbeat())
+        async with await tds.connect(**azure_sql(tds.EntraToken(entra_token(credential)))):
+            pass
+        beat.cancel()
+        if hasattr(credential, "close") and asyncio.iscoroutinefunction(credential.close):
+            await credential.close()
+        print(f"REVIEW PY-AZ-03 {label} Azure CLI credential: longest event-loop stall {max(gaps):.3f} s during the login")
+
+    login = tds.EntraToken(entra_token(cli()))
+    encryption = Encryption([store], enclave_attestation="none")
+    like = executesql("SELECT name FROM dbo.python_enclave WHERE name LIKE @p ORDER BY id", "@p nvarchar(50)",
+                      tds.Param("@p", tds.types.nvarchar(50), "A%"))
+    for round_ in (1, 2):
+        async with await encryption.connect(**azure_sql(login)) as connection:
+            async with connection.serial_channel() as channel:
+                rows = (await fetch(channel, like)).result_sets[0].rows
+        print(f"REVIEW PY-AZ-04 connection {round_} from one Encryption context: {rows}")
+    async with await encryption.connect(**azure_sql(login), mars=True) as connection:
+        async def one():
+            async with connection.serial_channel() as channel:
+                return (await fetch(channel, like)).result_sets[0].rows
+        results = await asyncio.gather(*(one() for _ in range(4)), return_exceptions=True)
+    print(f"REVIEW PY-AZ-04 four concurrent MARS channels on one connection: {results}")
+
+
+def assertion_jwt() -> str:
+    """A client assertion (RFC 7523) for the campaign's app registration, signed with the disposable certificate's key
+    and valid for ten minutes. Signing is the application's part; the credentials only exchange it for a token."""
+    import base64
+    import hashlib
+    import time
+    import uuid
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    key = serialization.load_pem_private_key((HERE / "secrets" / "assertion-key.pem").read_bytes(), None)
+    cert = x509.load_pem_x509_certificate((HERE / "secrets" / "assertion-cert.pem").read_bytes())
+    b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    header = {"alg": "RS256", "typ": "JWT",
+              "x5t": b64(hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).digest())}
+    now = int(time.time())
+    claims = {"aud": f"https://login.microsoftonline.com/{PLACES['tenant_id']}/oauth2/v2.0/token",
+              "iss": PLACES["service_principal_client_id"], "sub": PLACES["service_principal_client_id"],
+              "jti": str(uuid.uuid4()), "nbf": now - 60, "iat": now, "exp": now + 600}
+    signing_input = f"{b64(json.dumps(header).encode())}.{b64(json.dumps(claims).encode())}"
+    signature = key.sign(signing_input.encode(), padding.PKCS1v15(), hashes.SHA256())
+    return f"{signing_input}.{b64(signature)}"
+
+
+async def assertion() -> None:
+    """Follow-up F1: a disposable certificate on the campaign's app registration (its secret kept), a signed
+    assertion in secrets/assertion.jwt for Rust's mac_client_assertion test, and Python's logins with it."""
+    import datetime as dt
+    import subprocess
+    import time
+    from azure.identity import ClientAssertionCredential
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    if not (HERE / "secrets" / "assertion-cert.pem").exists():
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "tds campaign client assertion")])
+        now = dt.datetime.now(dt.timezone.utc)
+        cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(minutes=5))
+                .not_valid_after(now + dt.timedelta(days=2)).sign(key, hashes.SHA256()))
+        write_secret = lambda path, data: (path.write_bytes(data), path.chmod(0o600))
+        write_secret(HERE / "secrets" / "assertion-key.pem", key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        (HERE / "secrets" / "assertion-cert.pem").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        subprocess.run(["az", "ad", "app", "credential", "reset", "--id", PLACES["service_principal_client_id"],
+                        "--cert", f"@{HERE / 'secrets' / 'assertion-cert.pem'}", "--append", "-o", "none"],
+                       check=True, capture_output=True)
+        print("added a disposable certificate to the app registration; waiting for it to propagate")
+        time.sleep(60)
+    jwt = assertion_jwt()
+    path = HERE / "secrets" / "assertion.jwt"
+    path.write_text(jwt)
+    path.chmod(0o600)
+    credential = ClientAssertionCredential(PLACES["tenant_id"], PLACES["service_principal_client_id"], lambda: jwt)
+    await logins(credential, PLACES["service_principal_name"], "client assertion")
+
+
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "write":
@@ -132,6 +425,19 @@ def main() -> None:
         credential = ClientSecretCredential(PLACES["tenant_id"], PLACES["service_principal_client_id"],
                                             secrets()["service_principal_secret"])
         asyncio.run(logins(credential, PLACES["service_principal_name"], "service principal"))
+    elif mode == "azd":  # follow-up F2: azd signed in as the campaign's service principal
+        from azure.identity import AzureDeveloperCliCredential
+        asyncio.run(logins(AzureDeveloperCliCredential(), PLACES["service_principal_name"], "Azure Developer CLI"))
+    elif mode == "assertion":
+        asyncio.run(assertion())
+    elif mode == "review":
+        asyncio.run(review())
+    elif mode == "kdc-deadline":
+        asyncio.run(kdc_deadline())
+    elif mode == "rotation":
+        asyncio.run(rotation())
+    elif mode == "recovery":
+        asyncio.run(recovery())
     elif mode == "identity":
         from azure.identity import ManagedIdentityCredential
         asyncio.run(logins(ManagedIdentityCredential(), PLACES["runner_identity_name"], "managed identity"))

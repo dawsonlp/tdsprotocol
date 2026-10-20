@@ -1,6 +1,6 @@
 {
-  "scope": "Python wire parity; enabled acknowledgement is a Rust refusal",
-  "python_source_sha256": "7f4428c2d6799030a62a602cb3957b89861ce881c123eb964a07cdc0a7841043",
+  "scope": "Python wire parity; an enabled acknowledgement is refused by both clients",
+  "python_source_sha256": "3e0b81738476ec729fdbd1c1634e7282ef573b328169b07b7fd566daacf77420",
   "cases": [
     {
       "id": 5,

@@ -5,7 +5,7 @@ Reference: LOGIN7. Checked against MS-TDS v20260617, §2.2.6.4.
 
 import enum
 
-from .wire import Field, I32, Pointer, PointerTable, Raw, Reader, Struct, Type, U8, U32, Writer
+from .wire import Field, I32, MalformedMessage, Pointer, PointerTable, Raw, Reader, Struct, Type, U8, U32, Writer
 
 TDS_7_4 = 0x74000004  # LOGIN7 writes it little-endian (04 00 00 74), and LOGINACK writes it big-endian (74 00 00 04)
 
@@ -108,6 +108,18 @@ def result_context(features: dict) -> dict:
     return context
 
 
+UNSUPPORTED = {  # Azure features the driver can request for diagnosis but does not implement (PY-AZ-06)
+    Feature.AZURE_SQL_SUPPORT: "Azure SQL failover-partner support",
+    Feature.AZURE_DNS_CACHING: "Azure DNS caching",
+    Feature.ENHANCED_ROUTING: "enhanced routing",
+    Feature.GLOBAL_TRANSACTIONS: "global transactions",
+}
+
+
+class UnsupportedFeatureWarning(UserWarning):
+    """A login asks for a feature the driver does not implement. The login fails if the server enables it."""
+
+
 def feature_list(features, data: dict | None = None) -> dict:
     """The login's feature list for these features. Each feature has the data that the driver sends, unless data is
     given. The caller gives data as (feature, data), or through `data` (a recovery login's session, D-57). A feature
@@ -134,8 +146,11 @@ class FeatureList(Type):
     def read(self, r: Reader) -> dict:
         features = {}
         while r.peek() != FEATURES_END:
+            at = r.pos
             feature = r.read(Field("feature", U8, enum=Feature))
             n = r.read(Field("length", U32, fmt=lambda v: f"{v} bytes"))
+            if feature in features:  # each feature appears once (MS-TDS §2.2.6.4, §2.2.7.11)
+                raise MalformedMessage(f"feature {feature} appears twice", at, r.tree)
             features[feature] = bytes(r.read(Field("data", Raw(n))))
         r.read(Field("end", U8, fmt=lambda v: "end of the list"))
         return features
