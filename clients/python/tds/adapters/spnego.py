@@ -54,6 +54,12 @@ class Exchange:
     def step(self, challenge: bytes | None):
         return self._step(challenge)
 
+    @property
+    def complete(self) -> bool:
+        """Whether pyspnego's context finished authenticating (H1): read after each step has returned."""
+        context = self._context
+        return bool(context is not None and getattr(context, "complete", False))
+
     async def _step(self, challenge: bytes | None) -> bytes | None:
         loop = asyncio.get_running_loop()
         try:

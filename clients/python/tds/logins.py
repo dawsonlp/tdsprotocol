@@ -50,6 +50,9 @@ class SecurityExchange(Protocol):
         """The next token. Given None, it returns the first token, for LOGIN7. Given the server's challenge, it
         returns the answer to it. It returns None or b"" when there is nothing more to send."""
 
+    # Optional: `complete`, a bool read after the login reply's steps. If it is False when the server accepts the
+    # login, the login is refused (H1). Providers without it are accepted as before.
+
 
 class SecurityProvider(Protocol):
     """What a Windows login takes: an object that begins an exchange of tokens with a server, one per connection."""

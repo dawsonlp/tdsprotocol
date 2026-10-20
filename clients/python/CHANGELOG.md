@@ -22,6 +22,10 @@ Live testing on the Azure campaign's deployment (see the
   `"kerberos"` or `"negotiate"`); each opening makes its own Spnego provider, so
   a pool picks up a rotated Windows password after one 18452 refusal, as Rust's
   does. Live: local and domain accounts rotated during a pool's life.
+- A Windows provider's exchange may report `complete`. If it is False when the
+  server accepts the login (for Kerberos, without the server's proof of
+  identity), the login is refused, as in Rust; `Spnego` reports pyspnego's
+  completion. Providers without the property are accepted as before (H1).
 - FEDAUTHINFO is parsed strictly (PY-AZ-01): options outside the token, odd
   lengths, invalid UTF-16, duplicates and a missing SPN are refused, as in Rust.
 - The Key Vault key store refuses lengths that point past an encrypted column

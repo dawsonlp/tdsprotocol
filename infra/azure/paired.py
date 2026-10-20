@@ -234,6 +234,45 @@ async def rotation() -> None:
               f"password and logged in; idle connections after returning both: {idle_after}")
 
 
+async def kdc_deadline() -> None:
+    """Follow-up D, on the runner: the GCP failure again. A Kerberos config whose KDC never answers (an unused address
+    in the lab's subnet), an empty ticket cache and an explicit password make gssapi wait on the KDC. The opening must
+    return at its 1.5 s deadline while the event loop keeps running. The password arrives on standard input."""
+    import os
+    import tempfile
+    import time
+    from tds.adapters.spnego import Spnego
+    password = sys.stdin.readline().strip()
+    realm = PLACES["domain"].upper()
+    scratch = tempfile.mkdtemp(prefix="tds-kdc-")
+    config = os.path.join(scratch, "krb5.conf")
+    with open(config, "w") as f:
+        f.write(f"[libdefaults]\n  default_realm = {realm}\n  dns_lookup_kdc = false\n  rdns = false\n"
+                f"[realms]\n  {realm} = {{\n    kdc = 10.42.1.250\n  }}\n")
+    os.environ["KRB5_CONFIG"], os.environ["KRB5CCNAME"] = config, f"FILE:{os.path.join(scratch, 'empty-cache')}"
+    ticks = 0
+
+    async def heartbeat():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0.01)
+
+    beat = asyncio.create_task(heartbeat())
+    started = time.monotonic()
+    try:
+        await tds.connect(f"tdssql.{PLACES['domain']}", 1433, timeout=1.5,
+                          ssl_context=ssl.create_default_context(cafile=str(HERE / PLACES["sql_vm_ca"])),
+                          login=tds.WindowsLogin(Spnego(f"tdsuser@{realm}", password, "kerberos")))
+        outcome = "connected (unexpected)"
+    except tds.ConnectError as e:
+        outcome = str(e).splitlines()[0]
+    elapsed = time.monotonic() - started
+    beat.cancel()
+    print(f"PAIRED python kdc-deadline: returned after {elapsed:.2f} s with the event loop ticking {ticks} times: {outcome}")
+    assert elapsed < 2.5 and ticks > 50, (elapsed, ticks)
+
+
 async def review() -> None:
     """Live evidence for the Python Azure review backlog; it changes nothing.
 

@@ -43,9 +43,12 @@ class FakePyspnego:
         fake = self
 
         class Context:
+            complete = False
+
             def step(self, challenge):
                 with fake.lock:
                     fake.steps += 1
+                self.complete = True  # one step finishes this fake's authentication
                 return TOKEN if challenge is None else b""
 
         return Context()

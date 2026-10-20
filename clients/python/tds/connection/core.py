@@ -767,6 +767,11 @@ class ConnectionCore:
                                                  PacketType.WINDOWS_AUTH, bytes(answer))
                 if not done:
                     continue
+            if exchange is not None and done and not refused and getattr(exchange, "complete", True) is False:
+                # H1: the provider says its authentication isn't finished (for Kerberos, the server's own proof of
+                # identity is missing). A provider without `complete` is accepted as before.
+                raise ConnectError("log in", "the server accepted the login before the Windows provider finished "
+                                             "authenticating; the server was not verified")
             if info is not None and isinstance(login, logins.EntraLogin):
                 try:
                     where = _fed_auth_info(info)
