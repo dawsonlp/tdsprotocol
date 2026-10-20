@@ -19,6 +19,7 @@ from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGES = (
+    ("experiments/rust-azure-live-evidence.md", "rust-azure-live", "", "Rust Azure Live Campaign Evidence", "check"),
     ("experiments/rust-azure-code-complete.md", "rust-azure-code-complete", "", "Rust Azure Code-Complete Checkpoint", "check"),
     ("experiments/rust-azure-credential-inventory.md", "rust-azure-credentials", "", "Rust Azure Credential Inventory", "check"),
     ("experiments/rust-azure-key-enclave-evidence.md", "rust-azure-keys-evidence", "", "Rust Azure Key and Enclave Evidence", "check"),

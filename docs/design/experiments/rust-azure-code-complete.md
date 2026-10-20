@@ -108,6 +108,49 @@ development, live testing and fixes are complete.
 | B-10 | A02 | Controlled Entra × MARS × pool |
 | B-11 | Iteration 10 | Enclave SQL with certificate-store keys (controlled) |
 
+## Part B outcome, 2026-10-20
+
+The owner approved Part B on 2026-10-20, with development and testing on the
+running Azure deployment. Every exception is now closed by tests; live results
+are in the [campaign evidence](rust-azure-live-evidence.md).
+
+| ID | Controlled tests | Live |
+|---|---|---|
+| B-1 | `azure_edges`: FEDAUTHINFO refused for upfront and SQL logins, after LOGINACK, on a ninth round, above 64 KiB before buffering | — |
+| B-2 | `azure_edges`: empty token sent unchanged, server's refusal returned; no-expiry token accepted; a token arriving after cancellation has no receiver | Azure closes the connection on an empty token |
+| B-3 | `azure_edges`: wrong certificate at the redirect target refused before its token; closing a pool cancels a waiting Entra opening | — |
+| B-4 | `keyvault`: wrong algorithm and malformed envelopes refused without a vault call; another key or version never verifies; tampered metadata signature; missing key and unreadable response; canceled unwrap issues no later call | missing key, tampered envelope, rotation (pinned vs versionless) |
+| B-5 | path parsing (existing); no native seam, as recommended | `certstore_live::missing_and_wrong_certificates_are_refused` |
+| B-6 | `encryption::enclave`: concurrent packages never reuse a counter; another session's package does not decrypt. `encryption::tests`: a raced establishment keeps the accepted session | enclave queries after pool return |
+| B-7 | `tds-native-gssapi`: refusals keep status numbers that tell absent from expired | absent and expired tickets on the runner |
+| B-8 | `authentication`: wrong Windows password refused with 18452 before SQL | 18452 on the Windows VM |
+| B-9 | `cli_entra`: both modes send the Azure CLI's token with Azure SQL's scope and never print it; Windows options refused before network | `tds --auth entra-*` against Azure SQL |
+| B-10 | `azure_cross::entra_mars_pool_reuses_sessions_with_one_token_per_physical_login` | pool test with MARS on |
+| B-11 | `enclave_connection::certificate_store_named_keys_are_verified_and_released_to_the_enclave` (new `description_certstore` fixture) | — |
+
+**Owner decision (B-7):** system Kerberos refusals keep GSSAPI's major and minor
+status numbers, never its messages, as `ErrorKind::GssapiRefused`. `kind()` reads the
+RFC 2744 routine error, plus the Kerberos ticket-expired minor that MIT reports
+under `GSS_S_FAILURE`. Under Negotiate, SPNEGO substitutes its own minor, so an
+expired ticket is a mechanism failure, still distinct from an absent one.
+
+**Differences from Python, recorded rather than changed** (under this phase's
+evidence rule):
+- **FEDAUTHINFO (B-1):** Rust refuses unexpected or late FEDAUTHINFO, more than 8
+  rounds and messages over 64 KiB. Python ignores or loops, without limits
+  (PY-AZ-01).
+- **Token checks (B-2):** only Rust has the token size bound and the
+  known-expired check. Neither refuses an empty token.
+- **Pool close (B-3):** Rust's pool cancels an in-flight opening. Python's lets it
+  finish, then closes it.
+- **Key Vault (B-4):** only Rust checks the 32-byte root and applies a timeout.
+  Python raises a raw exception for a bad path.
+- **Enclave sessions (B-6):** Rust scopes them to one connection lease and
+  serializes establishment. Python shares them across connections and leases,
+  without a lock (PY-AZ-04).
+- **Ticket errors (B-7):** Python keeps the provider exception; Rust now keeps
+  the status numbers.
+
 ## Not claimed
 
 Azure interoperability is unproven until the live campaign. A skipped Windows

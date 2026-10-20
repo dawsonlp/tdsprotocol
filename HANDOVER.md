@@ -1,6 +1,27 @@
 # Rust client handover
 
-## Current — Rust Azure code-complete checkpoint, 2026-10-20
+## Current — Rust Azure live campaign and Part B, 2026-10-20
+
+`infra/azure` was applied in SW-Dev (`rg-tds-rust-azure`) at 18:59 UTC; the group
+deletes itself at **2026-10-21 18:59 UTC** (Logic App), budget USD 25. Rust,
+Python and SqlClient were run against Azure SQL (Entra by CLI, service principal
+and managed identity), Key Vault, the VBS enclave, NTLM, Kerberos and the
+Windows certificate store. Everything passes; see the
+[live evidence](docs/design/experiments/rust-azure-live-evidence.md).
+
+- **One driver defect, fixed:** encrypted `execute` described parameterless calls.
+  Azure answered with no result sets and Rust refused the statement; Rust now
+  skips the description, as Python does.
+- **Part B (B-1 to B-11):** done, controlled and live. The owner approved B-7:
+  Kerberos refusals keep GSSAPI status numbers (`ErrorKind::GssapiRefused`).
+  Differences from Python are recorded in the
+  [checkpoint](docs/design/experiments/rust-azure-code-complete.md).
+- **Harness races:** four more fake servers waited for EOF only after a
+  repeated-run hunt caught them.
+- **Next:** the owner decides on teardown (`terraform destroy`, then the checks in
+  `infra/azure/README.md`). Rust remains unpublished.
+
+## Preceding — Rust Azure code-complete checkpoint, 2026-10-20
 
 The owner asked for real-Azure testing of this branch. A free local check came
 first: tests were green, but the plan's code-complete bar was not met. The owner

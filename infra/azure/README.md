@@ -45,12 +45,10 @@ On this machine (Python's Key Vault test also needs the local Docker SQL Server)
 
 ```sh
 (cd ../../clients/python && .venv/bin/python -m pytest -m azure)           # Python's baseline
-(cd ../../clients/rust && cargo test --all-features --test azure_live -- --ignored --test-threads=1 --nocapture mac_ \
-   --skip mac_key_vault)                                                   # Rust: Entra, SQL, pools, features, NTLM, Browser
 ../../clients/python/.venv/bin/python paired.py principal                   # Python as the service principal
 ../../clients/python/.venv/bin/python paired.py write                       # Python's Key Vault and enclave tables
-(cd ../../clients/rust && TDS_AZURE_PAIRED=1 cargo test --all-features --test azure_live -- --ignored --nocapture \
-   mac_key_vault)                                                          # Rust writes its own, reads Python's
+(cd ../../clients/rust && TDS_AZURE_PAIRED=1 cargo test --all-features --test azure_live -- --ignored \
+   --test-threads=1 --nocapture mac_)    # Rust: Entra, SQL, pools, features, NTLM, Browser, vault, enclave, Part B
 ../../clients/python/.venv/bin/python paired.py read                        # Python reads Rust's
 dotnet/run.sh                                                               # SqlClient reads both: the tie-breaker
 ./kerberos.sh        # on the runner: Kerberos and managed identity for both clients; no-ticket refusal for Rust

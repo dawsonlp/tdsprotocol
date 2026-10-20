@@ -40,6 +40,7 @@ Read in order. Each part builds on the one before it.
 | Contract | [Rust Azure Feature Policy](experiments/rust-azure-feature-probe-contract.md) | Approved: warn on unsupported request; enabled acknowledgement fails opening | as needed |
 | Plan | [Rust Azure Integration](experiments/rust-azure-integration-plan.md) | Full Python Azure parity: Entra, Key Vault, enclave and campaign provider paths; code completion before cloud testing | as needed |
 | Plan | [Rust/Python Azure Parity Scenarios](experiments/rust-azure-parity-scenarios.md) | Paired behavioral, wire, crypto and lifecycle comparisons; source-test traceability and deferred live acceptance | as needed |
+| Check | [Rust Azure Live Campaign Evidence](experiments/rust-azure-live-evidence.md) | Rust, Python and SqlClient against real Azure SQL, Key Vault, Kerberos, NTLM and the Windows certificate store; findings and limits | as needed |
 | Check | [Rust Azure Code-Complete Checkpoint](experiments/rust-azure-code-complete.md) | Scenario-to-test traceability, cross-feature tests and owner-agreed exceptions B-1 to B-11 before the live campaign | as needed |
 | Check | [Rust Azure Credential Inventory](experiments/rust-azure-credential-inventory.md) | Entra credential modes in Python and Rust, their evidence, live coverage and recorded SDK gaps | as needed |
 | Backlog | [Python Azure Review](experiments/python-azure-review-backlog.md) | Suspected weaknesses and proposed remedies awaiting real-service evidence; no Python production fixes in this phase | as needed |
