@@ -19,7 +19,7 @@ use std::{
 };
 use tds_client::{
     Authentication, Batch, Collation, ConnectOptions, Connection, EnclaveAttestation, ErrorKind,
-    IntegerSize, Param, Pool, ProtocolVersion, ReleaseOutcome, SqlTextBytes, SqlType, Value,
+    IntegerSize, Param, Pool, ProtocolVersion, ReleaseOutcome, SqlType, Value,
     encryption::{KeyOperation, KeyProvider, Plaintext, Policies, keyvault::AzureKeyVaultKeyStore},
     entra::{
         AccessToken, EntraLogin, TokenFuture, TokenProvider, TokenProviders, TokenRequest,
@@ -172,6 +172,7 @@ async fn connect(options: ConnectOptions) -> Connection {
 }
 fn text(value: &Option<Value>) -> String {
     match value {
+        Some(Value::Unicode(t)) => t.to_string().unwrap(),
         Some(Value::Text(t)) => t.decode().unwrap().to_string().unwrap(),
         other => panic!("expected text, got {other:?}"),
     }
@@ -228,9 +229,11 @@ async fn mac_entra_tokens_up_front_and_mid_login_route_and_name_the_user() {
                     route.is_some(),
                     "connection policy Redirect routes every login"
                 );
-                // One request per physical login: the gateway, then the routed destination.
+                // Up front: one token per physical login, the gateway's and the
+                // destination's. Deferred: Azure's gateway routes without
+                // FEDAUTHINFO, so only the destination asks (Python matches).
                 let resources = provider.resources();
-                assert_eq!(resources.len(), 2, "{resources:?}");
+                assert_eq!(resources.len(), if deferred { 1 } else { 2 }, "{resources:?}");
                 if deferred {
                     assert!(
                         resources
@@ -290,7 +293,7 @@ async fn mac_service_principal_logs_in_with_both_flows() {
         let connection = connect(options).await;
         let (login, user, _) = who(&connection).await;
         assert_eq!(user, lab.get("service_principal_name"));
-        assert_eq!(provider.resources().len(), 2);
+        assert_eq!(provider.resources().len(), if deferred { 1 } else { 2 });
         println!("ENTRA service principal deferred={deferred} login={login} user={user}");
         connection.close().await.unwrap();
     }
@@ -470,8 +473,8 @@ fn nvarchar(collation: Collation) -> SqlType {
         collation,
     }
 }
-fn nvarchar_value(collation: Collation, value: &str) -> Value {
-    Value::Text(SqlTextBytes::from_text(collation, &SqlText::from(value)).unwrap())
+fn nvarchar_value(value: &str) -> Value {
+    Value::Unicode(SqlText::from(value))
 }
 fn int() -> SqlType {
     SqlType::Integer {
@@ -572,7 +575,7 @@ async fn mac_key_vault_and_enclave_values_round_trip_and_read_python_values() {
         vec![Param::new(
             "@v",
             nvarchar(collation),
-            Some(nvarchar_value(collation, VAULT_VALUE)),
+            Some(nvarchar_value(VAULT_VALUE)),
         )],
     )
     .await;
@@ -586,11 +589,7 @@ async fn mac_key_vault_and_enclave_values_round_trip_and_read_python_values() {
             "@id int, @name nvarchar(50), @salary int",
             vec![
                 Param::new("@id", int(), Some(Value::Integer(id as i64))),
-                Param::new(
-                    "@name",
-                    nvarchar(collation),
-                    Some(nvarchar_value(collation, name)),
-                ),
+                Param::new("@name", nvarchar(collation), Some(nvarchar_value(name))),
                 Param::new("@salary", int(), Some(Value::Integer(*salary as i64))),
             ],
         )
@@ -611,7 +610,7 @@ async fn mac_key_vault_and_enclave_values_round_trip_and_read_python_values() {
             vec![Param::new(
                 "@p",
                 nvarchar(collation),
-                Some(nvarchar_value(collation, "A%")),
+                Some(nvarchar_value("A%")),
             )],
         )
         .await;
@@ -654,7 +653,7 @@ async fn runner_managed_identity_logs_in_and_uses_the_vault() {
         let connection = connect(options).await;
         let (login, user, _) = who(&connection).await;
         assert_eq!(user, lab.get("runner_identity_name"));
-        assert_eq!(provider.resources().len(), 2);
+        assert_eq!(provider.resources().len(), if deferred { 1 } else { 2 });
         println!("ENTRA managed identity deferred={deferred} login={login} user={user}");
         connection.close().await.unwrap();
     }
