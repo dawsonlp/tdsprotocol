@@ -83,7 +83,7 @@ and fix. Evidence collected 2026-10-20 (`paired.py review` and a capture):
 - [x] H2. Implemented; NTLM (local, domain, wrong password) and Kerberos pass live
 
 ### I. Finish
-- [ ] I1. Full Rust matrix (with Docker live tests) and the Python suite
-- [ ] I2. Evidence record, handover, support matrix, Python changelog
+- [x] I1. Full Rust matrix: 251 default / 103 core / 327 all-features, 0 failed, strict Clippy, rustdoc, 62/62 Docker live; Azure paired check 117 Rust tests in 16 steps, source unchanged; Python 926 passed
+- [x] I2. Evidence record, handover, credential inventory, review backlog, roadmap and Python changelog updated
 - [ ] I3. PR `azure-auth-followups` → `main`, merged
 - [ ] I4. Expiry rehearsal: let the Logic App delete the resource group at the deadline, check the inventory, then `terraform destroy` for the app registration and state, and purge the soft-deleted vault

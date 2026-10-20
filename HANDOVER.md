@@ -1,6 +1,27 @@
 # Rust client handover
 
-## Current — Rust Azure live campaign and Part B, 2026-10-20
+## Current — Azure authentication follow-ups, 2026-10-20
+
+PR #2 merged the Rust Azure work into `main` (`1bf1493`). On branch
+`azure-auth-followups`, with the Python freeze lifted by the owner, every item
+in the [follow-up checklist](docs/design/experiments/azure-auth-followups.md)
+was developed and tested on the running deployment. Highlights:
+
+- **Python fixes:** the Kerberos opening deadline (worker pool for pyspnego),
+  PY-AZ-01 (strict FEDAUTHINFO, also in Rust), PY-AZ-03 (synchronous credentials
+  off the event loop), PY-AZ-05 (Key Vault checks) and PY-AZ-06 (feature policy).
+- **Python additions:** Windows credentials in `ConnectionConfig` (C3) and an
+  optional provider `complete` check (H1).
+- **Live evidence:** recovery after the server ends a session, password
+  rotation, client assertion and azd credentials, and GCP regressions.
+- **Owner decisions:** PY-AZ-01 strict in both clients; C3 extend
+  `ConnectionConfig`; H1 optional completion with legacy acceptance; F3 no
+  OpenSSL (client assertion instead).
+- **Remaining:** merge the follow-up PR, then the expiry rehearsal: let the Logic
+  App delete `rg-tds-rust-azure` at 2026-10-21 18:59 UTC, check the inventory,
+  `terraform destroy` for the app registration and state, and purge the vault.
+
+## Preceding — Rust Azure live campaign and Part B, 2026-10-20
 
 `infra/azure` was applied in SW-Dev (`rg-tds-rust-azure`) at 18:59 UTC; the group
 deletes itself at **2026-10-21 18:59 UTC** (Logic App), budget USD 25. Rust,

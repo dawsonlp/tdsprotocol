@@ -2,7 +2,7 @@
   "schema": 1,
   "scope": "Artificial public FEDAUTH wire vectors; no live acceptance",
   "sources": {
-    "clients/python/tds/logins.py": "04fe1bf493936c0ce8a327189190fddf6c4564f895c4757fdfd1873b8c4a6bf4",
+    "clients/python/tds/logins.py": "094ddd0b9593763cd7216a3218b63e1ed5e735166b5c5dad39bcac9447a83f3a",
     "clients/python/tds/tokens.py": "b9dd70bdc0672cca1ddb06d4284a941414113860ab08d27f40fc841cb9e3b117"
   },
   "cases": [

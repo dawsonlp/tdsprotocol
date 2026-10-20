@@ -1,5 +1,5 @@
-"""Retain Python production feature-request bytes; policy intentionally differs.
-No Python production behavior is changed and no server or credentials are used.
+"""Retain Python production feature-request bytes. Since 2026-10-20 both clients apply the same refusal policy to an
+enabled acknowledgement (PY-AZ-06); no server or credentials are used.
 """
 import argparse
 import hashlib
@@ -24,7 +24,7 @@ def main():
         writer = Writer(False)
         FeatureList().write(writer, feature_list([feature]))
         cases.append(dict(id=int(feature), encoded=bytes(writer.buf).hex()))
-    data = dict(scope="Python wire parity; enabled acknowledgement is a Rust refusal",
+    data = dict(scope="Python wire parity; an enabled acknowledgement is refused by both clients",
                 python_source_sha256=hashlib.sha256((ROOT / "clients/python/tds/login7.py").read_bytes()).hexdigest(), cases=cases)
     output = json.dumps(data, indent=2) + "\n"
     destination = HERE / "feature_probes.json"
