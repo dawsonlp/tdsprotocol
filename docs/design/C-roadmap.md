@@ -26,7 +26,13 @@ lab proposal below does not override that later agreement.
 
 ### Backlog · Python Kerberos opening deadline
 
-**Status:** deferred to the backlog by the owner after reviewing the GCP failure;
+**Status: fixed 2026-10-20** on branch `azure-auth-followups`, after the owner lifted
+the Python freeze. The built-in `Spnego` adapter now runs pyspnego in bounded
+workers (`tests/test_spnego_workers.py`). On the Azure runner, an unreachable KDC
+returned at the 1.5 s deadline with the event loop responsive, and real Kerberos
+logins still pass. The history below is kept for reference.
+
+**Original status:** deferred to the backlog by the owner after reviewing the GCP failure;
 the defect remains unfixed. An unreachable KDC left synchronous pyspnego startup
 blocked beyond a 1500 ms opening deadline; the independent watchdog stopped the
 process at 4010 ms. See the [retained evidence](experiments/gcp-authentication-follow-up-evidence.md#failures-retained-and-architectural-work-still-open).

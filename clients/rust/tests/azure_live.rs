@@ -1141,3 +1141,162 @@ async fn mac_recovery_after_the_server_ends_the_session() {
     }
     admin.close().await.unwrap();
 }
+
+/// Runs `infra/azure/scripts/rotation.ps1` on a VM. The password goes to `az`
+/// as a parameter, as `configure.py` passes secrets; it is a throwaway account.
+fn rotation_account(lab: &Lab, vm: &str, action: &str, scope: &str, name: &str, password: &str) {
+    let script = format!("@{}", lab.dir.join("scripts/rotation.ps1").display());
+    let mut args = vec![
+        "vm",
+        "run-command",
+        "invoke",
+        "-g",
+        lab.get("resource_group"),
+        "-n",
+        vm,
+        "--command-id",
+        "RunPowerShellScript",
+        "--scripts",
+        &script,
+        "-o",
+        "json",
+        "--parameters",
+    ];
+    let (a, s, n, p) = (
+        format!("Action={action}"),
+        format!("Scope={scope}"),
+        format!("Name={name}"),
+        format!("Password={password}"),
+    );
+    args.extend([a.as_str(), s.as_str(), n.as_str(), p.as_str()]);
+    let out: Json = serde_json::from_str(&az(&args)).unwrap();
+    let message = |code: &str| {
+        out["value"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["code"].as_str().unwrap_or("").contains(code))
+            .map(|m| m["message"].as_str().unwrap_or("").trim().to_owned())
+            .collect::<String>()
+    };
+    assert!(
+        message("StdErr").is_empty(),
+        "{vm} {action}: {}",
+        message("StdErr")
+    );
+    assert!(
+        message("StdOut").contains(&format!("{action} done")),
+        "{}",
+        message("StdOut")
+    );
+}
+fn throwaway_password() -> String {
+    let mut bytes = [0_u8; 9];
+    aws_lc_rs::rand::fill(&mut bytes).unwrap();
+    format!(
+        "Tds-{}-Rr7!",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    )
+}
+struct WindowsSource(std::sync::Mutex<tds_client::ConnectionConfig>);
+impl tds_client::ConfigService for WindowsSource {
+    fn read(&self) -> tds_client::ConfigRead<'_> {
+        Box::pin(async move { Ok(self.0.lock().unwrap().clone()) })
+    }
+}
+
+/// Follow-up C: rotate a Windows account's password during a pool's life. A
+/// refused new login re-reads settings once and reopens with the new password;
+/// sessions opened with the old password are discarded on return. Whether the
+/// old password is still accepted right after the change is recorded: AD keeps
+/// a domain account's previous password usable for NTLM for a while by default.
+#[tokio::test]
+#[ignore = "live Azure campaign: follow-ups (Windows VMs)"]
+async fn mac_windows_password_rotation_during_a_pool() {
+    use tds_client::{
+        ConnectionConfig, ConnectionServices, Pool, PoolPolicy,
+        auth::{Method, WindowsAuth},
+    };
+    let lab = lab();
+    let mut sql = ConnectOptions::new(
+        lab.get("sql_vm_public_ip"),
+        1433,
+        "tdsadmin",
+        lab.secret("sql_admin_password"),
+        lab.vm_roots(),
+    );
+    sql.timeout = Duration::from_secs(30);
+    for (scope, vm, prefix) in [
+        ("local", "vm-tds-sql", "TDSSQL"),
+        ("domain", "vm-tds-dc", "TDS"),
+    ] {
+        let (first, second) = (throwaway_password(), throwaway_password());
+        // A new name each run: a reused name can map to a deleted account's cached SID.
+        let name = format!("tdsrot-{}", &throwaway_password()[4..12]);
+        rotation_account(&lab, vm, "create", scope, &name, &first);
+        let login = format!("{prefix}\\{name}");
+        let admin = connect(sql.clone()).await;
+        run(
+            &admin,
+            &format!("IF SUSER_ID(N'{login}') IS NULL CREATE LOGIN [{login}] FROM WINDOWS"),
+        )
+        .await;
+        let mut options = windows_sql(
+            &lab,
+            Authentication::Windows(WindowsAuth::explicit(Method::Ntlm, &login, &first)),
+        );
+        options.timeout = Duration::from_secs(30);
+        let source = Arc::new(WindowsSource(std::sync::Mutex::new(
+            ConnectionConfig::from_options(&options),
+        )));
+        let pool = Pool::from_config(
+            source.clone(),
+            3,
+            ConnectionServices::new(lab.vm_roots()),
+            PoolPolicy::default(),
+        )
+        .unwrap();
+        let old = pool.acquire().await.unwrap();
+        assert_eq!(who(&old).await.0.to_uppercase(), login.to_uppercase());
+
+        rotation_account(&lab, vm, "set", scope, &name, &second);
+        let with_old = pool.acquire().await;
+        let old_accepted = with_old.is_ok();
+        match &with_old {
+            Ok(_) => println!(
+                "ROTATION {scope}: the old password still logged in right after the change"
+            ),
+            Err(e) => {
+                assert!(
+                    matches!(&e.cause().kind, ErrorKind::Server(m) if m.number == 18452),
+                    "{e}"
+                );
+                println!(
+                    "ROTATION {scope}: the old password is refused (18452); unchanged settings are not retried"
+                );
+            }
+        }
+        source.0.lock().unwrap().authentication =
+            Authentication::Windows(WindowsAuth::explicit(Method::Ntlm, &login, &second));
+        let new = pool.acquire().await.unwrap();
+        assert_eq!(who(&new).await.0.to_uppercase(), login.to_uppercase());
+        println!("ROTATION {scope}: a new login with the new password after re-reading settings");
+        // The session opened with the old password is retired when it comes back.
+        assert_eq!(old.release().await.unwrap(), ReleaseOutcome::Discarded);
+        assert_eq!(new.release().await.unwrap(), ReleaseOutcome::Returned);
+        if let Ok(lease) = with_old {
+            drop(lease);
+        }
+        pool.close().await.unwrap();
+        // A closing pool's sessions can outlive close() briefly on the server:
+        // end them (each may already be gone) and retry the drop.
+        run(&admin, &format!("DECLARE @i int = 0, @k nvarchar(max); WHILE SUSER_ID(N'{login}') IS NOT NULL AND @i < 10 BEGIN SET @k = N''; SELECT @k += N'BEGIN TRY KILL ' + CAST(session_id AS nvarchar) + N' END TRY BEGIN CATCH END CATCH;' FROM sys.dm_exec_sessions WHERE login_name = N'{login}'; EXEC (@k); BEGIN TRY DROP LOGIN [{login}] END TRY BEGIN CATCH WAITFOR DELAY '00:00:01' END CATCH; SET @i += 1; END")).await;
+        assert!(
+            rows(&admin, &format!("SELECT SUSER_ID(N'{login}')")).await[0][0].is_none(),
+            "login dropped"
+        );
+        admin.close().await.unwrap();
+        rotation_account(&lab, vm, "remove", scope, &name, "");
+        println!("ROTATION {scope}: done (old password accepted after the change: {old_accepted})");
+    }
+}
