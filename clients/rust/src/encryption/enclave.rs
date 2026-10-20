@@ -229,4 +229,51 @@ mod tests {
         equivalent.extend([8; 17]);
         assert!(fixed().establish(&equivalent).is_ok());
     }
+    /// Part B (B-6): channels share one session under its mutex (as the key
+    /// bank holds it). Concurrent packages get distinct, contiguous counters.
+    #[test]
+    fn concurrent_packages_from_one_session_never_reuse_a_counter() {
+        use std::sync::{Arc, Mutex};
+        let f = fixture();
+        let session = Arc::new(Mutex::new(fixed().establish(&bytes(&f, "info")).unwrap()));
+        let packages: Vec<Vec<u8>> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    let session = session.clone();
+                    scope.spawn(move || {
+                        (0..25)
+                            .map(|_| session.lock().unwrap().package("SQL", &[]).unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|w| w.join().unwrap())
+                .collect()
+        });
+        let session = session.lock().unwrap();
+        let mut counters: Vec<i64> = packages
+            .iter()
+            .map(|p| {
+                let body = session.key.decrypt(&p[8..]).unwrap();
+                i64::from_le_bytes(body.as_bytes()[16..24].try_into().unwrap())
+            })
+            .collect();
+        counters.sort_unstable();
+        assert_eq!(counters, (1..=200).collect::<Vec<_>>());
+    }
+    #[test]
+    fn a_package_from_another_session_does_not_decrypt() {
+        let f = fixture();
+        let info = bytes(&f, "info");
+        let mut ours = fixed().establish(&info).unwrap();
+        let theirs = Attestation::new().unwrap().establish(&info).unwrap();
+        let package = ours.package("SQL", &[]).unwrap();
+        assert_eq!(&package[..8], b"session1");
+        assert!(matches!(
+            theirs.key.decrypt(&package[8..]),
+            Err(Error::Authentication)
+        ));
+    }
 }

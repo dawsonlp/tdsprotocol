@@ -85,6 +85,13 @@ else:
         result("iiiixxsssbx",[(0,5,7,1,b"version1",vault_wrapped,"AZURE_KEY_VAULT",key_fixture["path"],"RSA_OAEP",True,
                                base64.b64decode(key_fixture["metadata_signature"]))],True)
         +result("isiiii",[(1,"@v",2,2,0,1)],True)+result("x",[(info,)],False))
+    # The same description under the certificate store's provider name, signed by
+    # Python's provider under that name: enclave release dispatches by name.
+    cert=LocalKeyStore(HERE.parent/"encryption");cert.name="MSSQL_CERTIFICATE_STORE"
+    output["description_certstore"]=encode(
+        result("iiiixxsssbx",[(0,5,7,1,b"version1",wrapped,"MSSQL_CERTIFICATE_STORE","master.pem","RSA_OAEP",True,
+                               cert.sign_master_key_metadata("master.pem"))],True)
+        +result("isiiii",[(1,"@v",2,2,0,1)],True)+result("x",[(info,)],False))
     output["column_root"]=encode(hashlib.sha256(b"public disposable CEK 0").digest())
     (HERE/"enclave.json").write_text(json.dumps(output,indent=2)+"\n")
     print("Generated Python fixed-P384 session, package and version-two batch/RPC")

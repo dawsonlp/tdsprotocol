@@ -1212,3 +1212,30 @@ async fn kp30_native_key_allocation_stays_stable_when_cache_grows() {
         bank.cells.capacity()
     );
 }
+
+/// Part B (B-6): a channel whose describe raced another's establishment keeps
+/// the accepted session (and its counter) and discards its own candidate.
+#[tokio::test]
+async fn a_raced_enclave_establishment_keeps_the_accepted_session() {
+    use base64::Engine;
+    let fixture = Fixture::new();
+    let json: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/azure/enclave.json")).unwrap();
+    let info = base64::engine::general_purpose::STANDARD
+        .decode(json["info"].as_str().unwrap())
+        .unwrap();
+    let session = fixture.session(Policies::default());
+    session.enable_enclaves();
+    let (first, second) = (session.exchange().unwrap(), session.exchange().unwrap());
+    let attestation = || super::super::enclave::Attestation::new().unwrap();
+    first
+        .establish_enclave(attestation(), info.clone())
+        .await
+        .unwrap();
+    let accepted = session.inner.bank().enclave.clone().unwrap();
+    second.establish_enclave(attestation(), info).await.unwrap();
+    let kept = session.inner.bank().enclave.clone().unwrap();
+    assert!(Arc::ptr_eq(&accepted, &kept), "the candidate was discarded");
+    drop((first, second));
+    session.close().await;
+}

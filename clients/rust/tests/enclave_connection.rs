@@ -325,3 +325,90 @@ async fn unsigned_enclave_key_is_refused_before_application_sql() {
     connection.close().await.unwrap();
     peer.await.unwrap();
 }
+
+/// Part B (B-11): enclave key release dispatches by provider name. A provider
+/// named MSSQL_CERTIFICATE_STORE verifies Python's enclave-permission signature
+/// and its column key reaches the package. (Native CNG signing is checked on
+/// Windows by certstore_native/certstore_live.)
+#[tokio::test]
+async fn certificate_store_named_keys_are_verified_and_released_to_the_enclave() {
+    let (listener, mut options) = support::listener().await;
+    options.enclave_attestation = Some(EnclaveAttestation::None);
+    let peer = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let (mut peer, _) = support::Peer::await_login(socket, false).await;
+        peer.accept_login(0x74000004, false, &acknowledgement())
+            .await;
+        assert_eq!(peer.message().await.0, packet::BATCH);
+        peer.reply(&support::done(0)).await;
+        let f = fixture();
+        let (kind, body) = peer.message().await;
+        assert_eq!(kind, packet::RPC);
+        let describe = read_call(&body);
+        let Some(Value::Binary(parameters)) = describe.parameters[2].value.as_ref() else {
+            panic!("attestation")
+        };
+        let session = peer_key(root_from_parameters(parameters));
+        peer.reply(&bytes(&f, "description_certstore")).await;
+        let (_, body) = peer.message().await;
+        let call = read_call(&body);
+        let key = encryption::ColumnKey {
+            database_id: 0,
+            key_id: 0,
+            version: 0,
+            metadata_version: [0; 8],
+            values: vec![WrappedKey {
+                provider: "peer".into(),
+                path: "".into(),
+                algorithm: "RSA_OAEP".into(),
+                encrypted: vec![1],
+            }],
+        };
+        let guard = session.exchange().unwrap();
+        let plain = guard
+            .decrypt(&key, &call.enclave_package[8..])
+            .await
+            .unwrap();
+        assert_eq!(&plain.as_bytes()[70..], bytes(&f, "column_root"));
+        peer.reply(&support::done(0)).await;
+        peer.expect_eof().await;
+    });
+    let connection = Connection::connect(options).await.unwrap();
+    let encrypted = connection
+        .encrypted(
+            vec![
+                encryption::LocalKeyStore::new(
+                    "MSSQL_CERTIFICATE_STORE",
+                    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/encryption"),
+                )
+                .unwrap(),
+            ],
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let mut channel = encrypted.serial_channel().await.unwrap();
+    channel
+        .execute(
+            fixture()["statement"].as_str().unwrap(),
+            "@v int",
+            vec![Param::new(
+                "@v",
+                SqlType::Integer {
+                    size: IntegerSize::Int,
+                },
+                Some(Value::Integer(7)),
+            )],
+        )
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    channel.close().await.unwrap();
+    assert_eq!(encrypted.statistics().metadata_verifications, 1);
+    assert_eq!(encrypted.statistics().authorized_keys, 1);
+    encrypted.close().await;
+    connection.close().await.unwrap();
+    peer.await.unwrap();
+}

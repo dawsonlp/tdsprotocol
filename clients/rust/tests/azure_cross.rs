@@ -538,3 +538,78 @@ mod encrypted {
         }
     }
 }
+
+/// Part B (B-10): one MARS physical login per token. A returned lease's
+/// sessions end with FIN; reuse opens a new session whose first request carries
+/// the deferred reset, without a new token. A dropped lease forces a new login.
+#[tokio::test]
+async fn entra_mars_pool_reuses_sessions_with_one_token_per_physical_login() {
+    use tds_client::mars::{self, Frame};
+    for deferred in [false, true] {
+        let (listener, mut options) = support::listener().await;
+        let provider = Provider::new("token-a");
+        options.authentication = login("a", "tenant/principal-v1", deferred);
+        options.token_providers = TokenProviders::new().with("a", provider.clone());
+        options.mars = true;
+        let server = tokio::spawn(async move {
+            for physical in 0..2 {
+                let (socket, _) = listener.accept().await.unwrap();
+                let (mut peer, login) = Peer::await_login(socket, true).await;
+                let carrier = if deferred {
+                    peer.reply(&info()).await;
+                    peer.message().await.1
+                } else {
+                    login
+                };
+                assert!(carries(&carrier, "token-a"));
+                peer.accept_login(0x74000004, true, FEDAUTH_ACK).await;
+                let syn = peer.frame().await;
+                assert_eq!((syn.flags, syn.channel), (mars::SYN, 0));
+                if physical == 1 {
+                    peer.drain_to_eof().await;
+                    return;
+                }
+                assert_eq!(peer.frame().await.flags, mars::FIN);
+                peer.send_frame(Frame {
+                    flags: mars::FIN,
+                    channel: 0,
+                    sequence: 0,
+                    window: 4,
+                    body: vec![],
+                })
+                .await;
+                let syn = peer.frame().await;
+                assert_eq!((syn.flags, syn.channel), (mars::SYN, 1));
+                let data = peer.frame().await;
+                assert_eq!(data.body[1] & 8, 8, "deferred reset on the reused session");
+                let mut reply = vec![0xe3, 3, 0, 18, 0, 0];
+                reply.extend(support::done(0));
+                peer.send_frame(Frame {
+                    flags: mars::DATA,
+                    channel: 1,
+                    sequence: 1,
+                    window: 4,
+                    body: packet::split(packet::REPLY, &reply, 4096).unwrap(),
+                })
+                .await;
+                // The session's FIN, then the dropped lease discards this login.
+                peer.drain_to_eof().await;
+            }
+        });
+        let pool = Pool::new(options, 1).unwrap();
+        let lease = pool.acquire().await.unwrap();
+        let _session = lease.serial_channel().await.unwrap();
+        assert_eq!(lease.release().await.unwrap(), ReleaseOutcome::Returned);
+        let reused = pool.acquire().await.unwrap();
+        query(&reused, "reset").await;
+        assert_eq!(provider.calls(), 1, "reuse requests no token");
+        drop(reused);
+        let fresh = pool.acquire().await.unwrap();
+        let _session = fresh.serial_channel().await.unwrap();
+        assert_eq!(provider.calls(), 2);
+        drop(_session);
+        drop(fresh);
+        pool.close().await.unwrap();
+        server.await.unwrap();
+    }
+}

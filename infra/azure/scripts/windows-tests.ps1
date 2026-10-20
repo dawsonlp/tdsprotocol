@@ -16,7 +16,14 @@ if (-not $cert) {
         -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy NonExportable -Provider "Microsoft Software Key Storage Provider" `
         -KeyUsage KeyEncipherment, DigitalSignature
 }
-"certificate $($cert.Thumbprint) in LocalMachine/My (key not exportable)"
+$other = Get-ChildItem Cert:\LocalMachine\My | Where-Object Subject -eq "CN=tds other" | Select-Object -First 1
+if (-not $other) {  # a second key, for the wrong-certificate checks (Part B, B-5)
+    $other = New-SelfSignedCertificate -Subject "CN=tds other" -CertStoreLocation Cert:\LocalMachine\My `
+        -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy NonExportable -Provider "Microsoft Software Key Storage Provider" `
+        -KeyUsage KeyEncipherment, DigitalSignature
+}
+"certificates $($cert.Thumbprint) and $($other.Thumbprint) in LocalMachine/My (keys not exportable)"
+$env:TDS_CERT_OTHER_THUMBPRINT = $other.Thumbprint
 $env:TDS_CERT_THUMBPRINT = $cert.Thumbprint
 $env:TDS_SQL_PASSWORD = $SqlPassword
 Set-Location C:\tds\clients\python

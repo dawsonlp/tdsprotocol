@@ -133,3 +133,53 @@ async fn certificate_store_keys_read_python_values_and_round_trip_rust_values() 
     );
     println!("CERTSTORE Rust value round trip: 52000");
 }
+
+/// Part B (B-5): a missing thumbprint or store, and a key wrapped by another
+/// certificate, are refused; nothing is decrypted with the wrong key.
+#[tokio::test]
+#[ignore = "live Azure campaign: on the Windows SQL VM"]
+async fn missing_and_wrong_certificates_are_refused() {
+    let thumbprint = env("TDS_CERT_THUMBPRINT");
+    let other = env("TDS_CERT_OTHER_THUMBPRINT");
+    let operation = KeyOperation::default();
+    for path in [
+        format!("LocalMachine/My/{}", "0".repeat(40)),
+        format!("CurrentUser/My/{thumbprint}"),
+    ] {
+        let error = WindowsCertificateStore
+            .open(&path, operation.clone())
+            .await
+            .err()
+            .expect("refused");
+        println!("CERTSTORE {path}: {error}");
+    }
+    let right = format!("LocalMachine/My/{thumbprint}");
+    let wrong = format!("LocalMachine/My/{other}");
+    let wrapped = WindowsCertificateStore
+        .open(&right, operation.clone())
+        .await
+        .unwrap()
+        .wrap(&Plaintext::copy(&[9; 32]).unwrap(), operation.clone())
+        .await
+        .unwrap();
+    let key = tds_client::encryption::WrappedKey {
+        provider: "MSSQL_CERTIFICATE_STORE".into(),
+        path: wrong.clone(),
+        algorithm: "RSA_OAEP".into(),
+        encrypted: wrapped,
+    };
+    let master = WindowsCertificateStore
+        .open(&wrong, operation.clone())
+        .await
+        .unwrap();
+    let error = master.unwrap(&key, operation).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            tds_client::encryption::Error::Authentication
+                | tds_client::encryption::Error::InvalidMetadata
+        ),
+        "{error:?}"
+    );
+    println!("CERTSTORE key wrapped by another certificate: {error:?}");
+}
