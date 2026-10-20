@@ -4,12 +4,12 @@
 
 **After reading this you can** distinguish implemented behavior, paired development checks, native compilation and the still-deferred live acceptance campaign.
 
-Development branch: `rust-azure-integration`, based on `f45aa43`; work is
-uncommitted. The owner approved the common async provider boundary and
-facade/physical-epoch enclave ownership on 2026-10-19. This is not the full-scope
-code-complete checkpoint. The [ticket-cache provider](rust-azure-ticket-cache-contract.md)
-and [experimental feature probes](rust-azure-feature-probe-contract.md) have
-separate concrete proposals awaiting owner agreement.
+Development branch: `rust-azure-integration`, based on `f45aa43`, committed in
+`6270814`. The owner approved the common async provider boundary and
+facade/physical-epoch enclave ownership on 2026-10-19. This slice is not itself
+the full-scope checkpoint; that is the [code-complete checkpoint](rust-azure-code-complete.md).
+The [ticket-cache provider](rust-azure-ticket-cache-contract.md) and
+[feature policy](rust-azure-feature-probe-contract.md) were later approved and implemented.
 
 ## Implemented behavior
 

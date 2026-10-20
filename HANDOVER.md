@@ -1,6 +1,30 @@
 # Rust client handover
 
-## Current development — Rust Azure integration, 2026-10-19
+## Current — Rust Azure code-complete checkpoint, 2026-10-20
+
+The owner asked for real-Azure testing of this branch. A free local check came
+first: tests were green, but the plan's code-complete bar was not met. The owner
+chose **Option A**. The [checkpoint](docs/design/experiments/rust-azure-code-complete.md)
+now records cross-feature tests (`azure_cross.rs`, Docker `keyvault_live.rs`),
+the [credential inventory](docs/design/experiments/rust-azure-credential-inventory.md),
+scenario-to-test traceability, and four fixed test-harness races. The macOS
+`check_rust.py --live` run had been broken since `6270814` and is fixed too.
+Exceptions B-1 to B-11 are the **next work after the live campaign and its fixes**.
+
+Campaign decisions (owner, 2026-10-20):
+- **Where:** subscription SW-Dev, one new dedicated resource group created and
+  deleted whole.
+- **Limits:** USD 25 cap; delete within 24 hours of `terraform apply`.
+- **Entra sources:** Azure CLI, service principal (the owner holds Application
+  Administrator) and managed identity.
+- **Microsoft tie-breaker:** .NET SqlClient in Docker; no local install.
+
+The previous `rg-tds-driver-tests` run lived 55 minutes on 2026-10-17 and cost
+USD 0.58. Next: build the Rust live harness, update `infra/azure` (resource group
+variable, runner Rust toolchain, Windows build, service principal, managed
+identity, budget and timed deletion), then provision with the owner's approval.
+
+## Rust Azure integration development, 2026-10-19
 
 PR #1 merged the Rust client and GCP campaign work into `main` at `f45aa43`.
 The old `rust-client` branch was deleted locally and remotely. New branch

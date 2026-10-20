@@ -8,13 +8,14 @@ This opens a new phase; it does not retroactively expand D-65's completion scope
 proposed Rust boundaries, the implementation iterations and the later live
 acceptance campaign.
 
-**Status:** the owner confirmed full Python Azure-integration parity as the goal;
-the authentication contract has been approved and its implementation is in
-progress. Key-provider/enclave architecture is approved and in development. No resource
-provisioning has started. Actual Azure testing and
-its infrastructure are deferred until code completion.
-Unit, fixture and controlled-peer tests belong to development; Azure deployment
-and live interoperability acceptance follow code completion.
+**Status, 2026-10-20:** the [code-complete checkpoint](rust-azure-code-complete.md)
+is recorded under the owner's Option A. Cross-feature tests, the
+[credential inventory](rust-azure-credential-inventory.md) and scenario traceability
+are in place. Edge cases B-1 to B-11 are owner-agreed exceptions, queued as the
+next work after the live campaign and its fixes. The live campaign comes next:
+subscription SW-Dev, one dedicated resource group created and deleted whole,
+USD 25 cap, deletion within 24 hours of apply. Entra sources are Azure CLI,
+service principal and managed identity. No resource has been provisioned yet.
 
 ## Development checkpoint — 2026-10-19
 

@@ -10,12 +10,12 @@
   "outcome": "distinguish implemented behavior, paired development checks, native compilation and the still-deferred live acceptance campaign."
 };
   page.body = () => [
-    "<p>Development branch: <code>rust-azure-integration</code>, based on <code>f45aa43</code>; work is",
-    "uncommitted. The owner approved the common async provider boundary and",
-    "facade/physical-epoch enclave ownership on 2026-10-19. This is not the full-scope",
-    "code-complete checkpoint. The <a href=\"#/rust-azure-ticket-cache\">ticket-cache provider</a>",
-    "and <a href=\"#/rust-azure-feature-probes\">experimental feature probes</a> have",
-    "separate concrete proposals awaiting owner agreement.</p>",
+    "<p>Development branch: <code>rust-azure-integration</code>, based on <code>f45aa43</code>, committed in",
+    "<code>6270814</code>. The owner approved the common async provider boundary and",
+    "facade/physical-epoch enclave ownership on 2026-10-19. This slice is not itself",
+    "the full-scope checkpoint; that is the <a href=\"#/rust-azure-code-complete\">code-complete checkpoint</a>.",
+    "The <a href=\"#/rust-azure-ticket-cache\">ticket-cache provider</a> and",
+    "<a href=\"#/rust-azure-feature-probes\">feature policy</a> were later approved and implemented.</p>",
     "<h2 id=\"implemented-behavior\">Implemented behavior</h2>",
     "<ul>",
     "<li><code>KeyProvider</code> opens an opaque <code>MasterKey</code>; async wrap, unwrap and metadata",
