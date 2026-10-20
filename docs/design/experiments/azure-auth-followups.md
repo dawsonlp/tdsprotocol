@@ -44,7 +44,7 @@ Not shown live in the campaign: under the Redirect policy clients bypass a relay
 ### C. Windows account rotation across both clients (GCP open item)
 - [x] C1. Rotate a throwaway account's password during a run (`scripts/rotation.ps1`; local on the SQL VM and in the domain; a new name each run, because a reused name can map to the deleted account's cached SID)
 - [x] C2. Rust (`mac_windows_password_rotation_during_a_pool`): local old password refused (18452) and not retried; domain old password **still accepted** right after the change (AD's NTLM grace period); re-read once, reopen with the new password; old-password sessions discarded on return
-- [ ] C3. Python: same scenario. Python's comparable configuration covers SQL credentials only (GCP open item 2); extending it to Windows values may need a design choice. **Decision gate if so.**
+- [x] C3. Python: `ConnectionConfig(windows=...)` (owner decision); a live pool re-reads the rotated password
 - [x] C4. Throwaway accounts and logins removed after each run; Python explicit connections (`paired.py rotation`) match Rust
 
 ### D. Python Kerberos opening deadline (roadmap backlog)
@@ -61,26 +61,26 @@ and fix. Evidence collected 2026-10-20 (`paired.py review` and a capture):
 - **PY-AZ-03:** a synchronous Azure CLI credential stalls Python's event loop for 0.42 s per login; the asynchronous credential stalls it 0.015 s.
 - **PY-AZ-04:** each encrypted connection already starts with fresh sessions; two connections from one context and four concurrent MARS channels on one connection all return correct enclave results.
 - [x] E1. PY-AZ-06: implement the owner-approved unsupported-feature policy in Python (warn on request; fail on an enabled ACK before SQL or pool admission; no retry without the flag). Live: ACKs 1/1/0/1 refused as in Rust
-- [ ] E2. PY-AZ-01: capture Azure's real FEDAUTHINFO layouts (deferred flow) with both clients; tighten Python's parsing (offsets, lengths, duplicates, UTF-16) only as far as real layouts and shared malformed fixtures support
-- [ ] E3. PY-AZ-02: collect real SDK refusals (wrong service principal secret, managed identity off-VM, Key Vault denial); keep provider text out of ordinary Python errors, with an explicit protected cause, as Rust does
-- [ ] E4. PY-AZ-03: measure a synchronous Azure credential blocking Python's event loop; run synchronous credential work in a worker, sharing D's worker design where it fits
-- [ ] E5. PY-AZ-04: paired evidence on enclave session reuse across connections, identities and pool return; scope Python's sessions per lease if the evidence supports it
-- [ ] E6. PY-AZ-05: add the structural checks Rust has (such as the 32-byte root) where valid vault, enclave and SqlClient responses still pass; raise a typed error for a bad key path
-- [ ] E7. Update the review backlog with each result
+- [x] E2. PY-AZ-01 (strict in both clients, owner decision): capture Azure's real FEDAUTHINFO layouts (deferred flow) with both clients; tighten Python's parsing (offsets, lengths, duplicates, UTF-16) only as far as real layouts and shared malformed fixtures support
+- [x] E3. PY-AZ-02 (no change: no leak found): collect real SDK refusals (wrong service principal secret, managed identity off-VM, Key Vault denial); keep provider text out of ordinary Python errors, with an explicit protected cause, as Rust does
+- [x] E4. PY-AZ-03 (fixed; live stall 0.42 s → 0.015 s): measure a synchronous Azure credential blocking Python's event loop; run synchronous credential work in a worker, sharing D's worker design where it fits
+- [x] E5. PY-AZ-04 (no change: no defect): paired evidence on enclave session reuse across connections, identities and pool return; scope Python's sessions per lease if the evidence supports it
+- [x] E6. PY-AZ-05 (fixed): add the structural checks Rust has (such as the 32-byte root) where valid vault, enclave and SqlClient responses still pass; raise a typed error for a bad key path
+- [x] E7. Update the review backlog with each result
 
 ### F. Credential-mode gaps
 - [ ] F1. Client assertion: a certificate credential on the campaign's app registration; Rust's `ClientAssertionCredential` and Python's equivalent log in
 - [ ] F2. Azure Developer CLI credential on this machine (both clients)
-- [ ] F3. Certificate service principal in Rust needs the SDK's OpenSSL-based feature. **Decision gate:** owner decides the dependency
+- [x] F3. Owner decision: do not enable OpenSSL; recorded as exception E-CRED-1 (use client assertion)
 - [ ] F4. Update the credential inventory
 
 ### G. Regression re-runs of GCP-proven paths
-- [ ] G1. Rust native signed-in Windows SSPI on the domain-joined SQL VM
-- [ ] G2. Rust portable explicit-credential Kerberos from the runner (`kdc_url` to the domain controller)
+- [x] G1. Rust native signed-in SSPI on the SQL VM (`regressions.sh`, as SYSTEM = `TDS\TDSSQL$`): Kerberos 7.4/8.0 pass, no native workers left; Negotiate to its own machine chooses NTLM (loopback), which Rust refuses unless `allow_ntlm_fallback` is set, and then logs in by NTLM
+- [x] G2. Rust portable explicit-credential Kerberos and Negotiate from the runner (`kdc_url` = the domain controller): `TDS\tdsuser`, scheme KERBEROS, TDS 7.4/8.0
 
 ### H. Explicit provider completion (GCP open item 1)
-- [ ] H1. Propose the design: require explicit provider completion, or an explicit legacy wrapper. **Decision gate**
-- [ ] H2. Implement and test after agreement; confirm live against the domain
+- [x] H1. Owner decision: optional `complete` on the provider exchange; incomplete at LOGINACK is refused; providers without it keep legacy behavior
+- [x] H2. Implemented; NTLM (local, domain, wrong password) and Kerberos pass live
 
 ### I. Finish
 - [ ] I1. Full Rust matrix (with Docker live tests) and the Python suite
