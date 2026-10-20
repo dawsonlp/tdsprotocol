@@ -69,10 +69,10 @@ and fix. Evidence collected 2026-10-20 (`paired.py review` and a capture):
 - [x] E7. Update the review backlog with each result
 
 ### F. Credential-mode gaps
-- [ ] F1. Client assertion: a certificate credential on the campaign's app registration; Rust's `ClientAssertionCredential` and Python's equivalent log in
-- [ ] F2. Azure Developer CLI credential on this machine (both clients)
+- [x] F1. Client assertion: a disposable certificate on the app registration, an application-signed assertion; Rust and Python log in, both flows
+- [x] F2. Azure Developer CLI credential (azd installed with Homebrew, signed in as the service principal by certificate, then signed out): Rust and Python log in, both flows
 - [x] F3. Owner decision: do not enable OpenSSL; recorded as exception E-CRED-1 (use client assertion)
-- [ ] F4. Update the credential inventory
+- [x] F4. Credential inventory updated
 
 ### G. Regression re-runs of GCP-proven paths
 - [x] G1. Rust native signed-in SSPI on the SQL VM (`regressions.sh`, as SYSTEM = `TDS\TDSSQL$`): Kerberos 7.4/8.0 pass, no native workers left; Negotiate to its own machine chooses NTLM (loopback), which Rust refuses unless `allow_ntlm_fallback` is set, and then logs in by NTLM

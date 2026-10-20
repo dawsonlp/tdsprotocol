@@ -1344,3 +1344,26 @@ async fn mac_client_assertion_logs_in_with_both_flows() {
         connection.close().await.unwrap();
     }
 }
+
+/// Follow-up F2: the Azure Developer CLI credential, with `azd` signed in as the
+/// campaign's service principal (`azd auth login --client-certificate ...`).
+#[tokio::test]
+#[ignore = "live Azure campaign: follow-ups (after azd auth login)"]
+async fn mac_azure_developer_cli_logs_in_with_both_flows() {
+    let lab = lab();
+    let credential: Arc<dyn TokenCredential> =
+        azure_identity::AzureDeveloperCliCredential::new(None).unwrap();
+    for deferred in [false, true] {
+        let provider = Counting::new(Arc::new(AzureTokenProvider::new(credential.clone())));
+        let options = azure_sql(
+            &lab,
+            entra("azd", deferred),
+            TokenProviders::new().with("azd", provider.clone()),
+        );
+        let connection = connect(options).await;
+        let (login, user, _) = who(&connection).await;
+        assert_eq!(user, lab.get("service_principal_name"));
+        println!("ENTRA Azure Developer CLI deferred={deferred} login={login} user={user}");
+        connection.close().await.unwrap();
+    }
+}

@@ -9,6 +9,7 @@
     python paired.py kdc-deadline < password                     on the runner: an unreachable KDC meets the deadline
     ../../clients/python/.venv/bin/python paired.py review       evidence for PY-AZ-02, 03 and 04 (no changes made)
     ../../clients/python/.venv/bin/python paired.py assertion    client assertion: certificate, signed JWT, logins
+    ../../clients/python/.venv/bin/python paired.py azd          Azure Developer CLI credential (after azd auth login)
 
 The order is: write, Rust's mac_key_vault_and_enclave_values_round_trip_and_read_python_values with
 TDS_AZURE_PAIRED=1, then read. Both clients use the same Key Vault key, values and expected rows; each creates its own
@@ -424,6 +425,9 @@ def main() -> None:
         credential = ClientSecretCredential(PLACES["tenant_id"], PLACES["service_principal_client_id"],
                                             secrets()["service_principal_secret"])
         asyncio.run(logins(credential, PLACES["service_principal_name"], "service principal"))
+    elif mode == "azd":  # follow-up F2: azd signed in as the campaign's service principal
+        from azure.identity import AzureDeveloperCliCredential
+        asyncio.run(logins(AzureDeveloperCliCredential(), PLACES["service_principal_name"], "Azure Developer CLI"))
     elif mode == "assertion":
         asyncio.run(assertion())
     elif mode == "review":
