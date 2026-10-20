@@ -14,6 +14,7 @@ struct Fixture {
     restricted: bool,
     statuses: VecDeque<u32>,
     acquire_status: u32,
+    acquire_minor: u32,
     restrict_status: u32,
     inquire_status: u32,
     actual: &'static [u8],
@@ -34,6 +35,7 @@ impl Default for Fixture {
             restricted: false,
             statuses: [1, 0].into(),
             acquire_status: 0,
+            acquire_minor: 0,
             restrict_status: 0,
             inquire_status: 0,
             actual: KERBEROS,
@@ -100,7 +102,7 @@ unsafe extern "C" fn release_name(_: *mut u32, name: *mut Handle) -> u32 {
     0
 }
 unsafe extern "C" fn acquire(
-    _: *mut u32,
+    minor: *mut u32,
     name: Handle,
     _: u32,
     mechs: *const OidSet,
@@ -122,6 +124,7 @@ unsafe extern "C" fn acquire(
                 assert!(bytes == KERBEROS || bytes == SPNEGO);
                 f.acquired_spnego = bytes == SPNEGO;
             }
+            *minor = f.acquire_minor;
             f.acquire_status
         })
     }
@@ -312,7 +315,7 @@ fn acquisition_restriction_and_context_failures_release_even_partial_outputs() {
     for status in [2, 4, 8, 16, 0xd0000] {
         reset(|f| f.statuses = [status].into());
         let mut ctx = context(Method::Kerberos, None, false).unwrap();
-        assert!(matches!(ctx.step(None, &[]), Err(Error::Refused)));
+        assert!(matches!(ctx.step(None, &[]), Err(Error::Refused(s)) if s.major == status));
         assert!(ctx.step(None, &[]).is_err());
         drop(ctx);
         clean();
@@ -385,4 +388,29 @@ fn system_library_imports_and_releases_principal_names_without_credentials() {
     let target = Name::new("MSSQLSvc/sql.test:1433", &SYSTEM).unwrap();
     let principal = Name::new("fixture@TDS.TEST", &SYSTEM).unwrap();
     drop((target, principal));
+}
+
+#[test]
+fn refusals_keep_status_numbers_that_tell_absent_from_expired_credentials() {
+    use crate::{Status, StatusKind};
+    // Statuses observed from MIT Kerberos on the campaign runner: no ticket
+    // (GSS_S_NO_CRED) and an expired one (GSS_S_FAILURE, ticket-expired minor).
+    // Other failures stay Failure; minors pass through unchanged.
+    for (major, minor, kind) in [
+        (0x70000, 0x96c7_3a8d, StatusKind::NoCredentials),
+        (0xb0000, 0, StatusKind::CredentialsExpired),
+        (0xd0000, 0x96c7_3a20, StatusKind::CredentialsExpired),
+        (0xd0000, 0x96c7_3a27, StatusKind::Failure),
+    ] {
+        reset(|f| {
+            f.acquire_status = major;
+            f.acquire_minor = minor;
+        });
+        let Err(Error::Refused(status)) = context(Method::Kerberos, None, false) else {
+            panic!("refused")
+        };
+        assert_eq!(status, Status { major, minor });
+        assert_eq!(status.kind(), kind);
+        clean();
+    }
 }

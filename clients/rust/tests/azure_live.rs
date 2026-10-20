@@ -712,27 +712,46 @@ async fn runner_kerberos_and_negotiate_use_the_tickets_user() {
     }
 }
 
-/// Run by `kerberos.sh` after `kdestroy`: no ticket means refusal, never NTLM.
+/// Run by `kerberos.sh` without a ticket (after `kdestroy`) and with an expired
+/// one: Rust refuses before any login, never falling back to NTLM, and keeps
+/// GSSAPI's status numbers so the two cases can be told apart (B-7).
 #[cfg(feature = "system-gssapi")]
 #[tokio::test]
-#[ignore = "live Azure campaign: on the runner VM, without a ticket"]
-async fn runner_without_a_ticket_kerberos_and_negotiate_are_refused() {
-    use tds_client::auth::Method;
-    if std::env::var("TDS_EXPECT_NO_TICKET").as_deref() != Ok("1") {
-        println!("skipped: set TDS_EXPECT_NO_TICKET=1 after kdestroy");
-        return;
-    }
+#[ignore = "live Azure campaign: on the runner VM, without a usable ticket"]
+async fn runner_without_a_usable_ticket_kerberos_and_negotiate_are_refused() {
+    use tds_client::auth::{GssapiStatusKind, Method};
+    let expired = match std::env::var("TDS_EXPECT_TICKET").as_deref() {
+        Ok("absent") => false,
+        Ok("expired") => true,
+        _ => {
+            println!("skipped: set TDS_EXPECT_TICKET=absent (after kdestroy) or expired");
+            return;
+        }
+    };
     let lab = lab();
     for method in [Method::Kerberos, Method::Negotiate] {
+        // Observed with MIT Kerberos: no ticket is GSS_S_NO_CRED for both. An
+        // expired ticket is GSS_S_FAILURE; Kerberos keeps the ticket-expired
+        // minor, but SPNEGO substitutes its own, so Negotiate reports Failure.
+        let expected = match (expired, method) {
+            (false, _) => GssapiStatusKind::NoCredentials,
+            (true, Method::Kerberos) => GssapiStatusKind::CredentialsExpired,
+            (true, _) => GssapiStatusKind::Failure,
+        };
         let error = kerberos(&lab, method, ProtocolVersion::V8_0)
             .await
             .err()
             .expect("refused");
-        assert!(
-            !matches!(error.cause().kind, ErrorKind::Server(_)),
-            "no login was attempted: {error}"
+        let ErrorKind::GssapiRefused(status) = error.cause().kind else {
+            panic!("{method:?}: expected a GSSAPI refusal before login: {error}");
+        };
+        println!(
+            "TICKET expired={expired} {method:?}: kind={:?} major=0x{:08x} minor=0x{:08x}: {error}",
+            status.kind(),
+            status.major,
+            status.minor
         );
-        println!("NO TICKET {method:?}: refused before login: {error}");
+        assert_eq!(status.kind(), expected, "{error}");
     }
 }
 

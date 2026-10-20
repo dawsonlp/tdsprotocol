@@ -160,4 +160,7 @@ pub(crate) use portable::Context;
 #[cfg(feature = "integrated-auth")]
 pub(crate) use portable::channel_binding;
 #[cfg(feature = "system-gssapi")]
-pub use tds_native_gssapi::{Evidence as GssapiEvidence, Mechanism as GssapiMechanism};
+pub use tds_native_gssapi::{
+    Evidence as GssapiEvidence, Mechanism as GssapiMechanism, Status as GssapiStatus,
+    StatusKind as GssapiStatusKind,
+};

@@ -39,6 +39,14 @@ async fn blocking_call<T: Send + 'static>(
         .result
 }
 
+/// A refusal keeps GSSAPI's status numbers; other native failures stay generic.
+fn native(error: tds_native_gssapi::Error) -> Error {
+    match error {
+        tds_native_gssapi::Error::Refused(status) => Error::new(ErrorKind::GssapiRefused(status)),
+        _ => failure(),
+    }
+}
+
 pub(super) struct System {
     context: Option<tds_native_gssapi::Context>,
     method: tds_native_gssapi::Method,
@@ -118,11 +126,11 @@ impl SecurityContext for System {
                         principal.as_deref(),
                         fallback,
                     )
-                    .map_err(|_| failure())?,
+                    .map_err(native)?,
                 };
                 let step = context
                     .step(challenge.as_ref().map(Token::as_bytes), &binding)
-                    .map_err(|_| failure())?;
+                    .map_err(native)?;
                 Ok((context, step))
             })
             .await?;

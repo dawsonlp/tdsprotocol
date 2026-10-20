@@ -1,6 +1,6 @@
 //! RFC 2744 ABI. Names, credentials and contexts are exclusively owned; native
 //! output buffers are released on success, continuation and every failure path.
-use super::{Error, Evidence, MAX_TOKEN, Mechanism, Method, Step};
+use super::{Error, Evidence, MAX_TOKEN, Mechanism, Method, Status, Step};
 use std::{ffi::c_void, ptr};
 use zeroize::Zeroizing;
 
@@ -208,7 +208,10 @@ impl Name {
             )
         };
         if status != 0 || result.raw.is_null() {
-            return Err(Error::Refused);
+            return Err(Error::Refused(Status {
+                major: status,
+                minor,
+            }));
         }
         Ok(result)
     }
@@ -241,7 +244,7 @@ impl Output {
             return Ok(Zeroizing::new(Vec::new()));
         }
         if self.buffer.value.is_null() {
-            return Err(Error::Refused);
+            return Err(Error::Refused(Status::default()));
         }
         // GSSAPI owns a buffer of the returned length until release_buffer.
         let bytes = unsafe {
@@ -346,7 +349,10 @@ impl Context {
             )
         };
         if status != 0 || result.credential.is_null() {
-            return Err(Error::Refused);
+            return Err(Error::Refused(Status {
+                major: status,
+                minor,
+            }));
         }
         if method == Method::Negotiate {
             // Restrict BEFORE emitting a token; rejecting NTLM only after
@@ -426,7 +432,10 @@ impl Context {
         // Accept exactly COMPLETE or CONTINUE_NEEDED. Other supplementary
         // statuses (duplicate/old/out-of-sequence tokens) are not success.
         if status > 1 || self.context.is_null() {
-            return Err(Error::Refused);
+            return Err(Error::Refused(Status {
+                major: status,
+                minor,
+            }));
         }
         let complete = status == 0;
         let evidence = if complete {
@@ -447,7 +456,10 @@ impl Context {
                 )
             };
             if status != 0 || local != 1 || open != 1 {
-                return Err(Error::Refused);
+                return Err(Error::Refused(Status {
+                    major: status,
+                    minor,
+                }));
             }
             // The returned OID is borrowed from the live context, never freed.
             let mechanism = unsafe { mechanism(actual) }?;
