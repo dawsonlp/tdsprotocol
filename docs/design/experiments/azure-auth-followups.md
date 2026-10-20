@@ -30,16 +30,16 @@ the deployment is still up.
 ## Checklist
 
 ### A. Git
-- [ ] A1. PR #2: `rust-azure-integration` → `main`, merged
-- [ ] A2. Branch `azure-auth-followups` from the new `main`
+- [x] A1. PR #2: `rust-azure-integration` → `main`, merged (`1bf1493`)
+- [x] A2. Branch `azure-auth-followups` from the new `main`
 
-### B. Live session recovery on Azure SQL (Rust and Python)
+### B. Live session recovery on Azure SQL (Rust and Python) — done
 Not shown live in the campaign: under the Redirect policy clients bypass a relay.
-- [ ] B1. Switch the server's connection policy to Proxy (`az sql server conn-policy set`)
-- [ ] B2. A local TCP relay to the gateway; break the connection mid-session
-- [ ] B3. Rust: recovery requests a new Entra token and keeps session state; no SQL replay
-- [ ] B4. Python: the same scenario, paired
-- [ ] B5. Restore Redirect; record the results
+- [x] B1. Switched the connection policy to Proxy (`az sql server conn-policy update`)
+- [x] B2. A local relay reached Azure, but the gateway routes by LOGIN7's server name, and both clients send the TCP host there (40532: "cannot open server 127.0.0.1"). Instead, the session is ended server-side with `KILL` from an admin connection, which needs no relay and works under both policies
+- [x] B3. Rust (`mac_recovery_after_the_server_ends_the_session`): Azure resets the transport at once; explicit recovery makes one new token request (under Redirect it reconnects to the routed node directly) and restores `DATEFIRST`/`TEXTSIZE`, in both Entra flows and under both policies
+- [x] B4. Python (`paired.py recovery`): identical results
+- [x] B5. Restored Redirect
 
 ### C. Windows account rotation across both clients (GCP open item)
 - [ ] C1. Rotate `tdsuser`'s password in AD during a run (run-command on the DC)

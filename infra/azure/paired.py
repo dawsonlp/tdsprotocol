@@ -4,6 +4,7 @@
     ../../clients/python/.venv/bin/python paired.py read         read Rust's tables (after Rust's paired test)
     ../../clients/python/.venv/bin/python paired.py principal    service-principal logins, both flows
     python paired.py identity                                    managed-identity logins (on the runner)
+    ../../clients/python/.venv/bin/python paired.py recovery     the server ends a session; it is recovered
 
 The order is: write, Rust's mac_key_vault_and_enclave_values_round_trip_and_read_python_values with
 TDS_AZURE_PAIRED=1, then read. Both clients use the same Key Vault key, values and expected rows; each creates its own
@@ -121,6 +122,39 @@ async def logins(credential, expected_user: str, label: str) -> None:
         print(f"PAIRED python {label} {type(login).__name__}: login={name} user={user}")
 
 
+async def recovery() -> None:
+    """Follow-up B: KILL ends the session from an admin connection; explicit recovery asks the token source again
+    and the server rebuilds the session's SET options. Paired with Rust's mac_recovery_after_the_server_ends_the_session."""
+    admin_login = tds.EntraToken(entra_token(cli()))
+    for deferred in (False, True):
+        calls = []
+        inner_token, inner_fetch = entra_token(cli()), entra_fetch(cli())
+        def counted_token():
+            calls.append("token")
+            return inner_token()
+        def counted_fetch(spn, sts):
+            calls.append(spn)
+            return inner_fetch(spn, sts)
+        login = tds.EntraLogin(counted_fetch) if deferred else tds.EntraToken(counted_token)
+        async with await tds.connect(**azure_sql(admin_login)) as admin, await tds.connect(**azure_sql(login)) as c:
+            async with c.serial_channel() as channel:
+                await fetch(channel, "SET DATEFIRST 3; SET TEXTSIZE 100")
+                spid = (await fetch(channel, "SELECT CAST(@@SPID AS int)")).result_sets[0].rows[0][0]
+            before = len(calls)
+            async with admin.serial_channel() as channel:
+                await fetch(channel, f"KILL {spid}")
+            for _ in range(100):
+                if not c.alive:
+                    break
+                await asyncio.sleep(0.1)
+            await c.recover()
+            async with c.serial_channel() as channel:
+                state = (await fetch(channel, "SELECT CAST(@@DATEFIRST AS int), CAST(@@TEXTSIZE AS int)")).result_sets[0].rows[0]
+            assert state == (3, 100), state
+            print(f"PAIRED python recovery deferred={deferred}: recovered; recoveries={c.recoveries} "
+                  f"new token calls={len(calls) - before} state={state} old spid={spid}")
+
+
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "write":
@@ -132,6 +166,8 @@ def main() -> None:
         credential = ClientSecretCredential(PLACES["tenant_id"], PLACES["service_principal_client_id"],
                                             secrets()["service_principal_secret"])
         asyncio.run(logins(credential, PLACES["service_principal_name"], "service principal"))
+    elif mode == "recovery":
+        asyncio.run(recovery())
     elif mode == "identity":
         from azure.identity import ManagedIdentityCredential
         asyncio.run(logins(ManagedIdentityCredential(), PLACES["runner_identity_name"], "managed identity"))

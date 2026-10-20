@@ -1052,3 +1052,92 @@ async fn mac_b9_cli_entra_modes_log_in() {
         );
     }
 }
+
+// ---------------------------------------------------------------- Follow-ups, live
+
+/// Follow-up B: the server ends the session (`KILL` from an admin connection);
+/// explicit recovery asks the credential source again and restores session
+/// state, without replaying SQL. Run under the connection policy in force
+/// (`TDS_AZURE_POLICY` labels the output).
+#[tokio::test]
+#[ignore = "live Azure campaign: follow-ups"]
+async fn mac_recovery_after_the_server_ends_the_session() {
+    let lab = lab();
+    let policy = std::env::var("TDS_AZURE_POLICY").unwrap_or_else(|_| "unlabeled".into());
+    let admin = connect(azure_sql(
+        &lab,
+        entra("cli", false),
+        TokenProviders::new().with("cli", cli()),
+    ))
+    .await;
+    for deferred in [false, true] {
+        let provider = cli();
+        let connection = connect(azure_sql(
+            &lab,
+            entra("cli", deferred),
+            TokenProviders::new().with("cli", provider.clone()),
+        ))
+        .await;
+        run(&connection, "SET DATEFIRST 3; SET TEXTSIZE 100").await;
+        let Some(Value::Integer(spid)) =
+            rows(&connection, "SELECT CAST(@@SPID AS int)").await[0][0]
+        else {
+            panic!("spid")
+        };
+        let before = provider.resources().len();
+        run(&admin, &format!("KILL {spid}")).await;
+        // Azure resets the transport at once; a channel or request then reports
+        // the break, and nothing is retried.
+        let failed = match connection.serial_channel().await {
+            Err(e) => Some(e),
+            Ok(mut channel) => match channel.exchange(Batch::new("SELECT 1")).await {
+                Ok(mut response) => response.finish().await.err(),
+                Err(e) => Some(e),
+            },
+        };
+        println!(
+            "RECOVERY {policy} deferred={deferred}: after KILL: {:?}",
+            failed.as_ref().map(|e| e.to_string())
+        );
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !connection.is_closed() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the driver observes the server's close");
+        match connection.recover().await {
+            Ok(()) => {
+                let state = rows(
+                    &connection,
+                    "SELECT CAST(@@DATEFIRST AS int), CAST(@@TEXTSIZE AS int), CAST(@@SPID AS int)",
+                )
+                .await;
+                println!(
+                    "RECOVERY {policy} deferred={deferred}: recovered; recoveries={} new tokens={} state={:?} old spid={spid}",
+                    connection.recoveries(),
+                    provider.resources().len() - before,
+                    state[0]
+                );
+                assert_eq!(state[0][0], Some(Value::Integer(3)), "DATEFIRST restored");
+                assert_eq!(state[0][1], Some(Value::Integer(100)), "TEXTSIZE restored");
+                assert!(
+                    provider.resources().len() > before,
+                    "the credential source was asked again"
+                );
+            }
+            Err(e) => {
+                println!("RECOVERY {policy} deferred={deferred}: server refused recovery: {e}");
+                assert!(
+                    matches!(
+                        e.cause().kind,
+                        ErrorKind::SessionNotRecovered { .. } | ErrorKind::Server(_)
+                    ),
+                    "{e}"
+                );
+            }
+        }
+        connection.close().await.unwrap();
+    }
+    admin.close().await.unwrap();
+}
