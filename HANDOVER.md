@@ -17,9 +17,13 @@ was developed and tested on the running deployment. Highlights:
 - **Owner decisions:** PY-AZ-01 strict in both clients; C3 extend
   `ConnectionConfig`; H1 optional completion with legacy acceptance; F3 no
   OpenSSL (client assertion instead).
-- **Remaining:** merge the follow-up PR, then the expiry rehearsal: let the Logic
-  App delete `rg-tds-rust-azure` at 2026-10-21 18:59 UTC, check the inventory,
-  `terraform destroy` for the app registration and state, and purge the vault.
+- **Merged and torn down:** PR #4 merged into `main` (`13ce471`); PR #3 (certifi)
+  too. At the owner's request the deployment was destroyed with Terraform on
+  2026-10-20 at 22:36 UTC instead of waiting for the self-delete. Nothing
+  remains: no resource group, no vault (purged), no app registration (also purged
+  from Entra's recycle bin), empty state, no local secrets. Azure cost data was
+  not yet available; the estimate is about USD 2–3 for roughly 3.6 hours. The
+  self-delete Logic App was never exercised: rehearse it with a future deployment.
 
 ## Preceding — Rust Azure live campaign and Part B, 2026-10-20
 
