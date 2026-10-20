@@ -42,21 +42,25 @@ Not shown live in the campaign: under the Redirect policy clients bypass a relay
 - [x] B5. Restored Redirect
 
 ### C. Windows account rotation across both clients (GCP open item)
-- [ ] C1. Rotate `tdsuser`'s password in AD during a run (run-command on the DC)
-- [ ] C2. Rust: a pool with a changeable configuration re-reads once after 18452 and reopens with the new password; unchanged credentials are not retried
+- [x] C1. Rotate a throwaway account's password during a run (`scripts/rotation.ps1`; local on the SQL VM and in the domain; a new name each run, because a reused name can map to the deleted account's cached SID)
+- [x] C2. Rust (`mac_windows_password_rotation_during_a_pool`): local old password refused (18452) and not retried; domain old password **still accepted** right after the change (AD's NTLM grace period); re-read once, reopen with the new password; old-password sessions discarded on return
 - [ ] C3. Python: same scenario. Python's comparable configuration covers SQL credentials only (GCP open item 2); extending it to Windows values may need a design choice. **Decision gate if so.**
-- [ ] C4. Restore the password; record the results
+- [x] C4. Throwaway accounts and logins removed after each run; Python explicit connections (`paired.py rotation`) match Rust
 
 ### D. Python Kerberos opening deadline (roadmap backlog)
-- [ ] D1. Isolate the built-in Spnego adapter's native calls in bounded, serialized workers, with a reaper owning late results ([design](python-windows-authentication-contract.md#3-built-in-provider-worker-ownership))
-- [ ] D2. Deterministic tests: timeout within tolerance, event loop stays responsive, cancellation, late success and error cleanup, worker-capacity bounds
-- [ ] D3. Live on the runner: an unreachable KDC (temporary `KRB5_CONFIG`) returns at the deadline; real Kerberos login still works
-- [ ] D4. Move the roadmap backlog entry to done
+- [x] D1. Isolate the built-in Spnego adapter's native calls in bounded, serialized workers, with a reaper owning late results ([design](python-windows-authentication-contract.md#3-built-in-provider-worker-ownership))
+- [x] D2. Deterministic tests: timeout within tolerance, event loop stays responsive, cancellation, late success and error cleanup, worker-capacity bounds
+- [x] D3. Live on the runner: an unreachable KDC returned at **1.50 s** for a 1.5 s deadline, the event loop ticking throughout (GCP: over 4 s); real Kerberos logins still pass
+- [x] D4. Move the roadmap backlog entry to done
 
 ### E. Python Azure review backlog (PY-AZ-01 to 06)
 Each item names the real-service evidence it needs; collect it, then decide
-and fix.
-- [ ] E1. PY-AZ-06: implement the owner-approved unsupported-feature policy in Python (warn on request; fail on an enabled ACK before SQL or pool admission; no retry without the flag). Live: ACKs 1/1/0/1 refused as in Rust
+and fix. Evidence collected 2026-10-20 (`paired.py review` and a capture):
+- **PY-AZ-01:** Azure's FEDAUTHINFO (sent only by the routed destination) is fully well-formed: two options, SPN then STS URL, in bounds, even lengths, valid UTF-16, no duplicates, data region exactly covered. Rust's parser deliberately mirrors Python's lenient slicing, so tightening changes both clients.
+- **PY-AZ-02:** real refusals (wrong service principal secret, managed identity off the VM, a vault key that cannot verify) carry descriptive Azure codes but no secret and nothing token-like.
+- **PY-AZ-03:** a synchronous Azure CLI credential stalls Python's event loop for 0.42 s per login; the asynchronous credential stalls it 0.015 s.
+- **PY-AZ-04:** each encrypted connection already starts with fresh sessions; two connections from one context and four concurrent MARS channels on one connection all return correct enclave results.
+- [x] E1. PY-AZ-06: implement the owner-approved unsupported-feature policy in Python (warn on request; fail on an enabled ACK before SQL or pool admission; no retry without the flag). Live: ACKs 1/1/0/1 refused as in Rust
 - [ ] E2. PY-AZ-01: capture Azure's real FEDAUTHINFO layouts (deferred flow) with both clients; tighten Python's parsing (offsets, lengths, duplicates, UTF-16) only as far as real layouts and shared malformed fixtures support
 - [ ] E3. PY-AZ-02: collect real SDK refusals (wrong service principal secret, managed identity off-VM, Key Vault denial); keep provider text out of ordinary Python errors, with an explicit protected cause, as Rust does
 - [ ] E4. PY-AZ-03: measure a synchronous Azure credential blocking Python's event loop; run synchronous credential work in a worker, sharing D's worker design where it fits
