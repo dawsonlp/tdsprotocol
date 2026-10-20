@@ -32,6 +32,10 @@ $out = & C:\uv\uv.exe run -q --extra encryption pytest -q -p no:cacheprovider te
 if ($out -notmatch " passed") { exit 1 }
 
 Set-Location C:\tds\clients\rust
+# Extracted files keep the archive's times; make them newer than any earlier build,
+# and keep the build directory outside C:\tds so dependencies stay compiled.
+Get-ChildItem C:\tds\clients\rust -Recurse -File | ForEach-Object { $_.LastWriteTime = Get-Date }
+$env:CARGO_TARGET_DIR = "C:\tds-target"
 $env:TDS_CERTSTORE_TEST_KEY_PATH = "LocalMachine/My/$($cert.Thumbprint)"
 $env:TDS_CERTSTORE_TEST_PYTHON = "C:\tds\clients\python\.venv\Scripts\python.exe"
 $env:TDS_SQL_HOST = "tdssql.$Domain"
@@ -39,7 +43,7 @@ $env:TDS_SQL_CA = "C:\tds-ca.pem"
 $vcvars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 $cargo = "$env:USERPROFILE\.cargo\bin\cargo.exe"
 $log = "C:\tds-rust-tests.log"
-cmd /c "call `"$vcvars`" >nul && `"$cargo`" test --locked --features certificate-store --test certstore_native --test certstore_live -- --ignored --nocapture > $log 2>&1"
+cmd /c "call `"$vcvars`" >nul && `"$cargo`" test --locked --no-fail-fast --features certificate-store --test certstore_native --test certstore_live -- --ignored --nocapture > $log 2>&1"
 $code = $LASTEXITCODE
-Select-String -Path $log -Pattern "test result|CERTSTORE|panicked|FAILED|^error" | ForEach-Object { "RUST: $($_.Line)" }
+Select-String -Path $log -Pattern "test result|CERTSTORE|panicked|FAILED|^error" -Context 0,1 | ForEach-Object { "RUST: $($_.Line)"; $_.Context.PostContext | ForEach-Object { "RUST:   $_" } }
 exit $code

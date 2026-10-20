@@ -31,6 +31,7 @@ fn options(database: &str) -> ConnectOptions {
         roots,
     );
     options.database = database.into();
+    options.column_encryption = true;
     options
 }
 async fn run(connection: &Connection, sql: &str) {
